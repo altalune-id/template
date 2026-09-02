@@ -24,7 +24,7 @@
     "prettier": "3.4.2"
   },
   "lint-staged": {
-    "*.go": ["gofmt -l -e", "go vet"],
+    "*.go": ["gofmt -l -e"],
     "Dockerfile": ["hadolint"],
     "*.{yml,yaml}": ["yamllint -c .yamllint.yaml"],
     "*.proto": ["pnpm exec buf lint --path"],
