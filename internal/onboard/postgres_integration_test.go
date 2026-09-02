@@ -52,9 +52,8 @@ func seedOnboardUser(t *testing.T, sqlDB *sql.DB, prefix string) uuid.UUID {
 
 func TestPostgres_Onboard_GetEmpty(t *testing.T) {
 	store, _ := newOnboardStoreForTest(t)
-	got, err := store.Get(t.Context())
-	require.NoError(t, err)
-	assert.Nil(t, got)
+	_, err := store.Get(t.Context())
+	assert.True(t, onboard.IsNotOnboardedError(err), "want NotOnboardedError, got %T: %v", err, err)
 }
 
 func TestPostgres_Onboard_SaveAndGet(t *testing.T) {
@@ -72,7 +71,7 @@ func TestPostgres_Onboard_SaveAndGet(t *testing.T) {
 	assert.Equal(t, onboard.MethodWebOnboard, got.Method)
 }
 
-func TestPostgres_Onboard_SaveIsIdempotent(t *testing.T) {
+func TestPostgres_Onboard_SaveIsSingleton(t *testing.T) {
 	store, userID := newOnboardStoreForTest(t)
 	ctx := t.Context()
 
@@ -82,7 +81,8 @@ func TestPostgres_Onboard_SaveIsIdempotent(t *testing.T) {
 
 	b2, err := onboard.New(userID, onboard.MethodCLIInit, time.Now().UTC())
 	require.NoError(t, err)
-	require.NoError(t, store.Save(ctx, b2))
+	err = store.Save(ctx, b2)
+	assert.True(t, onboard.IsAlreadyOnboardedError(err), "want AlreadyOnboardedError, got %T: %v", err, err)
 
 	got, err := store.Get(ctx)
 	require.NoError(t, err)
