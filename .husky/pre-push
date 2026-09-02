@@ -37,12 +37,20 @@ golangci-lint run --timeout=3m ./...
 echo "→ buf breaking vs origin/main"
 git fetch --quiet origin main 2>/dev/null || echo "warn: no origin/main — skipping buf breaking"
 if git rev-parse --verify origin/main >/dev/null 2>&1; then
-    pnpm exec buf breaking --against '.git#branch=origin/main' || {
-        echo "buf breaking failed — proto API surface may have broken"; exit 1;
-    }
+    if git ls-tree -r origin/main --name-only | grep -q '\.proto$'; then
+        pnpm exec buf breaking --against '.git#branch=origin/main' || {
+            echo "buf breaking failed — proto API surface may have broken"; exit 1;
+        }
+    else
+        echo "warn: origin/main has no .proto files — skipping buf breaking"
+    fi
 fi
 
 echo "→ goreleaser check"
-pnpm exec goreleaser check 2>/dev/null || goreleaser check
+if command -v goreleaser >/dev/null 2>&1; then
+    goreleaser check
+else
+    echo "warn: goreleaser not installed — skipping (brew install goreleaser to enable)"
+fi
 
 echo "→ pre-push OK"

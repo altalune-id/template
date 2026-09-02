@@ -150,7 +150,7 @@ func (h *AuthHandler) PostLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if dest := h.pendingInviteDest(r); dest != "" {
-		http.Redirect(w, r, dest, http.StatusSeeOther)
+		http.Redirect(w, r, dest, http.StatusSeeOther) //nolint:gosec // G710: dest is a server-built relative path; token comes from an HMAC-verified cookie via pendingInviteDest.
 		return
 	}
 	http.Redirect(w, r, ResolveReturnTo(h.Cfg.HTTP.BasePath, r.PostForm.Get("return_to")), http.StatusSeeOther) //nolint:gosec // G710: return_to sanitized via ResolveReturnTo → SanitizeReturnTo
@@ -202,7 +202,7 @@ func (h *AuthHandler) OIDCComplete(ctx context.Context, w http.ResponseWriter, r
 		return nil
 	}
 	if dest := h.pendingInviteDest(r); dest != "" {
-		http.Redirect(w, r, dest, http.StatusSeeOther)
+		http.Redirect(w, r, dest, http.StatusSeeOther) //nolint:gosec // G710: dest is a server-built relative path; token comes from an HMAC-verified cookie via pendingInviteDest.
 		return nil
 	}
 	if h.Cfg.Mode == config.ModeCloud && principal.ActiveOrgID == uuid.Nil {
