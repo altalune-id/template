@@ -80,7 +80,7 @@ func New(t *testing.T) *Handle {
 	return h
 }
 
-// OpenDB returns a *sql.DB against the handle's DSN. Caller is responsible for Close.
+// OpenDB returns a *sql.DB against the handle's DSN with a fresh public schema, so each test starts from a clean slate on a shared instance.
 func (h *Handle) OpenDB(t *testing.T) *sql.DB {
 	t.Helper()
 	db, err := sql.Open("pgx", h.DSN)
@@ -90,6 +90,10 @@ func (h *Handle) OpenDB(t *testing.T) *sql.DB {
 	if err := db.Ping(); err != nil {
 		_ = db.Close()
 		t.Fatalf("pgtest: ping: %v", err)
+	}
+	if _, err := db.ExecContext(t.Context(), "DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;"); err != nil {
+		_ = db.Close()
+		t.Fatalf("pgtest: reset public schema: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
 	return db

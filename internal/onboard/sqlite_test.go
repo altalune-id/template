@@ -3,6 +3,7 @@ package onboard_test
 import (
 	"context"
 	"database/sql"
+	"os"
 	"testing"
 	"time"
 
@@ -15,6 +16,16 @@ import (
 	"altalune.id/template/internal/user"
 	"altalune.id/template/schema"
 )
+
+// TestMain warms up modernc.org/sqlite's global mutex-init on the main goroutine so parallel Open calls under -race don't hit the driver-level data race in _sqlite3MutexInit.
+func TestMain(m *testing.M) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err == nil {
+		_ = db.Ping()
+		_ = db.Close()
+	}
+	os.Exit(m.Run())
+}
 
 func openMemSQLite(t *testing.T) (*sql.DB, pdb.DBConfig) {
 	t.Helper()

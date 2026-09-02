@@ -25,8 +25,8 @@
   },
   "lint-staged": {
     "*.go": ["gofmt -l -e"],
-    "Dockerfile": ["hadolint"],
-    "*.{yml,yaml}": ["yamllint -c .yamllint.yaml"],
+    "Dockerfile": ["sh -c 'if command -v hadolint >/dev/null 2>&1; then hadolint \"$@\"; else echo \"warn: hadolint not installed — skipping (brew install hadolint to enable)\"; fi' _"],
+    "*.{yml,yaml}": ["sh -c 'if command -v yamllint >/dev/null 2>&1; then yamllint -c .yamllint.yaml \"$@\"; else echo \"warn: yamllint not installed — skipping (brew install yamllint to enable)\"; fi' _"],
     "*.proto": ["pnpm exec buf lint --path"],
     "*.md": ["prettier --check"]
   }

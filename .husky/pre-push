@@ -20,6 +20,19 @@ while read -r _ local_sha _ remote_sha; do
     done
 done
 
+echo "→ gofmt -l ."
+if [ -n "$(gofmt -l .)" ]; then
+    echo "gofmt: the following files need formatting:" >&2
+    gofmt -l . >&2
+    exit 1
+fi
+
+echo "→ go vet ./..."
+go vet ./...
+
+echo "→ pnpm exec buf lint"
+pnpm exec buf lint
+
 echo "→ go tool gen-config-example --check"
 go tool gen-config-example --check
 echo "→ go tool gen-config-example --format=yaml --check"
