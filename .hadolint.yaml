@@ -1,0 +1,5 @@
+# hadolint config — https://github.com/hadolint/hadolint
+ignored:
+  - DL3008  # apk versions pinned by hash via digest — allow unpinned in golang:alpine
+  - DL3018  # ditto for apk add
+failure-threshold: warning
