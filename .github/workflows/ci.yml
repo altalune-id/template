@@ -7,7 +7,7 @@ on:
     branches: [main]
 
 jobs:
-  # Stage 1 fan-in: aggregates every static-analysis job so downstream tests and build only start once the cheap checks are green — saves ~10 minutes of runner time on a lint-broken PR.
+  # Stage 1 fan-in: gates test + build on every static-analysis job passing.
   lint-gate:
     runs-on: ubuntu-latest
     needs:
@@ -95,7 +95,7 @@ jobs:
         with:
           go-version: '1.26'
           cache: false
-      - uses: golangci/golangci-lint-action@v8
+      - uses: golangci/golangci-lint-action@v9
         with:
           version: v2.12.2
           args: --timeout=3m ./...
@@ -214,7 +214,7 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version: '1.26'
-      - uses: goreleaser/goreleaser-action@v6
+      - uses: goreleaser/goreleaser-action@v7
         with:
           version: '~> v2'
           args: check
