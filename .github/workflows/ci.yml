@@ -7,8 +7,25 @@ on:
     branches: [main]
 
 jobs:
-  # Unit tests: no external services, matrix across macOS + Linux. Fast.
+  # Stage 1 fan-in: aggregates every static-analysis job so downstream tests and build only start once the cheap checks are green — saves ~10 minutes of runner time on a lint-broken PR.
+  lint-gate:
+    runs-on: ubuntu-latest
+    needs:
+      - lint
+      - hadolint
+      - yamllint
+      - buf-lint
+      - goreleaser-check
+      - env-example-drift-check
+      - templ-drift-check
+      - proto-drift-check
+    steps:
+      - name: Stage 1 static analysis complete
+        run: echo "static analysis green — proceeding to Stage 2"
+
+  # Stage 2: unit tests + container build, matrix across macOS + Linux.
   test-unit:
+    needs: lint-gate
     strategy:
       fail-fast: false
       matrix:
@@ -41,9 +58,9 @@ jobs:
       - name: Test (race + shuffle + cover, unit only)
         run: go test -race -shuffle=on -cover ./...
 
-  # Integration tests: require a live Postgres. Guarded by the `integration` build tag so
-  # `go test ./...` never touches them and unit CI stays fast.
+  # Stage 3: integration tests — need a live Postgres and much slower, so gated on Stage 2 passing.
   test-integration:
+    needs: test-unit
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -204,9 +221,9 @@ jobs:
         env:
           GHCR_OWNER: ${{ github.repository_owner }}
 
-  # Build the container image (no push) — catches Dockerfile regressions on PRs
-  # before dev.yml would hit them on merge.
+  # Build the container image (no push) — catches Dockerfile regressions on PRs before dev.yml would hit them on merge.
   docker-build:
+    needs: lint-gate
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -223,8 +240,9 @@ jobs:
             VERSION=ci
             COMMIT=${{ github.sha }}
 
-  # Vulnerability scan against stdlib + dependencies.
+  # Vulnerability scan against stdlib + dependencies. Runs in Stage 3 alongside integration tests since it's expensive.
   govulncheck:
+    needs: lint-gate
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
