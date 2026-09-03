@@ -17,12 +17,12 @@ CLI usage inside the image: `docker run --rm altempl:dev version`,
 
 Registry tags:
 
-| Tag | Source |
-|---|---|
-| `ghcr.io/<owner>/altempl:edge` | latest push to `main` |
-| `ghcr.io/<owner>/altempl:<short-sha>` | that push, pinned |
-| `ghcr.io/<owner>/altempl:<version>` | tagged release (`v0.1.0` → `:0.1.0`) |
-| `ghcr.io/<owner>/altempl:latest` | most recent tagged release |
+| Tag                                   | Source                               |
+| ------------------------------------- | ------------------------------------ |
+| `ghcr.io/<owner>/altempl:edge`        | latest push to `main`                |
+| `ghcr.io/<owner>/altempl:<short-sha>` | that push, pinned                    |
+| `ghcr.io/<owner>/altempl:<version>`   | tagged release (`v0.1.0` → `:0.1.0`) |
+| `ghcr.io/<owner>/altempl:latest`      | most recent tagged release           |
 
 Base images are digest-pinned in `Dockerfile` — refresh with
 `docker manifest inspect <ref>` and update the two `ARG` lines.
@@ -30,7 +30,8 @@ Base images are digest-pinned in `Dockerfile` — refresh with
 ## Local dev stack (compose)
 
 `compose.yaml` starts Postgres + [Mailpit](https://mailpit.axllent.org/)
-+ altempl. Works with `docker compose` or `podman-compose`:
+
+- altempl. Works with `docker compose` or `podman-compose`:
 
 ```bash
 make compose-up          # build + start everything
@@ -74,9 +75,6 @@ ALT_DB_ALLOW_BYPASS_RLS=false
 ```
 
 Boot fails if the runtime role has `BYPASSRLS` and `db.allowBypassRLS` is `false`.
-
-Altalune engineers deploying via `dbadmin` —
-see [`altalune-internal-setup.md`](altalune-internal-setup.md).
 
 ## Reader replica
 

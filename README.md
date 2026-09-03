@@ -55,15 +55,15 @@ altempl/
 
 Safe for external Go projects to import:
 
-| Package | Purpose |
-|---|---|
-| `authl` | OIDC client + PKCE loopback |
-| `reqid` | UUIDv7 request-ID propagation |
-| `nanoid` | 21-char nanoid generator |
-| `worker` | Supervisor + Worker interface + HTTP/Func adapters |
-| `logger` | `slog.Handler` — auto-attaches request_id/trace_id, key redaction |
-| `telemetry` | OTel tracer + meter + Prometheus reader |
-| `mailer` | SMTP + template mail |
+| Package     | Purpose                                                           |
+| ----------- | ----------------------------------------------------------------- |
+| `authl`     | OIDC client + PKCE loopback                                       |
+| `reqid`     | UUIDv7 request-ID propagation                                     |
+| `nanoid`    | 21-char nanoid generator                                          |
+| `worker`    | Supervisor + Worker interface + HTTP/Func adapters                |
+| `logger`    | `slog.Handler` — auto-attaches request_id/trace_id, key redaction |
+| `telemetry` | OTel tracer + meter + Prometheus reader                           |
+| `mailer`    | SMTP + template mail                                              |
 
 Pre-1.0.0: minor releases may break; pin exact versions. Post-1.0.0:
 exported surface is frozen, additive changes only. Everything under
@@ -71,29 +71,28 @@ exported surface is frozen, additive changes only. Everything under
 
 ## Sign-up and invitation policies
 
-| Mode | Sign-in path | Behavior |
-|---|---|---|
-| Selfhosted, no OIDC | Local `/login` (genesis + password-set users) | Works. No invites, no T&C step. |
-| Selfhosted, no OIDC | `POST /orgs/{slug}/invites` | Blocked with 409; invites banner shown, form hidden. |
-| Selfhosted + OIDC | Uninvited OIDC sign-in | Rejected before persistence; renders a 403 "not invited" page. |
-| Selfhosted + OIDC | Invited OIDC sign-in | User created, membership from invite, `/welcome` (T&C), then dashboard. |
-| Cloud (OIDC forced) | Invited OIDC sign-in | Same as selfhosted + OIDC invited. |
-| Cloud (OIDC forced) | Uninvited OIDC sign-in | User created, no silent org, redirect to `/signup/complete` to name the org + first project. |
+| Mode                | Sign-in path                                  | Behavior                                                                                     |
+| ------------------- | --------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| Selfhosted, no OIDC | Local `/login` (genesis + password-set users) | Works. No invites, no T&C step.                                                              |
+| Selfhosted, no OIDC | `POST /orgs/{slug}/invites`                   | Blocked with 409; invites banner shown, form hidden.                                         |
+| Selfhosted + OIDC   | Uninvited OIDC sign-in                        | Rejected before persistence; renders a 403 "not invited" page.                               |
+| Selfhosted + OIDC   | Invited OIDC sign-in                          | User created, membership from invite, `/welcome` (T&C), then dashboard.                      |
+| Cloud (OIDC forced) | Invited OIDC sign-in                          | Same as selfhosted + OIDC invited.                                                           |
+| Cloud (OIDC forced) | Uninvited OIDC sign-in                        | User created, no silent org, redirect to `/signup/complete` to name the org + first project. |
 
 Invite issuance requires `mode=cloud` or `oidc.issuer` set. `/signup/complete` runs only in cloud mode; the T&C checkbox appears when `compliance.requireAcceptance=true`.
 
 ## Documentation
 
-| Doc | For |
-|---|---|
-| [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md) | precedence, awareness tags, modes, first-boot |
-| [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) | docker, DB roles, RLS, replica, observability, OIDC |
-| [`docs/CLI_CONTRACT.md`](docs/CLI_CONTRACT.md) | stable command tree, exit codes, output envelopes |
-| [`docs/MODULE_TEMPLATE.md`](docs/MODULE_TEMPLATE.md) | adding a domain module |
-| [`docs/PLATFORM_TEMPLATE.md`](docs/PLATFORM_TEMPLATE.md) | adding a platform primitive |
-| [`docs/altalune-internal-setup.md`](docs/altalune-internal-setup.md) | Altalune-internal `dbadmin` deployment |
-| [`CONTRIBUTING.md`](CONTRIBUTING.md) | workflow, testing, release |
-| [`AGENTS.md`](AGENTS.md) | rules for AI coding agents |
+| Doc                                                      | For                                                 |
+| -------------------------------------------------------- | --------------------------------------------------- |
+| [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md)         | precedence, awareness tags, modes, first-boot       |
+| [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)               | docker, DB roles, RLS, replica, observability, OIDC |
+| [`docs/CLI_CONTRACT.md`](docs/CLI_CONTRACT.md)           | stable command tree, exit codes, output envelopes   |
+| [`docs/MODULE_TEMPLATE.md`](docs/MODULE_TEMPLATE.md)     | adding a domain module                              |
+| [`docs/PLATFORM_TEMPLATE.md`](docs/PLATFORM_TEMPLATE.md) | adding a platform primitive                         |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md)                     | workflow, testing, release                          |
+| [`AGENTS.md`](AGENTS.md)                                 | rules for AI coding agents                          |
 
 ## License
 
