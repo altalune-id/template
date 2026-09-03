@@ -1,0 +1,33 @@
+package templates
+
+import (
+	"altalune.id/template/internal/web"
+	"strconv"
+)
+
+type ErrorView struct {
+	Status  int
+	Title   string
+	Message string
+}
+
+templ ErrorPage(d web.LayoutData, v ErrorView) {
+	<section class="mx-auto max-w-md text-center py-12">
+		<p class="text-sm uppercase tracking-widest text-muted-foreground">
+			if v.Status > 0 {
+				{ d.Tr("error.label") + " " + strconv.Itoa(v.Status) }
+			} else {
+				{ d.Tr("error.label") }
+			}
+		</p>
+		<h1 class="mt-2 text-2xl font-semibold">{ v.Title }</h1>
+		if v.Message != "" {
+			<p class="mt-2 text-muted-foreground">{ v.Message }</p>
+		}
+		<a href={ templ.SafeURL(d.Href("/")) } class="mt-6 inline-block text-primary hover:underline">{ d.Tr("error.return_home") }</a>
+	</section>
+}
+
+templ ErrorLayout(d web.LayoutData, v ErrorView) {
+	@Layout(web.WithContent(d, ErrorPage(d, v)))
+}
