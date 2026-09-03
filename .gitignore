@@ -37,9 +37,6 @@ node_modules/
 /.superpowers/
 /docs/superpowers/
 
-# Altalune-internal deployment doc — kept locally, never committed
-/docs/altalune-internal-setup.md
-
 # App data
 .altempl-data
 .cache
