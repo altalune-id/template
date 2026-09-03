@@ -4,6 +4,7 @@ package handlers
 import (
 	"log"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -265,19 +266,28 @@ func (d Deps) ClearSession(w http.ResponseWriter, r *http.Request) {
 
 // SanitizeReturnTo rejects any return_to that leaves the same-origin.
 func SanitizeReturnTo(raw string) string {
-	if raw == "" {
+	normalized := strings.ReplaceAll(raw, "\\", "/")
+	u, err := url.Parse(normalized)
+	if err != nil {
 		return ""
 	}
-	if raw[0] != '/' {
+	if u.Scheme != "" || u.Host != "" || u.Opaque != "" {
 		return ""
 	}
-	if len(raw) >= 2 && (raw[1] == '/' || raw[1] == '\\') {
+	if !strings.HasPrefix(u.Path, "/") {
 		return ""
 	}
-	if strings.ContainsRune(raw, '\\') {
+	if strings.HasPrefix(u.Path, "//") {
 		return ""
 	}
-	return raw
+	out := u.EscapedPath()
+	if u.RawQuery != "" {
+		out += "?" + u.RawQuery
+	}
+	if u.Fragment != "" {
+		out += "#" + u.EscapedFragment()
+	}
+	return out
 }
 
 // ResolveReturnTo returns a safe destination, defaulting to basePath+"/" when raw is unsafe.

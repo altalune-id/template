@@ -145,7 +145,7 @@ func TestSanitizeReturnTo(t *testing.T) {
 		{"scheme relative rejected", "//evil.com", ""},
 		{"windows slash trick rejected", "/\\evil.com", ""},
 		{"no slash rejected", "foo", ""},
-		{"backslash rejected", "/foo\\bar", ""},
+		{"backslash normalized", "/foo\\bar", "/foo/bar"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

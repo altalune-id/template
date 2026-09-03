@@ -24,7 +24,7 @@ func TestSanitizeRedirect(t *testing.T) {
 		{"http://evil.com/", ""},
 		{"javascript:alert(1)", ""},
 		{"/ok?redirect=/x", "/ok?redirect=/x"},
-		{"/back\\slash", ""},
+		{"/back\\slash", "/back/slash"},
 		{"/with:colon", ""},
 		{"/\\evil.com", ""},
 	}

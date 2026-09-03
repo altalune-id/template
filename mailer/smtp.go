@@ -18,7 +18,7 @@ func (s *SMTP) Send(_ context.Context, m Message) error {
 	if from == "" {
 		from = s.Cfg.From
 	}
-	// SECURITY: reject CR/LF in header fields (RFC 5322 §2.2.3) so callers can't inject extra headers or split the body.
+	// SECURITY: reject CR/LF in header fields (RFC 5322 sec 2.2.3) so callers can't inject extra headers or split the body.
 	if err := (Message{From: from, To: m.To, Subject: m.Subject}).Validate(); err != nil {
 		return err
 	}
@@ -31,11 +31,19 @@ func (s *SMTP) Send(_ context.Context, m Message) error {
 	return smtp.SendMail(addr, auth, from, []string{m.To}, []byte(body))
 }
 
+// stripCRLF removes any CR or LF from v.
+func stripCRLF(v string) string {
+	if !strings.ContainsAny(v, "\r\n") {
+		return v
+	}
+	return strings.NewReplacer("\r", "", "\n", "").Replace(v)
+}
+
 func buildMIME(from string, m Message) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "From: %s\r\n", from)
-	fmt.Fprintf(&b, "To: %s\r\n", m.To)
-	fmt.Fprintf(&b, "Subject: %s\r\n", m.Subject)
+	fmt.Fprintf(&b, "From: %s\r\n", stripCRLF(from))
+	fmt.Fprintf(&b, "To: %s\r\n", stripCRLF(m.To))
+	fmt.Fprintf(&b, "Subject: %s\r\n", stripCRLF(m.Subject))
 	if m.HTMLBody != "" {
 		fmt.Fprintf(&b, "MIME-Version: 1.0\r\nContent-Type: text/html; charset=utf-8\r\n\r\n%s", m.HTMLBody)
 	} else {

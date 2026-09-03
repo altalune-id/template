@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"golang.org/x/oauth2"
@@ -222,21 +223,30 @@ func (c *Client) fetchUserInfo(ctx context.Context, token *oauth2.Token) (*userI
 	return &out, nil
 }
 
-// sanitizeReturnTo accepts only same-origin absolute paths; rejects protocol-relative, absolute URLs, and backslash tricks.
+// sanitizeReturnTo accepts only same-origin absolute paths; rejects protocol-relative and absolute URLs, and normalizes backslashes to forward slashes.
 func sanitizeReturnTo(raw string) string {
-	if raw == "" {
+	normalized := strings.ReplaceAll(raw, "\\", "/")
+	u, err := url.Parse(normalized)
+	if err != nil {
 		return ""
 	}
-	if raw[0] != '/' {
+	if u.Scheme != "" || u.Host != "" || u.Opaque != "" {
 		return ""
 	}
-	if len(raw) >= 2 && (raw[1] == '/' || raw[1] == '\\') {
+	if !strings.HasPrefix(u.Path, "/") {
 		return ""
 	}
-	if strings.ContainsRune(raw, '\\') {
+	if strings.HasPrefix(u.Path, "//") {
 		return ""
 	}
-	return raw
+	out := u.EscapedPath()
+	if u.RawQuery != "" {
+		out += "?" + u.RawQuery
+	}
+	if u.Fragment != "" {
+		out += "#" + u.EscapedFragment()
+	}
+	return out
 }
 
 func responseWritten(w http.ResponseWriter) bool {

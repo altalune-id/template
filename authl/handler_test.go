@@ -23,7 +23,7 @@ func TestSanitizeReturnTo(t *testing.T) {
 		{"//evil.example", ""},
 		{"/\\evil.example", ""},
 		{"http://evil.example", ""},
-		{"/path\\to", ""},
+		{"/path\\to", "/path/to"},
 		{"relative", ""},
 	}
 	for _, tc := range cases {
