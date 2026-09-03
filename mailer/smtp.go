@@ -14,14 +14,18 @@ type SMTP struct {
 
 // Send delivers m via SMTP.
 func (s *SMTP) Send(_ context.Context, m Message) error {
+	from := m.From
+	if from == "" {
+		from = s.Cfg.From
+	}
+	// SECURITY: reject CR/LF in header fields (RFC 5322 §2.2.3) so callers can't inject extra headers or split the body.
+	if err := (Message{From: from, To: m.To, Subject: m.Subject}).Validate(); err != nil {
+		return err
+	}
 	addr := fmt.Sprintf("%s:%d", s.Cfg.SMTP.Host, s.Cfg.SMTP.Port)
 	var auth smtp.Auth
 	if s.Cfg.SMTP.User != "" {
 		auth = smtp.PlainAuth("", s.Cfg.SMTP.User, s.Cfg.SMTP.Pass, s.Cfg.SMTP.Host)
-	}
-	from := m.From
-	if from == "" {
-		from = s.Cfg.From
 	}
 	body := buildMIME(from, m)
 	return smtp.SendMail(addr, auth, from, []string{m.To}, []byte(body))

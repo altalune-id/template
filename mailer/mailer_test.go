@@ -3,6 +3,7 @@ package mailer
 import (
 	"bytes"
 	"context"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -16,6 +17,38 @@ func TestConsole_Send(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), "hi") || !strings.Contains(buf.String(), "hello") {
 		t.Errorf("console output missing content: %s", buf.String())
+	}
+}
+
+func TestMessage_ValidateRejectsHeaderInjection(t *testing.T) {
+	cases := []struct {
+		name  string
+		m     Message
+		field string
+	}{
+		{"crlf in from", Message{From: "f@x\r\nBcc: attacker@evil.com", To: "t@x", Subject: "s"}, "From"},
+		{"lf in to", Message{From: "f@x", To: "t@x\nBcc: attacker@evil.com", Subject: "s"}, "To"},
+		{"cr in subject", Message{From: "f@x", To: "t@x", Subject: "hi\rBcc: attacker@evil.com"}, "Subject"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.m.Validate()
+			if !IsHeaderInjectionError(err) {
+				t.Fatalf("want HeaderInjectionError, got %T: %v", err, err)
+			}
+			var target *HeaderInjectionError
+			if !errors.As(err, &target) || target.Field != tc.field {
+				t.Errorf("field: got %q want %q", target.Field, tc.field)
+			}
+		})
+	}
+}
+
+func TestConsole_Send_RejectsInjection(t *testing.T) {
+	c := Console{W: &bytes.Buffer{}}
+	err := c.Send(context.Background(), Message{To: "t@x", From: "f@x", Subject: "hi\r\nBcc: e@v", TextBody: "b"})
+	if !IsHeaderInjectionError(err) {
+		t.Fatalf("want HeaderInjectionError, got %T: %v", err, err)
 	}
 }
 

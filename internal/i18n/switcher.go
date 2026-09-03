@@ -74,16 +74,16 @@ func SanitizeRedirect(raw string) string {
 	if raw == "" {
 		return ""
 	}
-	if !strings.HasPrefix(raw, "/") {
+	if raw[0] != '/' {
 		return ""
 	}
-	if strings.HasPrefix(raw, "//") {
+	if len(raw) >= 2 && (raw[1] == '/' || raw[1] == '\\') {
 		return ""
 	}
-	if strings.Contains(raw, "\\") {
+	if strings.ContainsRune(raw, '\\') {
 		return ""
 	}
-	if strings.Contains(raw, ":") {
+	if strings.ContainsRune(raw, ':') {
 		return ""
 	}
 	return raw

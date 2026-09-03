@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 )
 
 // Config is the input mailer needs to construct a driver.
@@ -30,6 +31,37 @@ type Message struct {
 	Subject  string
 	TextBody string
 	HTMLBody string
+}
+
+// Validate rejects any Message whose header-line fields (From/To/Subject) contain CR or LF (RFC 5322 section 2.2.3 forbids CR/LF in header field bodies).
+func (m Message) Validate() error {
+	for _, f := range []struct {
+		name, val string
+	}{
+		{"From", m.From},
+		{"To", m.To},
+		{"Subject", m.Subject},
+	} {
+		if strings.ContainsAny(f.val, "\r\n") {
+			return &HeaderInjectionError{Field: f.name}
+		}
+	}
+	return nil
+}
+
+// HeaderInjectionError is returned when a Message field that becomes an SMTP header contains CR or LF.
+type HeaderInjectionError struct {
+	Field string
+}
+
+func (e *HeaderInjectionError) Error() string {
+	return fmt.Sprintf("mailer: header injection in %s: CR/LF not allowed", e.Field)
+}
+
+// IsHeaderInjectionError reports whether err (or anything it wraps) is a HeaderInjectionError.
+func IsHeaderInjectionError(err error) bool {
+	var target *HeaderInjectionError
+	return errors.As(err, &target)
 }
 
 // Mailer sends a Message via whichever driver Config selected.

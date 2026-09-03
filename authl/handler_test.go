@@ -18,8 +18,10 @@ func TestSanitizeReturnTo(t *testing.T) {
 		in, want string
 	}{
 		{"", ""},
+		{"/", "/"},
 		{"/dashboard", "/dashboard"},
 		{"//evil.example", ""},
+		{"/\\evil.example", ""},
 		{"http://evil.example", ""},
 		{"/path\\to", ""},
 		{"relative", ""},

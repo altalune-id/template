@@ -224,7 +224,16 @@ func (c *Client) fetchUserInfo(ctx context.Context, token *oauth2.Token) (*userI
 
 // sanitizeReturnTo accepts only same-origin absolute paths; rejects protocol-relative, absolute URLs, and backslash tricks.
 func sanitizeReturnTo(raw string) string {
-	if raw == "" || !strings.HasPrefix(raw, "/") || strings.HasPrefix(raw, "//") || strings.Contains(raw, "\\") {
+	if raw == "" {
+		return ""
+	}
+	if raw[0] != '/' {
+		return ""
+	}
+	if len(raw) >= 2 && (raw[1] == '/' || raw[1] == '\\') {
+		return ""
+	}
+	if strings.ContainsRune(raw, '\\') {
 		return ""
 	}
 	return raw

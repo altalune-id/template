@@ -26,6 +26,7 @@ func TestSanitizeRedirect(t *testing.T) {
 		{"/ok?redirect=/x", "/ok?redirect=/x"},
 		{"/back\\slash", ""},
 		{"/with:colon", ""},
+		{"/\\evil.com", ""},
 	}
 	for _, tc := range tests {
 		t.Run(tc.in, func(t *testing.T) {

@@ -265,7 +265,16 @@ func (d Deps) ClearSession(w http.ResponseWriter, r *http.Request) {
 
 // SanitizeReturnTo rejects any return_to that leaves the same-origin.
 func SanitizeReturnTo(raw string) string {
-	if raw == "" || !strings.HasPrefix(raw, "/") || strings.HasPrefix(raw, "//") || strings.Contains(raw, "\\") {
+	if raw == "" {
+		return ""
+	}
+	if raw[0] != '/' {
+		return ""
+	}
+	if len(raw) >= 2 && (raw[1] == '/' || raw[1] == '\\') {
+		return ""
+	}
+	if strings.ContainsRune(raw, '\\') {
 		return ""
 	}
 	return raw

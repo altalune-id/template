@@ -140,8 +140,10 @@ func TestSanitizeReturnTo(t *testing.T) {
 		want string
 	}{
 		{"empty", "", ""},
+		{"root allowed", "/", "/"},
 		{"absolute allowed", "/dashboard", "/dashboard"},
 		{"scheme relative rejected", "//evil.com", ""},
+		{"windows slash trick rejected", "/\\evil.com", ""},
 		{"no slash rejected", "foo", ""},
 		{"backslash rejected", "/foo\\bar", ""},
 	}
