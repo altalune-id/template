@@ -11,7 +11,7 @@ import (
 	"altalune.id/template/internal/platform/config"
 )
 
-func stubServerBoot(_ context.Context, _ *config.Config) (*boot.Server, error) {
+func stubServerBoot(_ context.Context, _ *config.Config, _ ...boot.Option) (*boot.Server, error) {
 	return &boot.Server{}, nil
 }
 

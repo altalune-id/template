@@ -4,6 +4,7 @@ package todo_test
 
 import (
 	"database/sql"
+	"fmt"
 	"testing"
 	"time"
 
@@ -138,4 +139,36 @@ func TestPostgres_Todo_ClearDone(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, remaining, 1)
 	assert.Equal(t, "open", remaining[0].Title)
+}
+
+func TestPostgresStore_MarkDoneOlderThan_BatchesAndRespectsTenant(t *testing.T) {
+	store, orgID, projID, userID := newTodoStoreForTest(t)
+	ctx := tenant.Into(t.Context(), tenant.Context{OrgID: orgID, ProjectID: projID, UserID: userID})
+
+	old := time.Now().UTC().Add(-20 * 24 * time.Hour)
+	for i := range 5 {
+		td, err := todo.New(orgID, projID, fmt.Sprintf("stale-%d", i))
+		require.NoError(t, err)
+		td.CreatedAt = old
+		td.UpdatedAt = old
+		require.NoError(t, store.Save(ctx, td))
+	}
+	fresh, err := todo.New(orgID, projID, "fresh")
+	require.NoError(t, err)
+	require.NoError(t, store.Save(ctx, fresh))
+
+	cutoff := time.Now().UTC().Add(-14 * 24 * time.Hour)
+	n, err := store.MarkDoneOlderThan(ctx, orgID, cutoff, 2)
+	require.NoError(t, err)
+	assert.Equal(t, 5, n, "batching must loop until exhausted")
+
+	no := false
+	open, err := store.List(ctx, orgID, projID, todo.ListOpts{Done: &no})
+	require.NoError(t, err)
+	require.Len(t, open, 1)
+	assert.Equal(t, "fresh", open[0].Title)
+
+	n, err = store.MarkDoneOlderThan(ctx, uuid.New(), cutoff, 100)
+	require.NoError(t, err)
+	assert.Zero(t, n, "another org's scope must sweep nothing")
 }

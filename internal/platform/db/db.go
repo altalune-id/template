@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"log/slog"
@@ -12,8 +13,8 @@ import (
 	_ "modernc.org/sqlite"             // sqlite driver: registers "sqlite" with database/sql
 )
 
-// Open opens the driver-specific *sql.DB, pings it, and applies pool tuning.
-func Open(cfg DBConfig, log *slog.Logger) (*sql.DB, error) {
+// Open opens the driver-specific *sql.DB, pings it with bounded retry, and applies pool tuning.
+func Open(ctx context.Context, cfg DBConfig, log *slog.Logger) (*sql.DB, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
@@ -41,9 +42,11 @@ func Open(cfg DBConfig, log *slog.Logger) (*sql.DB, error) {
 	if err != nil {
 		return nil, fmt.Errorf("db: open %s: %w", driver, err)
 	}
-	if err := db.Ping(); err != nil {
+	pingErr := retry(withRetryLogger(ctx, log), cfg.ConnectTimeout, cfg.ConnectBackoff,
+		func(attemptCtx context.Context) error { return db.PingContext(attemptCtx) })
+	if pingErr != nil {
 		_ = db.Close()
-		return nil, fmt.Errorf("db: ping %s: %w", driver, err)
+		return nil, fmt.Errorf("db: ping %s: %w", driver, pingErr)
 	}
 
 	if cfg.MaxOpenConns > 0 {

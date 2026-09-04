@@ -5,6 +5,7 @@ import (
 	"context"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -15,6 +16,8 @@ import (
 type Todo struct {
 	mu   sync.Mutex
 	data map[uuid.UUID]*todo.Todo
+
+	MarkDoneOlderThanFn func(ctx context.Context, orgID uuid.UUID, cutoff time.Time, batch int) (int, error)
 }
 
 // NewTodo returns an empty in-memory todo.Store.
@@ -78,6 +81,24 @@ func (f *Todo) ClearDone(_ context.Context, orgID, projectID uuid.UUID) (int, er
 			delete(f.data, id)
 			n++
 		}
+	}
+	return n, nil
+}
+
+func (f *Todo) MarkDoneOlderThan(ctx context.Context, orgID uuid.UUID, cutoff time.Time, batch int) (int, error) {
+	if f.MarkDoneOlderThanFn != nil {
+		return f.MarkDoneOlderThanFn(ctx, orgID, cutoff, batch)
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	n := 0
+	for _, t := range f.data {
+		if t.OrgID != orgID || t.Done || !t.CreatedAt.Before(cutoff) {
+			continue
+		}
+		t.Done = true
+		t.UpdatedAt = time.Now().UTC()
+		n++
 	}
 	return n, nil
 }

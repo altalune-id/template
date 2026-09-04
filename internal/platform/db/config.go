@@ -18,19 +18,23 @@ const (
 
 // DBConfig is the driver-agnostic input to Open.
 type DBConfig struct {
-	Driver          Driver         `yaml:"driver"          mapstructure:"driver"          awareness:"required,bootstrap" validate:"required,oneof=postgres sqlite"`
-	DSN             string         `yaml:"dsn"             mapstructure:"dsn"             awareness:"required,secret"    validate:"required"`
-	Schema          string         `yaml:"schema"          mapstructure:"schema"          awareness:"bootstrap"`
-	TablePrefix     string         `yaml:"tablePrefix"     mapstructure:"tablePrefix"     awareness:"bootstrap"`
-	Role            string         `yaml:"role"            mapstructure:"role"            awareness:"bootstrap"`
-	Migrator        MigratorConfig `yaml:"migrator"        mapstructure:"migrator"`
-	Reader          ReaderConfig   `yaml:"reader"          mapstructure:"reader"`
-	AutoMigrate     bool           `yaml:"autoMigrate"     mapstructure:"autoMigrate"`
-	AllowBypassRLS  bool           `yaml:"allowBypassRLS"  mapstructure:"allowBypassRLS"  awareness:"bootstrap"`
-	MaxOpenConns    int            `yaml:"maxOpenConns"    mapstructure:"maxOpenConns"                                   validate:"gte=0"`
-	MaxIdleConns    int            `yaml:"maxIdleConns"    mapstructure:"maxIdleConns"                                   validate:"gte=0"`
-	ConnMaxLifetime time.Duration  `yaml:"connMaxLifetime" mapstructure:"connMaxLifetime"                                validate:"gte=0"`
-	ConnMaxIdleTime time.Duration  `yaml:"connMaxIdleTime" mapstructure:"connMaxIdleTime"                                validate:"gte=0"`
+	Driver          Driver            `yaml:"driver"          mapstructure:"driver"          awareness:"required,bootstrap" validate:"required,oneof=postgres sqlite"`
+	DSN             string            `yaml:"dsn"             mapstructure:"dsn"             awareness:"required,secret"    validate:"required"`
+	Schema          string            `yaml:"schema"          mapstructure:"schema"          awareness:"bootstrap"`
+	TablePrefix     string            `yaml:"tablePrefix"     mapstructure:"tablePrefix"     awareness:"bootstrap"`
+	Role            string            `yaml:"role"            mapstructure:"role"            awareness:"bootstrap"`
+	Migrator        MigratorConfig    `yaml:"migrator"        mapstructure:"migrator"`
+	Reader          ReaderConfig      `yaml:"reader"          mapstructure:"reader"`
+	Maintenance     MaintenanceConfig `yaml:"maintenance"     mapstructure:"maintenance"`
+	Health          HealthConfig      `yaml:"health"          mapstructure:"health"`
+	AutoMigrate     bool              `yaml:"autoMigrate"     mapstructure:"autoMigrate"`
+	AllowBypassRLS  bool              `yaml:"allowBypassRLS"  mapstructure:"allowBypassRLS"  awareness:"bootstrap"`
+	MaxOpenConns    int               `yaml:"maxOpenConns"    mapstructure:"maxOpenConns"                                   validate:"gte=0"`
+	MaxIdleConns    int               `yaml:"maxIdleConns"    mapstructure:"maxIdleConns"                                   validate:"gte=0"`
+	ConnMaxLifetime time.Duration     `yaml:"connMaxLifetime" mapstructure:"connMaxLifetime"                                validate:"gte=0"`
+	ConnMaxIdleTime time.Duration     `yaml:"connMaxIdleTime" mapstructure:"connMaxIdleTime"                                validate:"gte=0"`
+	ConnectTimeout  time.Duration     `yaml:"connectTimeout"  mapstructure:"connectTimeout"  awareness:"-"                  validate:"gte=0"`
+	ConnectBackoff  time.Duration     `yaml:"connectBackoff"  mapstructure:"connectBackoff"  awareness:"-"                  validate:"gte=0"`
 }
 
 // ReaderConfig points reads at a replica pool. When DSN is empty, reads fall back to the writer pool — safe default that matches single-node deploys.
@@ -47,6 +51,22 @@ type ReaderConfig struct {
 type MigratorConfig struct {
 	DSN  string `yaml:"dsn"  mapstructure:"dsn"  awareness:"secret,bootstrap"`
 	Role string `yaml:"role" mapstructure:"role" awareness:"bootstrap"`
+}
+
+// MaintenanceConfig holds a credential used only by cross-tenant maintenance reads. When DSN is empty, maintenance reads fall back to the writer pool.
+type MaintenanceConfig struct {
+	DSN             string        `yaml:"dsn"             mapstructure:"dsn"             awareness:"secret,bootstrap"`
+	Role            string        `yaml:"role"            mapstructure:"role"            awareness:"bootstrap"`
+	MaxOpenConns    int           `yaml:"maxOpenConns"    mapstructure:"maxOpenConns"    awareness:"-" validate:"gte=0"`
+	MaxIdleConns    int           `yaml:"maxIdleConns"    mapstructure:"maxIdleConns"    awareness:"-" validate:"gte=0"`
+	ConnMaxLifetime time.Duration `yaml:"connMaxLifetime" mapstructure:"connMaxLifetime" awareness:"-" validate:"gte=0"`
+	ConnMaxIdleTime time.Duration `yaml:"connMaxIdleTime" mapstructure:"connMaxIdleTime" awareness:"-" validate:"gte=0"`
+}
+
+// HealthConfig tunes the db-health worker.
+type HealthConfig struct {
+	Interval time.Duration `yaml:"interval" mapstructure:"interval" awareness:"-" validate:"gte=0"`
+	Timeout  time.Duration `yaml:"timeout"  mapstructure:"timeout"  awareness:"-" validate:"gte=0"`
 }
 
 var v10 = validator.New() //nolint:gochecknoglobals // validator instance is stateless + safe for concurrent use; shared per go-playground/validator conventions.

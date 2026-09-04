@@ -7,9 +7,9 @@ repo. Read this before touching code.
 
 Multitenant Go template. Templ + HTMX + Connect-RPC on one HTTP listener.
 Downstream services fork this shape and swap the domain modules. Signatures
-under `authl/`, `logger/`, `mailer/`, `nanoid/`, `reqid/`, `telemetry/`,
-`worker/`, and `internal/platform/` are copied verbatim into forks —
-signature changes cost every fork of churn, so land tests first.
+under `authl/`, `logger/`, `mailer/`, `nanoid/`, `reqid/`, `scheduler/`,
+`telemetry/`, `worker/`, and `internal/platform/` are copied verbatim into
+forks — signature changes cost every fork of churn, so land tests first.
 
 ## Read first
 
@@ -21,6 +21,8 @@ signature changes cost every fork of churn, so land tests first.
   `internal/platform/tokens/`, `worker/`.
 - [`docs/CLI_CONTRACT.md`](docs/CLI_CONTRACT.md) — stable command tree,
   exit codes, output envelopes.
+- [`GLOSSARY.md`](GLOSSARY.md) — canonical terminology. Check a term here
+  before inventing a synonym.
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — TDD, commits, signing.
 
 ## Skills

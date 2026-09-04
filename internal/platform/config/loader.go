@@ -88,6 +88,15 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("db.dsn", filepath.Join(homeDir(), ".altempl", "altempl.db"))
 	v.SetDefault("db.autoMigrate", true)
 	v.SetDefault("db.tablePrefix", "altempl_")
+	v.SetDefault("db.connectTimeout", "30s")
+	v.SetDefault("db.connectBackoff", "250ms")
+	v.SetDefault("db.health.interval", "30s")
+	v.SetDefault("db.health.timeout", "2s")
+	v.SetDefault("db.maintenance.maxOpenConns", 2)
+
+	v.SetDefault("scheduler.enabled", true)
+	v.SetDefault("scheduler.timezone", "UTC")
+	v.SetDefault("scheduler.shutdownGrace", "30s")
 
 	v.SetDefault("api.enabled", true)
 	v.SetDefault("api.openapi.enabled", true)

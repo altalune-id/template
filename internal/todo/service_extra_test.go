@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -130,5 +131,8 @@ func (b *brokenByIDStore) List(_ context.Context, _, _ uuid.UUID, _ todo.ListOpt
 }
 func (b *brokenByIDStore) Delete(_ context.Context, _ uuid.UUID) error { return nil }
 func (b *brokenByIDStore) ClearDone(_ context.Context, _, _ uuid.UUID) (int, error) {
+	return 0, nil
+}
+func (b *brokenByIDStore) MarkDoneOlderThan(_ context.Context, _ uuid.UUID, _ time.Time, _ int) (int, error) {
 	return 0, nil
 }

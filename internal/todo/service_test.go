@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"google.golang.org/grpc/codes"
@@ -246,4 +247,61 @@ func (f *failingStore) List(_ context.Context, _, _ uuid.UUID, _ todo.ListOpts) 
 func (f *failingStore) Delete(_ context.Context, _ uuid.UUID) error { return nil }
 func (f *failingStore) ClearDone(_ context.Context, _, _ uuid.UUID) (int, error) {
 	return 0, nil
+}
+func (f *failingStore) MarkDoneOlderThan(_ context.Context, _ uuid.UUID, _ time.Time, _ int) (int, error) {
+	return 0, nil
+}
+
+func TestService_AutoCompleteStale(t *testing.T) {
+	store := fakes.NewTodo()
+	svc, unexCalls := newSvc(t, store)
+	ctx, tc := tenantCtx(t)
+
+	store.MarkDoneOlderThanFn = func(_ context.Context, gotOrg uuid.UUID, cutoff time.Time, batch int) (int, error) {
+		if gotOrg != tc.OrgID {
+			t.Errorf("orgID=%v want %v", gotOrg, tc.OrgID)
+		}
+		if batch != todo.SweepBatchSize {
+			t.Errorf("batch=%d want %d", batch, todo.SweepBatchSize)
+		}
+		if skew := time.Since(cutoff.Add(todo.StaleAfter)); skew < 0 || skew > time.Minute {
+			t.Errorf("cutoff=%v skew=%v want within a minute of now-StaleAfter", cutoff, skew)
+		}
+		return 7, nil
+	}
+
+	n, err := svc.AutoCompleteStale(ctx, todo.StaleAfter)
+	if err != nil {
+		t.Fatalf("AutoCompleteStale: %v", err)
+	}
+	if n != 7 {
+		t.Errorf("swept=%d want 7", n)
+	}
+	if *unexCalls != 0 {
+		t.Errorf("unexpected() called %d times", *unexCalls)
+	}
+}
+
+func TestService_AutoCompleteStale_RequiresTenant(t *testing.T) {
+	svc, _ := newSvc(t, fakes.NewTodo())
+	_, err := svc.AutoCompleteStale(context.Background(), todo.StaleAfter)
+	if !tenant.IsMissingError(err) {
+		t.Fatalf("want tenant.MissingError, got %v", err)
+	}
+}
+
+func TestService_AutoCompleteStale_StoreFailureIsUnexpected(t *testing.T) {
+	store := fakes.NewTodo()
+	svc, unexCalls := newSvc(t, store)
+	ctx, _ := tenantCtx(t)
+	store.MarkDoneOlderThanFn = func(_ context.Context, _ uuid.UUID, _ time.Time, _ int) (int, error) {
+		return 0, errors.New("boom")
+	}
+
+	if _, err := svc.AutoCompleteStale(ctx, todo.StaleAfter); err == nil {
+		t.Fatal("want error")
+	}
+	if *unexCalls != 1 {
+		t.Errorf("unexpected() called %d times, want 1", *unexCalls)
+	}
 }

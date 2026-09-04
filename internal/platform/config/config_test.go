@@ -6,6 +6,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/stretchr/testify/require"
 
 	"altalune.id/template/internal/platform/db"
 )
@@ -242,6 +245,62 @@ func TestValidate_ModeInvariants(t *testing.T) {
 	}
 }
 
+func TestSchedulerConfig_GetTimezone(t *testing.T) {
+	tests := []struct {
+		name    string
+		tz      string
+		want    string
+		wantErr bool
+	}{
+		{"empty defaults to UTC", "", "UTC", false},
+		{"named zone", "Asia/Jakarta", "Asia/Jakarta", false},
+		{"invalid zone errors", "Mars/Olympus", "", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := &SchedulerConfig{Timezone: tt.tz}
+			loc, err := c.GetTimezone()
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("GetTimezone() err = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantErr {
+				return
+			}
+			if loc.String() != tt.want {
+				t.Errorf("loc = %q, want %q", loc.String(), tt.want)
+			}
+		})
+	}
+}
+
+func TestDefaults_SchedulerAndDBKeys(t *testing.T) {
+	cfg := Defaults()
+	if !cfg.Scheduler.Enabled {
+		t.Error("scheduler.enabled must default true")
+	}
+	if cfg.Scheduler.Timezone != "UTC" {
+		t.Errorf("scheduler.timezone = %q, want UTC", cfg.Scheduler.Timezone)
+	}
+	if cfg.Scheduler.ShutdownGrace != 30*time.Second {
+		t.Errorf("scheduler.shutdownGrace = %s, want 30s", cfg.Scheduler.ShutdownGrace)
+	}
+	if cfg.DB.ConnectTimeout != 30*time.Second {
+		t.Errorf("db.connectTimeout = %s, want 30s", cfg.DB.ConnectTimeout)
+	}
+	if cfg.DB.ConnectBackoff != 250*time.Millisecond {
+		t.Errorf("db.connectBackoff = %s, want 250ms", cfg.DB.ConnectBackoff)
+	}
+	if cfg.DB.Health.Interval != 30*time.Second {
+		t.Errorf("db.health.interval = %s, want 30s", cfg.DB.Health.Interval)
+	}
+	if cfg.DB.Health.Timeout != 2*time.Second {
+		t.Errorf("db.health.timeout = %s, want 2s", cfg.DB.Health.Timeout)
+	}
+	if cfg.DB.Maintenance.MaxOpenConns != 2 {
+		t.Errorf("db.maintenance.maxOpenConns = %d, want 2", cfg.DB.Maintenance.MaxOpenConns)
+	}
+}
+
 func TestMode_IsProduction(t *testing.T) {
 	if !ModeCloud.IsProduction() {
 		t.Fatal("cloud must be production")
@@ -295,4 +354,83 @@ func withGenesisFallback(t *testing.T) Option {
 	t.Setenv("ALT_GENESIS_EMAIL", "root@example.com")
 	t.Setenv("ALT_GENESIS_PASSWORD", "x")
 	return func(*loadOptions) {}
+}
+
+func TestSchedulerConfig_Locations(t *testing.T) {
+	tests := []struct {
+		name     string
+		cfg      SchedulerConfig
+		job      string
+		wantZone string
+	}{
+		{
+			name:     "unset global falls back to UTC",
+			cfg:      SchedulerConfig{},
+			job:      "any-job",
+			wantZone: "UTC",
+		},
+		{
+			name:     "global applies to every job",
+			cfg:      SchedulerConfig{Timezone: "Asia/Jakarta"},
+			job:      "any-job",
+			wantZone: "Asia/Jakarta",
+		},
+		{
+			name: "per-job overrides global",
+			cfg: SchedulerConfig{
+				Timezone: "Asia/Jakarta",
+				Jobs:     map[string]SchedulerJobConfig{"todo-autocomplete-stale": {Timezone: "Europe/Berlin"}},
+			},
+			job:      "todo-autocomplete-stale",
+			wantZone: "Europe/Berlin",
+		},
+		{
+			name: "unlisted job still gets the global",
+			cfg: SchedulerConfig{
+				Timezone: "Asia/Jakarta",
+				Jobs:     map[string]SchedulerJobConfig{"other-job": {Timezone: "Europe/Berlin"}},
+			},
+			job:      "todo-autocomplete-stale",
+			wantZone: "Asia/Jakarta",
+		},
+		{
+			name: "empty per-job timezone falls back to global",
+			cfg: SchedulerConfig{
+				Timezone: "Asia/Jakarta",
+				Jobs:     map[string]SchedulerJobConfig{"todo-autocomplete-stale": {}},
+			},
+			job:      "todo-autocomplete-stale",
+			wantZone: "Asia/Jakarta",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			loc, err := tt.cfg.Locations()
+			require.NoError(t, err)
+			require.Equal(t, tt.wantZone, loc(tt.job).String())
+		})
+	}
+}
+
+func TestSchedulerConfig_Locations_RejectsBadZones(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  SchedulerConfig
+	}{
+		{"bad global", SchedulerConfig{Timezone: "Mars/Olympus"}},
+		{"bad per-job", SchedulerConfig{Jobs: map[string]SchedulerJobConfig{"j": {Timezone: "Mars/Olympus"}}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := tt.cfg.Locations()
+			require.Error(t, err, "a bad IANA name must fail at boot, not silently fall back to UTC")
+		})
+	}
+}
+
+func TestSchedulerConfig_Locations_NilReceiverIsUTC(t *testing.T) {
+	var cfg *SchedulerConfig
+	loc, err := cfg.Locations()
+	require.NoError(t, err)
+	require.Equal(t, "UTC", loc("any").String())
 }

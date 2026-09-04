@@ -87,6 +87,9 @@ func TestSQLiteStore_SaveAndByID(t *testing.T) {
 	if got.OrgID != tc.OrgID {
 		t.Errorf("org mismatch")
 	}
+	if !got.UpdatedAt.Equal(td.UpdatedAt) {
+		t.Errorf("UpdatedAt round-trip mismatch: got=%v want=%v", got.UpdatedAt, td.UpdatedAt)
+	}
 }
 
 func TestSQLiteStore_ByID_NotFound(t *testing.T) {
@@ -135,6 +138,7 @@ func TestSQLiteStore_SaveIsUpsert(t *testing.T) {
 	if err := store.Save(ctx, td); err != nil {
 		t.Fatal(err)
 	}
+	beforeToggle := td.UpdatedAt
 	td.Toggle()
 	if err := store.Save(ctx, td); err != nil {
 		t.Fatalf("second Save: %v", err)
@@ -145,6 +149,9 @@ func TestSQLiteStore_SaveIsUpsert(t *testing.T) {
 	}
 	if !got.Done {
 		t.Errorf("Done round-trip failed")
+	}
+	if got.UpdatedAt.Before(beforeToggle) {
+		t.Errorf("UpdatedAt went backwards on upsert: got=%v before=%v", got.UpdatedAt, beforeToggle)
 	}
 }
 
@@ -200,5 +207,101 @@ func TestSQLiteStore_TenantMissing(t *testing.T) {
 	var zero *todo.NotFoundError
 	if errors.As(err, &zero) {
 		t.Errorf("MissingError should not resolve to NotFoundError")
+	}
+}
+
+func TestSQLiteStore_MarkDoneOlderThan(t *testing.T) {
+	store, _, tc := newSQLiteStoreForTest(t)
+	ctx := tenant.Into(context.Background(), tc)
+
+	old := time.Now().UTC().Add(-20 * 24 * time.Hour)
+	recent := time.Now().UTC().Add(-1 * time.Hour)
+
+	seed := func(title string, created time.Time, done bool) {
+		td, err := todo.New(tc.OrgID, tc.ProjectID, title)
+		if err != nil {
+			t.Fatal(err)
+		}
+		td.CreatedAt = created
+		td.UpdatedAt = created
+		td.Done = done
+		if err := store.Save(ctx, td); err != nil {
+			t.Fatal(err)
+		}
+	}
+	seed("stale-open-1", old, false)
+	seed("stale-open-2", old, false)
+	seed("stale-already-done", old, true)
+	seed("recent-open", recent, false)
+
+	cutoff := time.Now().UTC().Add(-14 * 24 * time.Hour)
+	n, err := store.MarkDoneOlderThan(ctx, tc.OrgID, cutoff, 1)
+	if err != nil {
+		t.Fatalf("MarkDoneOlderThan: %v", err)
+	}
+	if n != 2 {
+		t.Fatalf("swept=%d want 2 (only stale open todos, and batching must not stop after the first batch)", n)
+	}
+
+	no := false
+	open, err := store.List(ctx, tc.OrgID, tc.ProjectID, todo.ListOpts{Done: &no})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(open) != 1 || open[0].Title != "recent-open" {
+		t.Errorf("open todos after sweep: %+v", open)
+	}
+}
+
+func TestSQLiteStore_MarkDoneOlderThan_IsIdempotent(t *testing.T) {
+	store, _, tc := newSQLiteStoreForTest(t)
+	ctx := tenant.Into(context.Background(), tc)
+
+	td, err := todo.New(tc.OrgID, tc.ProjectID, "stale")
+	if err != nil {
+		t.Fatal(err)
+	}
+	td.CreatedAt = time.Now().UTC().Add(-20 * 24 * time.Hour)
+	td.UpdatedAt = td.CreatedAt
+	if err := store.Save(ctx, td); err != nil {
+		t.Fatal(err)
+	}
+
+	cutoff := time.Now().UTC().Add(-14 * 24 * time.Hour)
+	n1, err := store.MarkDoneOlderThan(ctx, tc.OrgID, cutoff, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n1 != 1 {
+		t.Fatalf("first sweep=%d want 1", n1)
+	}
+
+	n2, err := store.MarkDoneOlderThan(ctx, tc.OrgID, cutoff, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n2 != 0 {
+		t.Errorf("second sweep=%d want 0, a second sweep must be a no-op", n2)
+	}
+}
+
+func TestSQLiteStore_MarkDoneOlderThan_NothingStale(t *testing.T) {
+	store, _, tc := newSQLiteStoreForTest(t)
+	ctx := tenant.Into(context.Background(), tc)
+
+	td, err := todo.New(tc.OrgID, tc.ProjectID, "fresh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Save(ctx, td); err != nil {
+		t.Fatal(err)
+	}
+
+	n, err := store.MarkDoneOlderThan(ctx, tc.OrgID, time.Now().UTC().Add(-14*24*time.Hour), 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Errorf("swept=%d want 0", n)
 	}
 }

@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"log/slog"
+	"slices"
 
 	"golang.org/x/sync/errgroup"
 )
@@ -23,6 +24,9 @@ func New(log *slog.Logger) *Supervisor {
 
 // Register adds w to the set of workers Run will start.
 func (s *Supervisor) Register(w Worker) { s.workers = append(s.workers, w) }
+
+// Workers returns the registered workers in registration order.
+func (s *Supervisor) Workers() []Worker { return slices.Clone(s.workers) }
 
 // Run starts every worker under one errgroup and returns the first non-nil error.
 func (s *Supervisor) Run(ctx context.Context) error {

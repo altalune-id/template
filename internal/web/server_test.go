@@ -5,7 +5,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 
 	"altalune.id/template/internal/web"
 )
@@ -132,4 +135,33 @@ func TestServer_MiddlewareChain_OuterFirst(t *testing.T) {
 	if got != want {
 		t.Errorf("order=%q, want %q", got, want)
 	}
+}
+
+func TestReadyz_UnreadyBeforeFirstProbe(t *testing.T) {
+	t.Parallel()
+	var ready atomic.Bool
+	ts := httptest.NewServer(web.NewServer(web.ServerOpts{HealthOK: ready.Load}))
+	t.Cleanup(ts.Close)
+
+	resp, err := http.Get(ts.URL + "/readyz")
+	require.NoError(t, err)
+	require.NoError(t, resp.Body.Close())
+	require.Equal(t, http.StatusServiceUnavailable, resp.StatusCode)
+
+	ready.Store(true)
+	resp, err = http.Get(ts.URL + "/readyz")
+	require.NoError(t, err)
+	require.NoError(t, resp.Body.Close())
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+}
+
+func TestHealthz_IgnoresDBHealth(t *testing.T) {
+	t.Parallel()
+	ts := httptest.NewServer(web.NewServer(web.ServerOpts{HealthOK: func() bool { return false }}))
+	t.Cleanup(ts.Close)
+
+	resp, err := http.Get(ts.URL + "/healthz")
+	require.NoError(t, err)
+	require.NoError(t, resp.Body.Close())
+	require.Equal(t, http.StatusOK, resp.StatusCode, "liveness must not depend on the database")
 }

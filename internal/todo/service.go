@@ -3,6 +3,7 @@ package todo
 import (
 	"context"
 	"log/slog"
+	"time"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -184,5 +185,26 @@ func (s *Service) ClearDone(ctx context.Context) (int, error) {
 			"org_id", tc.OrgID, "project_id", tc.ProjectID)
 	}
 	span.SetAttributes(attribute.Int("todo.cleared", n))
+	return n, nil
+}
+
+// AutoCompleteStale marks every open todo older than olderThan as done in the caller's org scope.
+func (s *Service) AutoCompleteStale(ctx context.Context, olderThan time.Duration) (int, error) {
+	ctx, span := tracer.Start(ctx, "todo.AutoCompleteStale")
+	defer span.End()
+
+	tc, err := tenant.From(ctx)
+	if err != nil {
+		return 0, err
+	}
+	span.SetAttributes(attribute.String("org_id", tc.OrgID.String()))
+
+	cutoff := time.Now().UTC().Add(-olderThan)
+	n, err := s.store.MarkDoneOlderThan(ctx, tc.OrgID, cutoff, SweepBatchSize)
+	if err != nil {
+		span.RecordError(err)
+		return 0, s.unexpected(ctx, "todo.AutoCompleteStale: mark done", err, "org_id", tc.OrgID)
+	}
+	span.SetAttributes(attribute.Int("todo.swept", n))
 	return n, nil
 }

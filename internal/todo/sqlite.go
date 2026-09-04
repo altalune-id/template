@@ -31,6 +31,7 @@ type sqliteTodoRow struct {
 	Title     string `alias:"todos.title"`
 	Done      int64  `alias:"todos.done"`
 	CreatedAt string `alias:"todos.created_at"`
+	UpdatedAt string `alias:"todos.updated_at"`
 }
 
 func (r *sqliteTodoRow) toTodo() (*Todo, error) {
@@ -50,6 +51,10 @@ func (r *sqliteTodoRow) toTodo() (*Todo, error) {
 	if err != nil {
 		return nil, fmt.Errorf("todo.sqlite: parse created_at: %w", err)
 	}
+	ua, err := time.Parse(time.RFC3339Nano, r.UpdatedAt)
+	if err != nil {
+		return nil, fmt.Errorf("todo.sqlite: parse updated_at: %w", err)
+	}
 	return &Todo{
 		ID:        id,
 		OrgID:     oid,
@@ -57,6 +62,7 @@ func (r *sqliteTodoRow) toTodo() (*Todo, error) {
 		Title:     r.Title,
 		Done:      r.Done == 1,
 		CreatedAt: ca,
+		UpdatedAt: ua,
 	}, nil
 }
 
@@ -69,7 +75,7 @@ func (s *sqliteStore) Save(ctx context.Context, t *Todo) error {
 	if t.Done {
 		done = 1
 	}
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	updatedAt := t.UpdatedAt.UTC().Format(time.RFC3339Nano)
 	stmt := s.table.INSERT(s.table.AllColumns).
 		VALUES(
 			t.ID.String(),
@@ -79,14 +85,14 @@ func (s *sqliteStore) Save(ctx context.Context, t *Todo) error {
 			t.Title,
 			done,
 			t.CreatedAt.UTC().Format(time.RFC3339Nano),
-			now,
+			updatedAt,
 		).
 		ON_CONFLICT(s.table.ID).
 		DO_UPDATE(
 			sqlite.SET(
 				s.table.Title.SET(sqlite.String(t.Title)),
 				s.table.Done.SET(sqlite.Int(done)),
-				s.table.UpdatedAt.SET(sqlite.String(now)),
+				s.table.UpdatedAt.SET(sqlite.String(updatedAt)),
 			),
 		)
 	if _, err := stmt.ExecContext(ctx, s.db); err != nil {
@@ -194,4 +200,41 @@ func (s *sqliteStore) ClearDone(ctx context.Context, orgID, projectID uuid.UUID)
 		return 0, fmt.Errorf("todo.sqlite.ClearDone: rows affected: %w", err)
 	}
 	return int(n), nil
+}
+
+// MarkDoneOlderThan marks stale open todos done in batches. NOTE: each batch commits separately; the sweep is idempotent.
+func (s *sqliteStore) MarkDoneOlderThan(ctx context.Context, orgID uuid.UUID, cutoff time.Time, batch int) (int, error) {
+	if batch <= 0 {
+		batch = SweepBatchSize
+	}
+	cut := cutoff.UTC().Format(time.RFC3339Nano)
+	total := 0
+	for {
+		stale := sqlite.SELECT(s.table.ID).
+			FROM(s.table).
+			WHERE(
+				s.table.OrgID.EQ(sqlite.String(orgID.String())).
+					AND(s.table.Done.EQ(sqlite.Int(0))).
+					AND(s.table.CreatedAt.LT(sqlite.String(cut))),
+			).
+			ORDER_BY(s.table.CreatedAt.ASC()).
+			LIMIT(int64(batch))
+
+		stmt := s.table.UPDATE(s.table.Done, s.table.UpdatedAt).
+			SET(sqlite.Int(1), sqlite.String(time.Now().UTC().Format(time.RFC3339Nano))).
+			WHERE(s.table.ID.IN(stale))
+
+		res, err := stmt.ExecContext(ctx, s.db)
+		if err != nil {
+			return total, fmt.Errorf("todo.sqlite.MarkDoneOlderThan: %w", err)
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return total, fmt.Errorf("todo.sqlite.MarkDoneOlderThan: rows affected: %w", err)
+		}
+		total += int(n)
+		if int(n) < batch {
+			return total, nil
+		}
+	}
 }

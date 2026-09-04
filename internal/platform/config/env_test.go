@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestEnvVarName(t *testing.T) {
@@ -235,6 +237,20 @@ func TestLoad_RequireFile_PathProvided(t *testing.T) {
 	if !strings.Contains(err.Error(), "nope.yaml") && !strings.Contains(err.Error(), "required") {
 		t.Fatalf("expected required-file error, got %v", err)
 	}
+}
+
+func TestWalkEnvKeys_SkipsStructValuedMapsOnly(t *testing.T) {
+	byEnv := map[string]struct{}{}
+	for _, k := range WalkEnvKeys("ALT") {
+		byEnv[k.Key] = struct{}{}
+	}
+	_, hasSchedulerJobs := byEnv["ALT_SCHEDULER_JOBS"]
+	require.False(t, hasSchedulerJobs,
+		"struct-valued map config is not env-addressable and must not appear in .env.example")
+
+	_, hasTelemetryHeaders := byEnv["ALT_TELEMETRY_OTLP_HEADERS"]
+	require.True(t, hasTelemetryHeaders,
+		"scalar-valued map config is env-addressable and must still appear in .env.example")
 }
 
 func containsAll(haystack, needles []string) bool {

@@ -21,6 +21,16 @@ For domain packages, see [`MODULE_TEMPLATE.md`](MODULE_TEMPLATE.md).
   `session`, `capabilities`, `nanoid`, `worker`, `notify`.
 - Long-running loops — `scheduler`, `queue` consumer, future `outbox`,
   websocket gateway. All register as `Worker` on `Supervisor`.
+  Reference impls: `worker/` (the Supervisor itself), `scheduler/`
+  (a `Worker` that owns many periodic `Job`s), and
+  `internal/platform/db.HealthMonitor` (a `Worker` owning one loop).
+
+These are **categories, not directories.** Some platform packages live
+under `internal/platform/<name>/`; others are exported roots —
+`worker/`, `scheduler/`, `logger/`, `telemetry/`, `mailer/`, `nanoid/`,
+`reqid/`, `authl/`. A primitive downstream forks may import belongs at
+the root; one that only this app's internals need belongs under
+`internal/platform/`.
 
 **No:**
 
@@ -30,15 +40,15 @@ For domain packages, see [`MODULE_TEMPLATE.md`](MODULE_TEMPLATE.md).
 
 ## 2. Required files
 
-| File | Required? | Purpose |
-|---|---|---|
-| `<name>.go` OR `doc.go` | Yes | Package godoc + primary type / interface |
-| `<name>_test.go` | Yes | Coverage on every exported symbol |
-| `config.go` | If cfg-driven | Config struct + defaults (Viper-compatible) |
-| `errors.go` | If ≥ 1 typed error | Typed errors + `Is<TypeName>` + `ToAppError` |
-| `options.go` | If uses functional options | `type Option func(*T)` + `With*` builders |
-| `<subject>.go` | Per adapter | `type postgresStore`, `type valkeyCache`, etc. |
-| `<subject>_test.go` | Yes | Coverage per adapter |
+| File                    | Required?                  | Purpose                                        |
+| ----------------------- | -------------------------- | ---------------------------------------------- |
+| `<name>.go` OR `doc.go` | Yes                        | Package godoc + primary type / interface       |
+| `<name>_test.go`        | Yes                        | Coverage on every exported symbol              |
+| `config.go`             | If cfg-driven              | Config struct + defaults (Viper-compatible)    |
+| `errors.go`             | If ≥ 1 typed error         | Typed errors + `Is<TypeName>` + `ToAppError`   |
+| `options.go`            | If uses functional options | `type Option func(*T)` + `With*` builders      |
+| `<subject>.go`          | Per adapter                | `type postgresStore`, `type valkeyCache`, etc. |
+| `<subject>_test.go`     | Yes                        | Coverage per adapter                           |
 
 ## 3. Conventions
 
@@ -74,10 +84,22 @@ knobs. Required inputs are positional constructor args.
 - The application `config.Config` embeds each platform config:
   ```go
   type Config struct {
-      Log       logger.Config    `yaml:"log"`
-      Tokens    tokens.Config    `yaml:"tokens"`
-      Cache     cache.Config     `yaml:"cache"`
-      Scheduler scheduler.Config `yaml:"scheduler"`
+      Log    logger.Config `yaml:"log"`
+      Tokens tokens.Config `yaml:"tokens"`
+      Cache  cache.Config  `yaml:"cache"`
+  }
+  ```
+- An **exported root** primitive carries no `mapstructure` tags and no
+  deployment policy — it takes a plain `Options` struct at construction.
+  Its config lives in `internal/platform/config` instead, so the
+  importable package stays free of Viper. `scheduler/` is the reference:
+  ```go
+  // internal/platform/config/config.go
+  type SchedulerConfig struct {
+      Enabled       bool                          `mapstructure:"enabled"       awareness:"bootstrap"`
+      Timezone      string                        `mapstructure:"timezone"      awareness:"bootstrap"`
+      ShutdownGrace time.Duration                 `mapstructure:"shutdownGrace" awareness:"-"`
+      Jobs          map[string]SchedulerJobConfig `mapstructure:"jobs"          awareness:"-"`
   }
   ```
 - Env-var mapping is automatic via the `BindEnv` walker in
@@ -124,6 +146,15 @@ Every worker:
 1. Returns `nil` on graceful shutdown (ctx cancelled).
 2. Returns a non-nil error on unrecoverable failure (Supervisor cascades cancel).
 3. Never blocks ctx cancellation for more than the graceful window (10s).
+4. In a periodic loop, logs per-tick failures instead of returning them — a
+   returned error cancels every sibling worker. `db.HealthMonitor.Run`
+   swallows probe errors for exactly this reason.
+
+**Worker or scheduler `Job`?** A `Job` when at most one replica should do the
+work per tick, or when an operator needs to trigger it by name
+(`altempl scheduler run <job>`). A `Worker` when every replica needs its own
+copy of the result — per-process state such as a health snapshot — or when
+per-tick failures must not reach the scheduler's `ErrorReporter`.
 
 ### Import allow-list (depguard-enforced)
 
@@ -138,7 +169,8 @@ Platform packages MUST NOT import: any `internal/<domain>/` package,
 ## 4. Adapter pattern — swappable implementations
 
 When multiple backends satisfy the same port (e.g. cache with memory
-+ Valkey + Redis adapters):
+
+- Valkey + Redis adapters):
 
 ```
 internal/platform/cache/

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/go-playground/validator/v10"
 
@@ -12,6 +13,7 @@ import (
 	"altalune.id/template/internal/platform/notify"
 	"altalune.id/template/internal/platform/tokens"
 	"altalune.id/template/logger"
+	"altalune.id/template/scheduler"
 	"altalune.id/template/telemetry"
 )
 
@@ -39,6 +41,7 @@ type Config struct {
 	Session       SessionConfig       `yaml:"session"       mapstructure:"session"`
 	Log           logger.Config       `yaml:"log"           mapstructure:"log"`
 	Telemetry     telemetry.Config    `yaml:"telemetry"     mapstructure:"telemetry"`
+	Scheduler     SchedulerConfig     `yaml:"scheduler"     mapstructure:"scheduler"`
 	Observability ObservabilityConfig `yaml:"observability" mapstructure:"observability"`
 	Mail          MailConfig          `yaml:"mail"          mapstructure:"mail"`
 	I18n          I18nConfig          `yaml:"i18n"          mapstructure:"i18n"`
@@ -140,6 +143,59 @@ type SMTPConfig struct {
 	User string `yaml:"user" mapstructure:"user"`
 	Pass string `yaml:"pass" mapstructure:"pass" awareness:"secret"`
 	TLS  bool   `yaml:"tls"  mapstructure:"tls"`
+}
+
+// SchedulerConfig tunes the periodic-job runner. Job cadences are baked into each domain's scheduler adapter, not exposed here.
+type SchedulerConfig struct {
+	Enabled       bool                          `yaml:"enabled"       mapstructure:"enabled"       awareness:"bootstrap"`
+	Timezone      string                        `yaml:"timezone"      mapstructure:"timezone"      awareness:"bootstrap"`
+	ShutdownGrace time.Duration                 `yaml:"shutdownGrace" mapstructure:"shutdownGrace" awareness:"-"        validate:"gte=0"`
+	Jobs          map[string]SchedulerJobConfig `yaml:"jobs"          mapstructure:"jobs"          awareness:"-"`
+}
+
+// SchedulerJobConfig overrides per-job scheduler settings by job name.
+type SchedulerJobConfig struct {
+	Timezone string `yaml:"timezone" mapstructure:"timezone" awareness:"-"`
+}
+
+// GetTimezone resolves Timezone via time.LoadLocation; empty returns time.UTC.
+func (s *SchedulerConfig) GetTimezone() (*time.Location, error) {
+	if s == nil || s.Timezone == "" {
+		return time.UTC, nil
+	}
+	loc, err := time.LoadLocation(s.Timezone)
+	if err != nil {
+		return nil, fmt.Errorf("config: scheduler.timezone %q: %w", s.Timezone, err)
+	}
+	return loc, nil
+}
+
+// Locations resolves every configured zone and returns a per-job lookup falling back to Timezone, then UTC.
+func (s *SchedulerConfig) Locations() (scheduler.LocationFunc, error) {
+	fallback, err := s.GetTimezone()
+	if err != nil {
+		return nil, err
+	}
+	if s == nil || len(s.Jobs) == 0 {
+		return scheduler.FixedLocation(fallback), nil
+	}
+	perJob := make(map[string]*time.Location, len(s.Jobs))
+	for name, jc := range s.Jobs {
+		if jc.Timezone == "" {
+			continue
+		}
+		loc, lErr := time.LoadLocation(jc.Timezone)
+		if lErr != nil {
+			return nil, fmt.Errorf("config: scheduler.jobs.%s.timezone %q: %w", name, jc.Timezone, lErr)
+		}
+		perJob[name] = loc
+	}
+	return func(jobName string) *time.Location {
+		if loc, ok := perJob[jobName]; ok {
+			return loc
+		}
+		return fallback
+	}, nil
 }
 
 // Validate cascades to each subsystem then runs the struct-tag pass and the cross-field invariants.

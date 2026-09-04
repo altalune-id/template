@@ -14,7 +14,7 @@ import (
 func TestServe_ExitsWhenSupervisorReturns(t *testing.T) {
 	setSelfhostedEnv(t)
 
-	bootFn := func(_ context.Context, cfg *config.Config) (*boot.Server, error) {
+	bootFn := func(_ context.Context, cfg *config.Config, _ ...boot.Option) (*boot.Server, error) {
 		return &boot.Server{
 			Cfg:        cfg,
 			Supervisor: worker.New(nil),
