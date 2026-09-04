@@ -15,7 +15,7 @@ import (
 	"altalune.id/template/internal/platform/session"
 )
 
-func bootServerEcho(_ context.Context, cfg *config.Config) (*boot.Server, error) {
+func bootServerEcho(_ context.Context, cfg *config.Config, _ ...boot.Option) (*boot.Server, error) {
 	return &boot.Server{Cfg: cfg}, nil
 }
 

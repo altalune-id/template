@@ -30,6 +30,7 @@ type pgTodoRow struct {
 	Title     string    `alias:"todos.title"`
 	Done      bool      `alias:"todos.done"`
 	CreatedAt time.Time `alias:"todos.created_at"`
+	UpdatedAt time.Time `alias:"todos.updated_at"`
 }
 
 func (r *pgTodoRow) toTodo() *Todo {
@@ -40,6 +41,7 @@ func (r *pgTodoRow) toTodo() *Todo {
 		Title:     r.Title,
 		Done:      r.Done,
 		CreatedAt: r.CreatedAt,
+		UpdatedAt: r.UpdatedAt,
 	}
 }
 

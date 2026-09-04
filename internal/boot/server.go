@@ -7,25 +7,22 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	stdlog "log"
 	"log/slog"
 	"net/http"
 	"strings"
 	"sync/atomic"
 
-	"altalune.id/template/internal/password"
-
 	"altalune.id/template/authl"
 	"altalune.id/template/internal/api"
 	"altalune.id/template/internal/apperror"
 	"altalune.id/template/internal/auth"
-	i18npkg "altalune.id/template/internal/i18n"
 	"altalune.id/template/internal/invite"
 	"altalune.id/template/internal/onboard"
 	"altalune.id/template/internal/org"
 	"altalune.id/template/internal/platform"
 	"altalune.id/template/internal/platform/capabilities"
 	"altalune.id/template/internal/platform/config"
+	"altalune.id/template/internal/platform/db"
 	"altalune.id/template/internal/platform/notify"
 	"altalune.id/template/internal/platform/session"
 	"altalune.id/template/internal/platform/tenant"
@@ -33,12 +30,10 @@ import (
 	"altalune.id/template/internal/project"
 	"altalune.id/template/internal/todo"
 	"altalune.id/template/internal/user"
-	"altalune.id/template/internal/web"
-	webhandlers "altalune.id/template/internal/web/handlers"
-	webmw "altalune.id/template/internal/web/middleware"
 	"altalune.id/template/logger"
 	"altalune.id/template/mailer"
 	"altalune.id/template/nanoid"
+	"altalune.id/template/scheduler"
 	"altalune.id/template/telemetry"
 	"altalune.id/template/worker"
 )
@@ -63,13 +58,20 @@ type Server struct {
 
 	Web        http.Handler
 	API        *api.Server
+	Scheduler  *scheduler.Runner
+	Health     *db.HealthMonitor
 	Supervisor *worker.Supervisor
 
 	shutdownOTel func(context.Context) error
 }
 
 // BootServer builds every dependency and returns a wired [Server].
-func BootServer(ctx context.Context, cfg *config.Config) (*Server, error) {
+func BootServer(ctx context.Context, cfg *config.Config, opts ...Option) (*Server, error) {
+	o := newOptions()
+	for _, opt := range opts {
+		opt(o)
+	}
+
 	log := logger.New(cfg.Log)
 
 	tp, mp, shutdownOTel, err := telemetry.Setup(ctx, cfg.Telemetry, log)
@@ -134,106 +136,14 @@ func BootServer(ctx context.Context, cfg *config.Config) (*Server, error) {
 	}
 	kernel.AddCloser(pool)
 
-	userStore := user.NewStore(cfg.DB, pool)
-	orgStore := org.NewStore(cfg.DB, pool, pgConn)
-	projectStore := project.NewStore(cfg.DB, pool, pgConn)
-	todoStore := todo.NewStore(cfg.DB, pool, pgConn)
-	inviteStore := invite.NewStore(cfg.DB, pool, pgConn)
-	onboardStore := onboard.NewStore(cfg.DB, pool)
-
-	orgs := org.NewService(orgStore, caps, log, reporter.Unexpected)
-	projects := project.NewService(projectStore, log, reporter.Unexpected)
-	todos := todo.NewService(todoStore, log, reporter.Unexpected)
-	onboards := onboard.NewService(onboardStore, log, reporter.Unexpected)
-
-	invitesEnabled := cfg.Mode == config.ModeCloud || cfg.OIDC.Issuer != ""
-
-	sendWorkflow := invite.NewSendWorkflow(
-		inviteStore,
-		mail,
-		strings.TrimRight(cfg.HTTP.BaseURL, "/")+cfg.HTTP.BasePath,
-		log,
-		reporter.Unexpected,
-	)
-	acceptWorkflow := invite.NewAcceptWorkflow(
-		inviteStore,
-		userStoreForInvite{store: userStore},
-		orgStoreForInvite{store: orgStore},
-		log,
-		reporter.Unexpected,
-	)
-	invites := invite.NewService(inviteStore, sendWorkflow, acceptWorkflow, invitesEnabled, log, reporter.Unexpected)
-
-	users := user.NewService(
-		userStore,
-		user.GenesisConfig{Email: cfg.Genesis.Email, Name: cfg.Genesis.Email},
-		log,
-		reporter.Unexpected,
-		user.WithInviteFinder(invites),
-	)
-
-	onboardWorkflow := user.NewOnboardWorkflow(
-		userStore,
-		orgStoreForOnboard{store: orgStore},
-		projectStoreForOnboard{store: projectStore},
-		inviteStoreForOnboard{store: inviteStore},
-		onboardPolicyFrom(cfg),
-		log,
-		reporter.Unexpected,
-	)
-
-	genesisHash, err := hashGenesisPassword(cfg.Genesis.Password)
+	svcs, err := buildServices(cfg, kernel, caps)
 	if err != nil {
 		_ = pool.Close()
 		_ = shutdownOTel(context.Background())
-		return nil, fmt.Errorf("boot: hash genesis password: %w", err)
+		return nil, err
 	}
-	local := auth.NewLocalLogin(
-		userStoreForAuth{store: userStore},
-		auth.Genesis{
-			Email:        cfg.Genesis.Email,
-			PasswordHash: genesisHash,
-			Name:         cfg.Genesis.Email,
-		},
-		log,
-		reporter.Unexpected,
-		auth.WithLocalNotFound(user.IsNotFoundError),
-	)
 
-	oidcOpts := []auth.OIDCOption{
-		auth.WithSignupRequired(user.IsSignupRequiredError),
-	}
-	if cfg.Mode == config.ModeSelfhosted {
-		oidcOpts = append(oidcOpts, auth.WithAllowSignup(func(ctx context.Context, email string) error {
-			if req, rerr := onboards.Required(ctx); rerr == nil && req {
-				return nil
-			}
-			return users.CheckOIDCSignupEligibility(ctx, email)
-		}))
-	}
-	oidcLogin := auth.NewOIDCLogin(
-		func(ctx context.Context, claims auth.EnsureClaims) (*auth.UserRef, bool, error) {
-			u, err := users.EnsureFromOIDC(ctx, user.Claims(claims))
-			if err != nil {
-				return nil, false, err
-			}
-			return &auth.UserRef{ID: u.ID, Email: u.Email, Name: u.Name, Source: u.Source, Locale: u.Locale, TermsAcceptedAt: u.TermsAcceptedAt}, false, nil
-		},
-		func(ctx context.Context, req auth.OnboardRequest) (auth.OnboardResult, error) {
-			res, err := onboardWorkflow.Onboard(ctx, req.UserID, req.Email)
-			if err != nil {
-				return auth.OnboardResult{}, err
-			}
-			return auth.OnboardResult{OrgID: res.OrgID, ProjectID: res.ProjectID}, nil
-		},
-		log,
-		reporter.Unexpected,
-		oidcOpts...,
-	)
-
-	auths := auth.NewService(local, oidcLogin, log, reporter.Unexpected)
-
-	onboarded, err := bootstrap(ctx, cfg, users, orgs, projects, onboards, log)
+	onboarded, err := bootstrap(ctx, cfg, svcs.Users, svcs.Orgs, svcs.Projects, svcs.Onboards, log)
 	if err != nil {
 		_ = pool.Close()
 		_ = shutdownOTel(context.Background())
@@ -241,7 +151,7 @@ func BootServer(ctx context.Context, cfg *config.Config) (*Server, error) {
 	}
 	caps.OnboardingRequired = !onboarded
 	if !caps.LocalIdentity {
-		has, hErr := users.HasLocalUsers(ctx)
+		has, hErr := svcs.Users.HasLocalUsers(ctx)
 		if hErr != nil {
 			log.Warn("boot: HasLocalUsers probe failed", slog.String("err", hErr.Error()))
 		} else if has {
@@ -250,16 +160,47 @@ func BootServer(ctx context.Context, cfg *config.Config) (*Server, error) {
 	}
 	kernel.Caps = caps
 
+	health := db.NewHealthMonitor(pool, cfg.DB.Health, log, kernel.Meter)
+	if pErr := health.Probe(ctx); pErr != nil {
+		log.Warn("boot: initial db health probe failed", slog.String("err", pErr.Error()))
+	}
+
 	sup := worker.New(log)
+	sup.Register(health)
 	if cfg.Telemetry.Metrics.Prometheus.Enabled {
 		sup.Register(telemetry.PrometheusWorker(cfg.Telemetry.Metrics.Prometheus, log))
 	}
 
-	apiSrv := api.New(cfg, kernel, auths, users, orgs, projects, todos, invites, todoStore)
-	var apiHandler http.Handler
-	if cfg.API.Enabled {
-		apiHandler = apiSrv.Handler(cfg.HTTP.BasePath)
+	var runner *scheduler.Runner
+	switch {
+	case !o.scheduler:
+		log.Info("boot: scheduler disabled by WithScheduler(false)")
+	case !cfg.Scheduler.Enabled:
+		log.Info("boot: scheduler disabled by scheduler.enabled=false")
+	default:
+		r, hasTenantJobs, sErr := buildScheduler(cfg, kernel, svcs, log)
+		if sErr != nil {
+			_ = pool.Close()
+			_ = shutdownOTel(context.Background())
+			return nil, sErr
+		}
+		warnIfTenantJobsCannotSeeTenants(cfg, hasTenantJobs, log)
+		runner = r
+		sup.Register(runner)
 	}
+
+	if o.schedulerOnly && runner == nil {
+		disabledBy := "scheduler.enabled=false"
+		if !o.scheduler {
+			disabledBy = "WithScheduler(false)"
+		}
+		_ = pool.Close()
+		_ = shutdownOTel(context.Background())
+		return nil, fmt.Errorf(
+			"boot: --scheduler-only requires the scheduler, but the scheduler is disabled by %s", disabledBy)
+	}
+
+	apiSrv, apiHandler := buildAPIHandler(cfg, kernel, svcs)
 
 	bundle, defaultLoc, err := buildI18nBundle(cfg)
 	if err != nil {
@@ -268,131 +209,39 @@ func BootServer(ctx context.Context, cfg *config.Config) (*Server, error) {
 		return nil, err
 	}
 
+	healthOK := health.Ready
+
 	required := &atomic.Bool{}
 	required.Store(!onboarded)
-	webHandler := buildWebHandler(cfg, kernel, caps, log, reporter,
-		auths, users, orgs, projects, todos, invites, onboards, required, apiHandler, bundle, defaultLoc)
+	webHandler := buildWebHandler(cfg, kernel, caps, log, reporter, healthOK,
+		svcs.Auth, svcs.Users, svcs.Orgs, svcs.Projects, svcs.Todos, svcs.Invites, svcs.Onboards, required, apiHandler, bundle, defaultLoc)
 
-	sup.Register(worker.HTTP("http", cfg.HTTP.Addr, webHandler, log))
+	httpHandler := webHandler
+	if o.schedulerOnly {
+		httpHandler = healthOnlyHandler(cfg, healthOK)
+	}
+	sup.Register(worker.HTTP("http", cfg.HTTP.Addr, httpHandler, log))
 
 	return &Server{
 		Cfg:          cfg,
 		Caps:         caps,
 		Platform:     kernel,
-		Auth:         auths,
-		Users:        users,
-		Orgs:         orgs,
-		Projects:     projects,
-		Todos:        todos,
-		Invites:      invites,
-		Onboards:     onboards,
+		Auth:         svcs.Auth,
+		Users:        svcs.Users,
+		Orgs:         svcs.Orgs,
+		Projects:     svcs.Projects,
+		Todos:        svcs.Todos,
+		Invites:      svcs.Invites,
+		Onboards:     svcs.Onboards,
 		Onboarded:    onboarded,
-		Onboard:      onboardWorkflow,
+		Onboard:      svcs.Onboard,
 		Web:          webHandler,
 		API:          apiSrv,
+		Scheduler:    runner,
+		Health:       health,
 		Supervisor:   sup,
 		shutdownOTel: shutdownOTel,
 	}, nil
-}
-
-func buildWebHandler(
-	cfg *config.Config,
-	kernel *platform.Kernel,
-	caps capabilities.Capabilities,
-	slogger *slog.Logger,
-	reporter *apperror.Reporter,
-	auths *auth.Service,
-	users *user.Service,
-	orgs *org.Service,
-	projects *project.Service,
-	todos *todo.Service,
-	invites *invite.Service,
-	onboards *onboard.Service,
-	required *atomic.Bool,
-	apiHandler http.Handler,
-	bundle *i18npkg.Bundle,
-	defaultLoc i18npkg.Locale,
-) http.Handler {
-	deps := newWebDeps(cfg, caps, kernel.Sessions, slogger)
-	deps.Orgs = orgs
-	deps.Projects = projects
-	deps.I18n = bundle
-
-	authHandler := webhandlers.NewAuthHandler(deps, auths, users, orgs, projects, kernel.AltAuth, required)
-	onboardingHandler := webhandlers.NewOnboardingHandler(deps, users)
-	onboardHandler := webhandlers.NewOnboardHandler(deps, users, orgs, projects, onboards, required)
-	homeHandler := webhandlers.NewHomeHandler(deps, orgs, projects)
-	orgHandler := webhandlers.NewOrgHandler(deps, orgs)
-	projectHandler := webhandlers.NewProjectHandler(deps, projects)
-	todoHandler := webhandlers.NewTodoHandler(deps, projects, todos)
-	inviteHandler := webhandlers.NewInviteHandler(deps, orgs, invites)
-	localeHandler := webhandlers.NewLocaleHandler(deps, users)
-	welcomeHandler := webhandlers.NewWelcomeHandler(deps, users)
-	signupHandler := webhandlers.NewSignupHandler(deps, users, orgs, projects)
-	legalHandler := webhandlers.NewLegalHandler(deps)
-
-	errTmpl := webmw.LogError{Log: slogger}
-
-	return web.NewServer(web.ServerOpts{
-		BasePath: cfg.HTTP.BasePath,
-		AppHandlers: []web.Register{
-			authHandler, onboardingHandler, onboardHandler, homeHandler, orgHandler, projectHandler, todoHandler, inviteHandler, localeHandler, welcomeHandler, signupHandler, legalHandler,
-		},
-		APIHandler: apiHandler,
-		RobotsCfg:  &struct{ RobotsTxt string }{RobotsTxt: cfg.HTTP.RobotsTxt},
-		Middlewares: []web.Middleware{
-			webmw.RequestID,
-			webmw.RequestLog(slogger),
-			webmw.OTel,
-			webmw.Recover(reporter.Unexpected, errTmpl),
-			webmw.Session(webmw.SessionConfig{
-				Store:  kernel.Sessions,
-				Secret: []byte(cfg.HTTP.StateSecret),
-			}),
-			i18npkg.Middleware(i18npkg.MiddlewareOpts{
-				Bundle:     bundle,
-				Default:    defaultLoc,
-				UserLookup: sessionLocaleLookup,
-			}),
-			webhandlers.OnboardingGate(cfg.HTTP.BasePath, required),
-			webhandlers.WelcomeGate(cfg.HTTP.BasePath, cfg.Compliance.RequireAcceptance),
-		},
-	})
-}
-
-func buildI18nBundle(cfg *config.Config) (*i18npkg.Bundle, i18npkg.Locale, error) {
-	tag := cfg.I18n.DefaultLocale
-	if tag == "" {
-		tag = string(i18npkg.EnUS)
-	}
-	tmp := i18npkg.NewEmbeddedBundle(i18npkg.EnUS)
-	loc, err := tmp.Parse(tag)
-	if err != nil {
-		return nil, "", fmt.Errorf("i18n: default locale %q not among embedded locales", tag)
-	}
-	return i18npkg.NewEmbeddedBundle(loc), loc, nil
-}
-
-func sessionLocaleLookup(ctx context.Context) string {
-	return session.PrincipalFrom(ctx).Locale
-}
-
-func newWebDeps(cfg *config.Config, caps capabilities.Capabilities, sessions session.Store, slogger *slog.Logger) webhandlers.Deps {
-	return webhandlers.Deps{
-		Cfg:      cfg,
-		Caps:     caps,
-		Sessions: sessions,
-		Logger:   stdlog.New(logSlogWriter{log: slogger}, "", 0),
-	}
-}
-
-type logSlogWriter struct{ log *slog.Logger }
-
-func (w logSlogWriter) Write(p []byte) (int, error) {
-	if w.log != nil {
-		w.log.Info(strings.TrimRight(string(p), "\n"))
-	}
-	return len(p), nil
 }
 
 // Run starts every registered worker and blocks until ctx is cancelled or a worker fails.
@@ -471,24 +320,6 @@ func resolveStateSecret(cfg *config.Config, log *slog.Logger) ([]byte, error) {
 	}
 	log.Warn("http.stateSecret is empty — using an ephemeral secret; set ALT_HTTP_STATE_SECRET to persist")
 	return ephemeral, nil
-}
-
-func onboardPolicyFrom(cfg *config.Config) user.Policy {
-	policyMode := user.PolicyModeCloud
-	if cfg.Mode == config.ModeSelfhosted {
-		policyMode = user.PolicyModeSelfhosted
-	}
-	return user.Policy{
-		Mode:             policyMode,
-		SingletonOrgSlug: cfg.Tenant.SingletonOrg.Slug,
-	}
-}
-
-func hashGenesisPassword(plain string) (string, error) {
-	if strings.TrimSpace(plain) == "" {
-		return "", nil
-	}
-	return password.Hash(plain)
 }
 
 func mailerConfig(m config.MailConfig) mailer.Config {

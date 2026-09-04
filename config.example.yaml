@@ -41,10 +41,32 @@ db:
   connMaxIdleTime: ""
   # env: ALT_DB_CONN_MAX_LIFETIME
   connMaxLifetime: ""
+  # env: ALT_DB_CONNECT_BACKOFF
+  connectBackoff: 250ms
+  # env: ALT_DB_CONNECT_TIMEOUT
+  connectTimeout: 30s
   # [required, bootstrap] env: ALT_DB_DRIVER
   driver: sqlite
   # [required, secret] env: ALT_DB_DSN
   dsn: ""
+  health:
+    # env: ALT_DB_HEALTH_INTERVAL
+    interval: 30s
+    # env: ALT_DB_HEALTH_TIMEOUT
+    timeout: 2s
+  maintenance:
+    # env: ALT_DB_MAINTENANCE_CONN_MAX_IDLE_TIME
+    connMaxIdleTime: ""
+    # env: ALT_DB_MAINTENANCE_CONN_MAX_LIFETIME
+    connMaxLifetime: ""
+    # [secret, bootstrap] env: ALT_DB_MAINTENANCE_DSN
+    dsn: ""
+    # env: ALT_DB_MAINTENANCE_MAX_IDLE_CONNS
+    maxIdleConns: ""
+    # env: ALT_DB_MAINTENANCE_MAX_OPEN_CONNS
+    maxOpenConns: 2
+    # [bootstrap] env: ALT_DB_MAINTENANCE_ROLE
+    role: ""
   # env: ALT_DB_MAX_IDLE_CONNS
   maxIdleConns: ""
   # env: ALT_DB_MAX_OPEN_CONNS
@@ -156,6 +178,14 @@ oidc:
   resource: ""
   # env: ALT_OIDC_SCOPES
   scopes: openid,email,profile
+
+scheduler:
+  # [bootstrap] env: ALT_SCHEDULER_ENABLED
+  enabled: true
+  # env: ALT_SCHEDULER_SHUTDOWN_GRACE
+  shutdownGrace: 30s
+  # [bootstrap] env: ALT_SCHEDULER_TIMEZONE
+  timezone: UTC
 
 session:
   # env: ALT_SESSION_PATH

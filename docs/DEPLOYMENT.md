@@ -76,6 +76,33 @@ ALT_DB_ALLOW_BYPASS_RLS=false
 
 Boot fails if the runtime role has `BYPASSRLS` and `db.allowBypassRLS` is `false`.
 
+### Maintenance role
+
+Tenant-scoped scheduler jobs must first ask "which tenants exist?" — a
+question no single tenant's scope can answer. `altempl_service` is
+`NOBYPASSRLS`, so under `tenant.rlsEnforce=true` it sees zero orgs. That is
+what `db.maintenance.dsn` is for: a fourth credential used only for
+cross-tenant maintenance reads.
+
+Grant it narrowly — `BYPASSRLS` and **read-only**:
+
+```sql
+CREATE ROLE altempl_maint LOGIN PASSWORD '<maint-pw>' BYPASSRLS;
+GRANT CONNECT ON DATABASE altempl TO altempl_maint;
+GRANT USAGE ON SCHEMA public TO altempl_maint;
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO altempl_maint;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO altempl_maint;
+```
+
+```
+ALT_DB_MAINTENANCE_DSN=postgres://altempl_maint:<maint-pw>@host:5432/altempl?sslmode=require
+```
+
+Leaving `db.maintenance.dsn` empty under `tenant.rlsEnforce=true` makes every
+tenant-scoped job **silently no-op** — tenant enumeration returns zero rows,
+so the job runs, reports success, and touches nothing. Boot logs a warning
+when it detects this combination; treat that warning as a misconfiguration.
+
 ## Reader replica
 
 `db.Pool{W, R}` wraps writer + reader. SQLite always aliases `R` to `W`.
@@ -108,6 +135,23 @@ root — NOT under `http.basePath`. This is deliberate:
 - Public reverse proxies typically route only `example.com/<basePath>/*`
   to altempl, so `/healthz` stays off the public surface by default.
 
+`/healthz` is liveness: it returns 200 whenever the process is serving, and
+never touches the database. Do not point a DB-dependent probe at it.
+
+`/readyz` is readiness: 200 only when every DB handle passed the most
+recent probe, 503 otherwise. Boot probes once synchronously before the
+listener accepts traffic, so `/readyz` is accurate from the very first
+request — no unready window on rollout. The `db-health` worker then
+refreshes the snapshot every `db.health.interval`, so readiness lags a DB
+outage by up to one interval; lower the interval if you need it tighter.
+
+`db-health` is a standalone `Worker` on the same `Supervisor` as the HTTP
+listener, not a scheduler job. It runs in **every** replica regardless of
+`scheduler.enabled` or `serve --no-scheduler`, so `/readyz` is DB-aware in
+every deployment shape. Each replica probes its own pool; the snapshot is
+never shared. A probe failure is logged and the worker keeps ticking — it
+never escalates to the notification sinks and never fails the process.
+
 Public status page needed? Add the proxy route explicitly:
 
 ```nginx
@@ -116,6 +160,51 @@ location = /altempl/healthz { proxy_pass http://altempl:5150/healthz; }
 
 `altempl healthz` is a self-contained probe binary (works in distroless,
 no `curl` needed) — the compose/k8s healthcheck.
+
+## Scheduler
+
+Jobs run in-process, registered as one `Worker` on the same `Supervisor` as
+the HTTP listener. `altempl scheduler list` prints what is registered.
+
+**Multiple replicas.** A job is either singleton or per-replica, and the
+choice is per job, not per deployment:
+
+| Job                       | Singleton | Runs on                                                            |
+| ------------------------- | --------- | ------------------------------------------------------------------ |
+| `todo-autocomplete-stale` | yes       | exactly one replica per tick — the one that wins the advisory lock |
+
+Scale replicas freely. Do not try to designate a "scheduler replica" for
+correctness; leader election is per tick, in Postgres.
+
+**Leader election** uses `pg_try_advisory_lock` on the writer handle. No
+migration and no lock table — nothing to provision. Under
+`driver: sqlite` the locker is a no-op, since there is one writing process.
+
+**Pool sizing caveat.** An advisory lock is session-scoped, so each
+in-flight singleton job **pins one writer connection** for its whole run.
+If `db.maxOpenConns` is capped at all, it must exceed the number of
+concurrent singleton jobs, or a job will block waiting for a connection it
+can never get while holding none. `0` (unlimited) is unaffected.
+
+**`--scheduler-only` as a deployment shape.** `altempl serve
+--scheduler-only` runs the jobs and nothing else — no web UI, no API. It
+still binds `http.addr` and still serves `/healthz` and `/readyz` — the
+`db-health` worker runs here too — so the same orchestrator probes and the
+same `altempl healthz` healthcheck work unchanged. `--scheduler-only` requires the scheduler: combined with
+`scheduler.enabled=false` (or `WithScheduler(false)`) it is rejected at
+boot, because the process would serve probes and do no work.
+
+Pick one of two shapes for the request-serving replicas, and know what each
+costs:
+
+- **Scheduler in-process everywhere** (the default; no `--no-scheduler`).
+  Job load shares the latency path, but singleton jobs still run on exactly
+  one replica per tick.
+- **`serve --no-scheduler` on the serving replicas**, paired with a
+  `--scheduler-only` job replica. This keeps job load off the latency path.
+
+Readiness is not a factor in that choice: `db-health` is a worker, not a
+job, so `/readyz` stays DB-aware in both shapes.
 
 ## Observability
 

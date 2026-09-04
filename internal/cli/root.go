@@ -13,7 +13,7 @@ import (
 )
 
 // ServerBootFn boots the fully-wired server graph (DB, migrations, services).
-type ServerBootFn func(ctx context.Context, cfg *config.Config) (*boot.Server, error)
+type ServerBootFn func(ctx context.Context, cfg *config.Config, opts ...boot.Option) (*boot.Server, error)
 
 // ClientBootFn boots the minimal client graph used by remote-facing subcommands.
 type ClientBootFn func(ctx context.Context, cfg *config.Config, token string) (*boot.Client, error)
@@ -85,6 +85,7 @@ func NewRootCmd(bootServer ServerBootFn, bootClient ClientBootFn) *cobra.Command
 		newServeCmd(bootServer),
 		newInitCmd(bootServer),
 		newMigrateCmd(bootServer),
+		newSchedulerCmd(bootServer),
 		newAuthCmd(bootServer, bootClient),
 		newOrgCmd(bootServer, bootClient),
 		newProjectCmd(bootServer, bootClient),

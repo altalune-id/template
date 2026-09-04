@@ -80,3 +80,20 @@ func TestSupervisor_NilLogger(t *testing.T) {
 		t.Fatal("expected New(nil) to fall back to slog.Default()")
 	}
 }
+
+func TestSupervisor_WorkersReportsRegistrationOrder(t *testing.T) {
+	blockUntilDone := func(ctx context.Context) error { <-ctx.Done(); return nil }
+	s := New(nil)
+	s.Register(stubWorker{name: "a", run: blockUntilDone})
+	s.Register(stubWorker{name: "b", run: blockUntilDone})
+
+	got := s.Workers()
+	if len(got) != 2 || got[0].Name() != "a" || got[1].Name() != "b" {
+		t.Fatalf("Workers() = %v, want [a b] in order", got)
+	}
+
+	got[0] = stubWorker{name: "mutated", run: blockUntilDone}
+	if s.Workers()[0].Name() != "a" {
+		t.Fatal("Workers() must return a copy the caller cannot use to mutate the supervisor")
+	}
+}

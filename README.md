@@ -46,7 +46,7 @@ altempl/
 │   ├── invite/, org/, project/, todo/, user/    # domain modules
 │   ├── platform/       # capabilities, config, db, notify, session, tenant, tokens
 │   └── web/            # templ + htmx handlers, icons, i18n
-├── logger/, mailer/, nanoid/, reqid/, telemetry/, worker/   # exported roots
+├── logger/, mailer/, nanoid/, reqid/, scheduler/, telemetry/, worker/   # exported roots
 ├── schema/             # embedded goose migrations + RLS guard
 └── version/            # build-time version info
 ```
@@ -55,15 +55,16 @@ altempl/
 
 Safe for external Go projects to import:
 
-| Package     | Purpose                                                           |
-| ----------- | ----------------------------------------------------------------- |
-| `authl`     | OIDC client + PKCE loopback                                       |
-| `reqid`     | UUIDv7 request-ID propagation                                     |
-| `nanoid`    | 21-char nanoid generator                                          |
-| `worker`    | Supervisor + Worker interface + HTTP/Func adapters                |
-| `logger`    | `slog.Handler` — auto-attaches request_id/trace_id, key redaction |
-| `telemetry` | OTel tracer + meter + Prometheus reader                           |
-| `mailer`    | SMTP + template mail                                              |
+| Package     | Purpose                                                                 |
+| ----------- | ----------------------------------------------------------------------- |
+| `authl`     | OIDC client + PKCE loopback                                             |
+| `reqid`     | UUIDv7 request-ID propagation                                           |
+| `nanoid`    | 21-char nanoid generator                                                |
+| `worker`    | Supervisor + Worker interface + HTTP/Func adapters                      |
+| `scheduler` | Cron/interval job runner — system and per-tenant scope, leader election |
+| `logger`    | `slog.Handler` — auto-attaches request_id/trace_id, key redaction       |
+| `telemetry` | OTel tracer + meter + Prometheus reader                                 |
+| `mailer`    | SMTP + template mail                                                    |
 
 Pre-1.0.0: minor releases may break; pin exact versions. Post-1.0.0:
 exported surface is frozen, additive changes only. Everything under
@@ -92,6 +93,7 @@ Invite issuance requires `mode=cloud` or `oidc.issuer` set. `/signup/complete` r
 | [`docs/MODULE_TEMPLATE.md`](docs/MODULE_TEMPLATE.md)     | adding a domain module                              |
 | [`docs/PLATFORM_TEMPLATE.md`](docs/PLATFORM_TEMPLATE.md) | adding a platform primitive                         |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md)                     | workflow, testing, release                          |
+| [`GLOSSARY.md`](GLOSSARY.md)                             | one concept, one name — canonical terminology       |
 | [`AGENTS.md`](AGENTS.md)                                 | rules for AI coding agents                          |
 
 ## License

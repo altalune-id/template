@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/stretchr/testify/require"
 )
 
 func TestNew(t *testing.T) {
@@ -85,6 +86,25 @@ func TestListOpts_ValueSemantics(t *testing.T) {
 	if zero.Done != nil {
 		t.Fatal("zero ListOpts should have nil Done")
 	}
+}
+
+func TestNew_SetsUpdatedAtToCreatedAt(t *testing.T) {
+	got, err := New(uuid.New(), uuid.New(), "write the spec")
+	require.NoError(t, err)
+	require.Equal(t, got.CreatedAt, got.UpdatedAt)
+}
+
+func TestToggle_BumpsUpdatedAt(t *testing.T) {
+	got, err := New(uuid.New(), uuid.New(), "write the spec")
+	require.NoError(t, err)
+	before := got.UpdatedAt
+
+	got.Toggle()
+
+	require.True(t, got.Done)
+	require.True(t, got.UpdatedAt.After(before) || got.UpdatedAt.Equal(before),
+		"UpdatedAt must not go backwards")
+	require.False(t, got.UpdatedAt.Before(before))
 }
 
 func TestInvalidTitleError_ToAppError(t *testing.T) {

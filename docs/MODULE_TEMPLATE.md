@@ -12,19 +12,26 @@ Reference implementation: `internal/todo/`. When in doubt, copy from there.
 
 Exact names.
 
-| File | Purpose |
-|---|---|
-| `<name>.go` | Aggregate root type + `New()` with invariants + value types |
-| `store.go` | `Store` interface (the driven port) |
-| `errors.go` | Typed error structs + `Is<TypeName>` helpers + `ToAppError()` |
-| `service.go` | `type Service struct` + application methods + `NewService(...)` |
-| `factory.go` | `NewStore(cfg, db, pc) Store` — driver dispatch |
-| `postgres.go` | `postgresStore` on `pgx` via `tenant.PgConn` |
-| `sqlite.go` | `sqliteStore` on `*sql.DB` |
-| `<name>_test.go` | Aggregate invariant tests |
-| `service_test.go` | Application tests using `internal/testutil/fakes.<Name>` |
-| `sqlite_test.go` | SQLite `:memory:` unit tests |
-| `postgres_integration_test.go` | `//go:build integration`; requires `TEST_PG_DSN` |
+| File                           | Purpose                                                         |
+| ------------------------------ | --------------------------------------------------------------- |
+| `<name>.go`                    | Aggregate root type + `New()` with invariants + value types     |
+| `store.go`                     | `Store` interface (the driven port)                             |
+| `errors.go`                    | Typed error structs + `Is<TypeName>` helpers + `ToAppError()`   |
+| `service.go`                   | `type Service struct` + application methods + `NewService(...)` |
+| `factory.go`                   | `NewStore(cfg, db, pc) Store` — driver dispatch                 |
+| `postgres.go`                  | `postgresStore` on `pgx` via `tenant.PgConn`                    |
+| `sqlite.go`                    | `sqliteStore` on `*sql.DB`                                      |
+| `<name>_test.go`               | Aggregate invariant tests                                       |
+| `service_test.go`              | Application tests using `internal/testutil/fakes.<Name>`        |
+| `sqlite_test.go`               | SQLite `:memory:` unit tests                                    |
+| `postgres_integration_test.go` | `//go:build integration`; requires `TEST_PG_DSN`                |
+
+Optional, only when the module has periodic work:
+
+| File                | Purpose                                                                                       |
+| ------------------- | --------------------------------------------------------------------------------------------- |
+| `scheduler.go`      | Optional. `Scheduler` adapter implementing `scheduler.Provider` — one `Job` per periodic task |
+| `scheduler_test.go` | Job metadata + `Run` behaviour, using the module's fake `Store`                               |
 
 Stateful workflows may live in their own file (see Section 3).
 
@@ -192,6 +199,24 @@ becomes its own struct in its own file. Examples:
 
 Rule: function unless it has state or 3+ deps. Then struct with a
 constructor + one primary method. The `Service` composes it.
+
+## 3a. Periodic work
+
+A module with periodic work adds `scheduler.go` holding a `Scheduler`
+struct and `SchedulerJobs() []scheduler.Job` (`scheduler.Provider`).
+Reference impl: `internal/todo/scheduler.go`.
+
+- A `Job.Run` body calls the module's own `Service` — never a `Store`
+  directly, and never another module's internals.
+- Cadence is a package constant in `scheduler.go`, not config. Only the
+  timezone is operator-tunable, via `scheduler.jobs.<name>.timezone`.
+- A `ScopeTenant` job's `Run` receives an **already tenant-bound ctx**:
+  the Runner fans out over tenants and sets the tenant scope before
+  each call, so the job needs no RLS or `org_id` handling of its own.
+- A `ScopeSystem` job runs once per tick with no tenant scope.
+- Register the adapter in `internal/boot/schedulers.go` and add the
+  module to `schedulerDomains` there — the wiring assertion fails the
+  boot if a slot is missing.
 
 ## 4. When to split into subdomains
 

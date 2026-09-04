@@ -13,13 +13,13 @@ import (
 	"altalune.id/template/schema"
 )
 
-func openMigratorDB(cfg *config.Config) (*sql.DB, *config.Config, error) {
+func openMigratorDB(ctx context.Context, cfg *config.Config) (*sql.DB, *config.Config, error) {
 	dbCfg := cfg.DB
 	if cfg.DB.Migrator.DSN != "" {
 		dbCfg.DSN = cfg.DB.Migrator.DSN
 		dbCfg.Role = cfg.DB.Migrator.Role
 	}
-	sqldb, err := db.Open(dbCfg, slog.Default())
+	sqldb, err := db.Open(ctx, dbCfg, slog.Default())
 	if err != nil {
 		return nil, nil, fmt.Errorf("open migrator: %w", err)
 	}
@@ -29,7 +29,7 @@ func openMigratorDB(cfg *config.Config) (*sql.DB, *config.Config, error) {
 }
 
 func runCLIMigrateUp(ctx context.Context, cfg *config.Config, _ ServerBootFn, cmd *cobra.Command) error {
-	sqldb, migCfg, err := openMigratorDB(cfg)
+	sqldb, migCfg, err := openMigratorDB(ctx, cfg)
 	if err != nil {
 		return err
 	}
@@ -78,7 +78,7 @@ func newMigrateStatusCmd(_ ServerBootFn) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			sqldb, migCfg, err := openMigratorDB(cfg)
+			sqldb, migCfg, err := openMigratorDB(cmd.Context(), cfg)
 			if err != nil {
 				return err
 			}
@@ -113,7 +113,7 @@ func newMigrateDownToCmd(_ ServerBootFn) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			sqldb, migCfg, err := openMigratorDB(cfg)
+			sqldb, migCfg, err := openMigratorDB(cmd.Context(), cfg)
 			if err != nil {
 				return err
 			}

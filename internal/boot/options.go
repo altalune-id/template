@@ -1,0 +1,17 @@
+package boot
+
+// Option tunes what BootServer wires and starts.
+type Option func(*options)
+
+type options struct {
+	scheduler     bool
+	schedulerOnly bool
+}
+
+func newOptions() *options { return &options{scheduler: true} }
+
+// WithScheduler enables or disables the periodic-job runner, overriding scheduler.enabled.
+func WithScheduler(on bool) Option { return func(o *options) { o.scheduler = on } }
+
+// WithSchedulerOnly runs the scheduler plus a health-only listener, with no web or API handler.
+func WithSchedulerOnly(on bool) Option { return func(o *options) { o.schedulerOnly = on } }

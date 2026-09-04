@@ -17,7 +17,7 @@ func openDBAndMigrate(ctx context.Context, cfg *config.Config, log *slog.Logger)
 			return db.Pool{}, nil, err
 		}
 	}
-	pool, err := db.OpenPool(cfg.DB, log)
+	pool, err := db.OpenPool(ctx, cfg.DB, log)
 	if err != nil {
 		return db.Pool{}, nil, err
 	}
@@ -37,7 +37,7 @@ func runMigrations(ctx context.Context, cfg *config.Config, log *slog.Logger) er
 		migCfg.DSN = cfg.DB.Migrator.DSN
 		migCfg.Role = cfg.DB.Migrator.Role
 	}
-	migDB, err := db.Open(migCfg, log)
+	migDB, err := db.Open(ctx, migCfg, log)
 	if err != nil {
 		return fmt.Errorf("boot: open migrator: %w", err)
 	}

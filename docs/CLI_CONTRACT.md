@@ -20,8 +20,43 @@ altempl [global flags] <command> [subcommand] [args] [flags]
 
   - Runs the HTTP server (web UI + Connect API + workers) on the configured
     `http.addr`. Blocks until the process is signalled.
-  - No command-scoped flags. All configuration comes from `-c`/`--config` and
-    the `ALT_*` env vars.
+  - Flags:
+    - `--no-scheduler` — start everything except the periodic-job runner.
+    - `--scheduler-only` — run only the periodic-job runner plus a
+      health-endpoint listener. No web UI, no API.
+  - The two are mutually exclusive; passing both is a usage error (`64`).
+  - Everything else comes from `-c`/`--config` and the `ALT_*` env vars.
+
+- `altempl scheduler list`
+
+  - Lists every registered job. Reads the wired runner; does not run anything.
+  - JSON shape (`--output=json`):
+    ```json
+    {
+      "data": [
+        {
+          "name": "todo-autocomplete-stale",
+          "scope": "tenant",
+          "schedule": "cron \"0 */6 * * *\" UTC",
+          "timeout": "2m0s",
+          "singleton": true
+        }
+      ]
+    }
+    ```
+  - Text output is a table: `NAME SCOPE SCHEDULE TIMEOUT SINGLETON`.
+
+- `altempl scheduler run <job>`
+
+  - Runs one job immediately, bypassing its schedule. Exactly one
+    positional argument — the job `name` from `scheduler list`.
+  - A `tenant`-scoped job fans out over every tenant, same as a scheduled tick.
+  - A `singleton` job still takes the cross-process lock first.
+  - Exit codes:
+    - `5` — unknown job.
+    - `6` — the job is already running here, or another replica holds the lock.
+    - `7` — the runner is draining, or the scheduler is disabled
+      (`scheduler.enabled=false`).
 
 - `altempl migrate up`
 
@@ -220,13 +255,15 @@ altempl [global flags] <command> [subcommand] [args] [flags]
     - `--timeout <duration>` — request timeout (default `3s`).
   - JSON shape (`--output=json`):
     ```json
-    { "data": {
+    {
+      "data": {
         "url": "http://127.0.0.1:5150/healthz",
         "status": 200,
         "ok": true,
         "took": "3ms",
         "error": ""
-    } }
+      }
+    }
     ```
 
 - `altempl completion <bash|zsh|fish|powershell>`
@@ -256,16 +293,17 @@ lower-precedence sources.
 
 ## Exit codes
 
-| Code | Meaning                                   |
-| ---- | ----------------------------------------- |
-| 0    | success                                   |
-| 1    | general error                             |
-| 2    | token invalid or expired                  |
-| 3    | forbidden (token valid, wrong scope)      |
-| 4    | validation error (bad input)              |
-| 5    | not found                                 |
-| 6    | conflict (already exists)                 |
-| 64   | usage error (bad flag / missing argument) |
+| Code | Meaning                                                       |
+| ---- | ------------------------------------------------------------- |
+| 0    | success                                                       |
+| 1    | general error                                                 |
+| 2    | token invalid or expired                                      |
+| 3    | forbidden (token valid, wrong scope)                          |
+| 4    | validation error (bad input)                                  |
+| 5    | not found                                                     |
+| 6    | conflict (already exists)                                     |
+| 7    | failed precondition (onboarding required, scheduler draining) |
+| 64   | usage error (bad flag / missing argument)                     |
 
 Exit codes are derived from the response's `apperror.AppError.GRPCCode()`
 (see `internal/cli/exit.go` and `internal/apperror/codes.go`). Unknown

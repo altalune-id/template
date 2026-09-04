@@ -101,6 +101,15 @@ func walkForEnvKeys(out *[]EnvKey, envPrefix, yamlPrefix string, t reflect.Type,
 		for ft.Kind() == reflect.Pointer {
 			ft = ft.Elem()
 		}
+		if ft.Kind() == reflect.Map {
+			et := ft.Elem()
+			for et.Kind() == reflect.Pointer {
+				et = et.Elem()
+			}
+			if et.Kind() == reflect.Struct && !isLeafType(et) {
+				continue
+			}
+		}
 		if ft.Kind() == reflect.Struct && !isLeafType(ft) {
 			walkForEnvKeys(out, envPrefix, yamlKey, ft, awareness)
 			continue
