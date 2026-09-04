@@ -127,6 +127,15 @@ linters:
             - go.opentelemetry.io/otel
             - github.com/robfig/cron/v3
             - altalune.id/template/reqid
+        httpclient-purity:
+          list-mode: strict
+          files:
+            - "**/httpclient/*.go"
+            - "!**/httpclient/*_test.go"
+          allow:
+            - $gostd
+            - github.com/go-resty/resty/v2
+            - go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp
         application-purity:
           list-mode: lax
           files:
@@ -174,6 +183,7 @@ linters:
             - "**/logger/**"
             - "**/telemetry/**"
             - "**/mailer/**"
+            - "**/httpclient/**"
           deny:
             - pkg: "altalune.id/template/internal"
               desc: "root-level shared packages must NOT depend on any internal/ package (import inversion)"
@@ -221,6 +231,10 @@ linters:
       # version/version.go holds -ldflags-injected build metadata; these MUST be
       # package-level vars so `go build -ldflags -X ...` can stamp them.
       - path: version/version\.go
+        linters:
+          - gochecknoglobals
+      # httpclient/safe.go holds the immutable SSRF deny-prefix table.
+      - path: httpclient/safe\.go
         linters:
           - gochecknoglobals
 

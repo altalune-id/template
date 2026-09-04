@@ -147,9 +147,7 @@ func (c *Client) authorizeURL(p *pkce, prompt, loginHint string) string {
 }
 
 func (c *Client) exchange(ctx context.Context, code, verifier, nonce string) (*Identity, error) {
-	if c.cfg.HTTPClient != nil {
-		ctx = context.WithValue(ctx, oauth2.HTTPClient, c.cfg.HTTPClient)
-	}
+	ctx = context.WithValue(ctx, oauth2.HTTPClient, c.cfg.HTTPClient)
 
 	opts := []oauth2.AuthCodeOption{oauth2.SetAuthURLParam("code_verifier", verifier)}
 	if c.cfg.Resource != "" {

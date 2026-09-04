@@ -66,3 +66,35 @@ func TestReadCookie_Present(t *testing.T) {
 	r.AddCookie(&http.Cookie{Name: "k", Value: "v"})
 	assert.Equal(t, "v", readCookie(r, "k"))
 }
+
+func TestApplyConfigDefaults_FillsHTTPClient(t *testing.T) {
+	cfg := Config{}
+	applyConfigDefaults(&cfg)
+
+	require.NotNil(t, cfg.HTTPClient)
+	assert.Positive(t, cfg.HTTPClient.Timeout, "http.DefaultClient has no timeout, so a stalled OP would hang discovery forever")
+}
+
+func TestApplyConfigDefaults_PreservesHTTPClient(t *testing.T) {
+	own := &http.Client{Timeout: time.Second}
+	cfg := Config{HTTPClient: own}
+	applyConfigDefaults(&cfg)
+
+	assert.Same(t, own, cfg.HTTPClient)
+}
+
+func TestApplyConfigDefaults_HTTPClientReachesLoopbackOP(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	cfg := Config{}
+	applyConfigDefaults(&cfg)
+
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, srv.URL, http.NoBody)
+	require.NoError(t, err)
+	resp, err := cfg.HTTPClient.Do(req)
+	require.NoError(t, err, "a Dex or Keycloak on localhost must stay reachable")
+	_ = resp.Body.Close()
+}

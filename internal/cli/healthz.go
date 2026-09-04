@@ -3,14 +3,13 @@ package cli
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net"
-	"net/http"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 
+	"altalune.id/template/httpclient"
 	"altalune.id/template/internal/cli/render"
 )
 
@@ -29,25 +28,14 @@ func newHealthzCmd() *cobra.Command {
 			if target == "" {
 				target = defaultHealthzURL(cmd.Context())
 			}
-			ctx, cancel := context.WithTimeout(cmd.Context(), timeout)
-			defer cancel()
-
-			req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, http.NoBody)
-			if err != nil {
-				return fmt.Errorf("healthz: build request: %w", err)
-			}
-			start := time.Now()
-			resp, doErr := http.DefaultClient.Do(req)
-			elapsed := time.Since(start).Truncate(time.Millisecond)
-			status := 0
+			res, doErr := httpclient.NewProber(httpclient.WithTimeout(timeout)).Probe(cmd.Context(), target)
+			elapsed := res.Elapsed.Truncate(time.Millisecond)
+			status := res.StatusCode
 			probeErr := ""
-			if doErr != nil {
+			if doErr != nil && !httpclient.IsUnhealthyStatusError(doErr) {
 				probeErr = doErr.Error()
-			} else {
-				status = resp.StatusCode
-				_ = resp.Body.Close()
 			}
-			ok := doErr == nil && status >= 200 && status < 300
+			ok := doErr == nil
 
 			switch render.Detect(cmd) {
 			case render.FormatJSON, render.FormatNDJSON:
