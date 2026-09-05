@@ -45,8 +45,8 @@ make compose-nuke        # stop + wipe docker/data/pg
 
 Postgres data lives at `./docker/data/pg` (bind-mounted, `.gitignore`d).
 The stack runs `selfhosted` with `ALT_DB_ALLOW_BYPASS_RLS=true` (RLS off)
-and Mailpit's open SMTP — production settings go under `mail.smtp.*`
-and the three-role split below.
+and Mailpit's open SMTP — production settings go under `mail.smtp.*` (or
+`mail.resend.*` with `mail.driver=resend`) and the three-role split below.
 
 ## Postgres roles
 

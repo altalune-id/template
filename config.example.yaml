@@ -137,6 +137,13 @@ mail:
   driver: console
   # env: ALT_MAIL_FROM
   from: no-reply@altempl.local
+  resend:
+    # [secret] env: ALT_MAIL_RESEND_API_KEY
+    apiKey: ""
+    # env: ALT_MAIL_RESEND_ENDPOINT
+    endpoint: ""
+    # env: ALT_MAIL_RESEND_MAX_ATTEMPTS
+    maxAttempts: 3
   smtp:
     # env: ALT_MAIL_SMTP_HOST
     host: ""

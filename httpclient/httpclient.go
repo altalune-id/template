@@ -27,7 +27,12 @@ func New(opts ...Option) *http.Client {
 	for _, opt := range opts {
 		opt(&s)
 	}
-	return &http.Client{Transport: newTransport(s), Timeout: s.timeout}
+	timeout := s.timeout
+	// SECURITY: only an explicit WithoutTimeout may unbound a client; a zero WithTimeout keeps DefaultTimeout.
+	if s.noTimeout {
+		timeout = 0
+	}
+	return &http.Client{Transport: newTransport(s), Timeout: timeout}
 }
 
 func newTransport(s settings) http.RoundTripper {
@@ -59,6 +64,10 @@ func newTransport(s settings) http.RoundTripper {
 	}
 	if s.otel {
 		rt = otelhttp.NewTransport(rt)
+	}
+	// NOTE: retry wraps the otel transport so every attempt gets its own span.
+	if s.retry.enabled() {
+		rt = &retryTransport{next: rt, policy: s.retry.withDefaults()}
 	}
 	return rt
 }

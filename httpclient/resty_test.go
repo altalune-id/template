@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -105,4 +106,80 @@ func TestNewResty_ResponseBodyLimit(t *testing.T) {
 	})
 	_, err := rc.R().SetContext(t.Context()).Get(srv.URL)
 	require.Error(t, err, "a 4KB body must not be buffered under a 16 byte cap")
+}
+
+func TestNewResty_BackoffHonoursBaseDelayFloor(t *testing.T) {
+	const base = 200 * time.Millisecond
+
+	for run := range 5 {
+		var (
+			mu     sync.Mutex
+			stamps []time.Time
+		)
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			mu.Lock()
+			stamps = append(stamps, time.Now())
+			n := len(stamps)
+			mu.Unlock()
+			if n == 1 {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+		}))
+
+		rc := httpclient.NewResty(httpclient.RestyOptions{
+			AllowPrivateHosts: true,
+			Retry:             httpclient.RetryPolicy{MaxAttempts: 2, BaseDelay: base, MaxDelay: 5 * time.Second},
+		})
+		_, err := rc.R().SetContext(t.Context()).Get(srv.URL)
+		require.NoError(t, err)
+		srv.Close()
+
+		mu.Lock()
+		require.Len(t, stamps, 2)
+		gap := stamps[1].Sub(stamps[0])
+		mu.Unlock()
+		require.GreaterOrEqual(t, gap, base, "run %d retried after %v; BaseDelay is a floor on this path too", run, gap)
+	}
+}
+
+func TestNewResty_FirstBackoffJitters(t *testing.T) {
+	const base = 120 * time.Millisecond
+
+	var lowest, highest time.Duration = time.Hour, 0
+	for range 8 {
+		var (
+			mu     sync.Mutex
+			stamps []time.Time
+		)
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			mu.Lock()
+			stamps = append(stamps, time.Now())
+			n := len(stamps)
+			mu.Unlock()
+			if n == 1 {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+		}))
+
+		rc := httpclient.NewResty(httpclient.RestyOptions{
+			AllowPrivateHosts: true,
+			Retry:             httpclient.RetryPolicy{MaxAttempts: 2, BaseDelay: base, MaxDelay: 5 * time.Second},
+		})
+		_, err := rc.R().SetContext(t.Context()).Get(srv.URL)
+		require.NoError(t, err)
+		srv.Close()
+
+		mu.Lock()
+		require.Len(t, stamps, 2)
+		gap := stamps[1].Sub(stamps[0])
+		mu.Unlock()
+		lowest, highest = min(lowest, gap), max(highest, gap)
+	}
+
+	require.Greater(t, highest-lowest, base/4,
+		"first-retry delays spanned only %v, so clients retry in lockstep", highest-lowest)
 }
