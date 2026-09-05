@@ -7,7 +7,23 @@ DECLARE
   wrong_seq    int;
   missing_defs int;
   offenders    text;
+  maint_bypass bool;
 BEGIN
+  SELECT rolbypassrls
+    INTO maint_bypass
+    FROM pg_roles
+   WHERE rolname = '@@APP@@_maintenance';
+
+  IF maint_bypass IS NULL THEN
+    RAISE EXCEPTION 'verify: role @@APP@@_maintenance does not exist'
+      USING HINT = 'Re-run bootstrap. Tenant-scoped jobs need it to enumerate orgs past RLS.';
+  END IF;
+
+  IF NOT maint_bypass THEN
+    RAISE EXCEPTION 'verify: @@APP@@_maintenance lacks BYPASSRLS'
+      USING HINT = 'ALTER ROLE @@APP@@_maintenance BYPASSRLS; without it tenant sweeps see zero orgs.';
+  END IF;
+
   SELECT count(*),
          string_agg(format('%I(%I)', c.relname, r.rolname), ', ')
     INTO wrong_owned, offenders

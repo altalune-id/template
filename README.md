@@ -64,7 +64,7 @@ Safe for external Go projects to import:
 | `scheduler` | Cron/interval job runner — system and per-tenant scope, leader election |
 | `logger`    | `slog.Handler` — auto-attaches request_id/trace_id, key redaction       |
 | `telemetry` | OTel tracer + meter + Prometheus reader                                 |
-| `mailer`    | SMTP + template mail                                                    |
+| `mailer`    | Transactional mail — `console`, `smtp`, `resend` drivers                |
 
 Pre-1.0.0: minor releases may break; pin exact versions. Post-1.0.0:
 exported surface is frozen, additive changes only. Everything under

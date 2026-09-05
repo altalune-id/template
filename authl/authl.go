@@ -39,7 +39,7 @@ type Config struct {
 	CookiePath   string // default "/"
 
 	TokenAuthStyle oauth2.AuthStyle // default AuthStyleInHeader (client_secret_basic)
-	HTTPClient     *http.Client     // default http.DefaultClient
+	HTTPClient     *http.Client     // default: httpclient.New with private hosts allowed
 }
 
 // Identity is the verified callback result passed to OnComplete.
@@ -88,11 +88,7 @@ func NewClient(ctx context.Context, cfg Config) (*Client, error) {
 
 	applyConfigDefaults(&cfg)
 
-	discoverCtx := ctx
-	if cfg.HTTPClient != nil {
-		discoverCtx = oidc.ClientContext(ctx, cfg.HTTPClient)
-	}
-	provider, err := oidc.NewProvider(discoverCtx, cfg.Issuer)
+	provider, err := oidc.NewProvider(oidc.ClientContext(ctx, cfg.HTTPClient), cfg.Issuer)
 	if err != nil {
 		return nil, fmt.Errorf("authl: discover %q: %w", cfg.Issuer, err)
 	}

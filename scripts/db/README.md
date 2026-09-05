@@ -7,7 +7,7 @@ on Neon, RDS, CloudSQL, Supabase, and self-hosted.
 
 - `provision.sh` — entry point. Creates the DB, renders templates for a given
   app prefix, runs bootstrap + ops.
-- `bootstrap.template.sql` — six-role graph, ownership, default privileges.
+- `bootstrap.template.sql` — seven-role graph, ownership, default privileges.
 - `ops.template.sql` — SECURITY DEFINER procedures for day-2 role/user ops.
 - `verify.template.sql` — post-migration invariant check.
 
@@ -27,10 +27,20 @@ provider admin  (neondb_owner / postgres / rds_superuser)
     ├── <app>_editor    NOLOGIN group — SELECT + UPDATE for humans
     ├── <app>_reader    NOLOGIN group — SELECT via pg_read_all_data
     └── <app>_ops       NOLOGIN group — EXECUTE on ops procedures
+
+<app>_maintenance  LOGIN BYPASSRLS — read-only cross-tenant reads
 ```
 
 Only `<app>_migrator` does DDL. `<app>_service` does DML. Humans in `_editor`
 edit rows, `_reader` reads, `_ops` manages other humans.
+
+`<app>_maintenance` stands outside the `_owner` tree — it owns nothing and
+only reads. Tenant-scoped scheduler jobs enumerate every org, which the
+`FORCE ROW LEVEL SECURITY` policy on `orgs` hides from `<app>_service`;
+`BYPASSRLS` is the only attribute that lifts it (owning the table does not,
+and `pg_read_all_data` alone does not either). Export it as
+`ALT_DB_MAINTENANCE_DSN`. Creating it requires an admin that itself has
+`BYPASSRLS` or `SUPERUSER`.
 
 ## Quick start
 
@@ -44,7 +54,7 @@ non-interactively.
 
 ## Provider notes
 
-- **Neon**: `ADMIN_URL` uses the *direct* endpoint (not `-pooler` — pooling
+- **Neon**: `ADMIN_URL` uses the _direct_ endpoint (not `-pooler` — pooling
   drops the DDL and `SET ROLE`). Runtime services should use the pooled
   endpoint.
 - **RDS / CloudSQL / self-hosted**: single endpoint; connect as your admin.
@@ -104,6 +114,7 @@ sed "s/@@APP@@/$APP/g" scripts/db/bootstrap.template.sql | \
   psql --single-transaction \
        -v migrator_password="$MIG_PW" \
        -v service_password="$SVC_PW" \
+       -v maintenance_password="$MNT_PW" \
        "$ADMIN_URL/authdb"
 
 sed "s/@@APP@@/$APP/g" scripts/db/ops.template.sql | \
@@ -120,5 +131,6 @@ APP=auth sed "s/@@APP@@/$APP/g" scripts/db/verify.template.sql \
   | psql "$ADMIN_URL/authdb"
 ```
 
-Fails loudly if any `public.*` object isn't owned by `<app>_owner` or if
-default privileges are missing.
+Fails loudly if any `public.*` object isn't owned by `<app>_owner`, if
+default privileges are missing, or if `<app>_maintenance` is absent or has
+lost `BYPASSRLS`.

@@ -7,6 +7,8 @@ import (
 
 	"github.com/coreos/go-oidc/v3/oidc"
 	"golang.org/x/oauth2"
+
+	"altalune.id/template/httpclient"
 )
 
 func applyConfigDefaults(cfg *Config) {
@@ -31,6 +33,10 @@ func applyConfigDefaults(cfg *Config) {
 	if cfg.TokenAuthStyle == oauth2.AuthStyleAutoDetect {
 		// Force HTTP Basic per RFC 6749 Section 2.3.1; oauth2's AutoDetect tries client_secret_post first.
 		cfg.TokenAuthStyle = oauth2.AuthStyleInHeader
+	}
+	if cfg.HTTPClient == nil {
+		// SECURITY: the SSRF filter stays off — the issuer is operator-configured and routinely cluster-local.
+		cfg.HTTPClient = httpclient.New(httpclient.WithAllowPrivateHosts(true))
 	}
 }
 

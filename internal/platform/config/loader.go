@@ -120,6 +120,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("mail.from", "no-reply@altempl.local")
 	v.SetDefault("mail.smtp.port", 587)
 	v.SetDefault("mail.smtp.tls", true)
+	v.SetDefault("mail.resend.maxAttempts", 3)
 
 	v.SetDefault("tenant.rlsEnforce", true)
 	v.SetDefault("tenant.personalOrgSlugFallback", "personal")

@@ -12,6 +12,7 @@ require (
 	github.com/coreos/go-oidc/v3 v3.11.0
 	github.com/go-jet/jet/v2 v2.13.0
 	github.com/go-playground/validator/v10 v10.30.3
+	github.com/go-resty/resty/v2 v2.17.2
 	github.com/go-viper/mapstructure/v2 v2.5.0
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.10.0

@@ -4,11 +4,12 @@ import (
 	"bytes"
 	"context"
 	"log/slog"
-	"net"
 	"net/http"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"altalune.id/template/httpclient"
 )
 
 const (
@@ -38,12 +39,12 @@ func newWebhookSink(kind, url string, log *slog.Logger) *webhookSink {
 		kind: kind,
 		url:  url,
 		log:  log,
-		client: &http.Client{
-			Timeout: webhookTotalTimeout,
-			Transport: &http.Transport{
-				DialContext: (&net.Dialer{Timeout: webhookDialTimeout}).DialContext,
-			},
-		},
+		// SECURITY: the SSRF filter stays off — sink URLs are operator-configured and routinely cluster-local.
+		client: httpclient.New(
+			httpclient.WithAllowPrivateHosts(true),
+			httpclient.WithDialTimeout(webhookDialTimeout),
+			httpclient.WithTimeout(webhookTotalTimeout),
+		),
 		q: make(chan []byte, webhookQueueCap),
 	}
 	s.wg.Add(1)

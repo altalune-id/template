@@ -131,9 +131,10 @@ type ObservabilityConfig struct {
 
 // MailConfig configures the transactional mailer. NOTE: mirrors legacy config.MailConfig until the mailer package publishes its own.
 type MailConfig struct {
-	Driver string     `yaml:"driver" mapstructure:"driver"`
-	From   string     `yaml:"from"   mapstructure:"from"`
-	SMTP   SMTPConfig `yaml:"smtp"   mapstructure:"smtp"`
+	Driver string       `yaml:"driver" mapstructure:"driver"`
+	From   string       `yaml:"from"   mapstructure:"from"`
+	SMTP   SMTPConfig   `yaml:"smtp"   mapstructure:"smtp"`
+	Resend ResendConfig `yaml:"resend" mapstructure:"resend"`
 }
 
 // SMTPConfig configures the SMTP driver used by MailConfig.
@@ -143,6 +144,13 @@ type SMTPConfig struct {
 	User string `yaml:"user" mapstructure:"user"`
 	Pass string `yaml:"pass" mapstructure:"pass" awareness:"secret"`
 	TLS  bool   `yaml:"tls"  mapstructure:"tls"`
+}
+
+// ResendConfig configures the Resend driver used by MailConfig. https://resend.com/docs/api-reference/emails/send-email
+type ResendConfig struct {
+	APIKey      string `yaml:"apiKey"      mapstructure:"apiKey"      awareness:"secret"`
+	Endpoint    string `yaml:"endpoint"    mapstructure:"endpoint"`
+	MaxAttempts int    `yaml:"maxAttempts" mapstructure:"maxAttempts" validate:"gte=0,lte=10"`
 }
 
 // SchedulerConfig tunes the periodic-job runner. Job cadences are baked into each domain's scheduler adapter, not exposed here.

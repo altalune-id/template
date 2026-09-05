@@ -333,5 +333,10 @@ func mailerConfig(m config.MailConfig) mailer.Config {
 			Pass: m.SMTP.Pass,
 			TLS:  m.SMTP.TLS,
 		},
+		Resend: mailer.ResendConfig{
+			APIKey:      m.Resend.APIKey,
+			Endpoint:    m.Resend.Endpoint,
+			MaxAttempts: m.Resend.MaxAttempts,
+		},
 	}
 }
