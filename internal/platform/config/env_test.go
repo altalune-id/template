@@ -265,3 +265,36 @@ func containsAll(haystack, needles []string) bool {
 	}
 	return true
 }
+
+// db.schema defaults to public so postgres migrations render a qualified name; an empty env var
+// cannot clear it, because AutomaticEnv without AllowEmptyEnv reads "" as unset.
+func TestLoad_SchemaDefaultAndOptOut(t *testing.T) {
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.DB.Schema != "public" {
+		t.Errorf("default schema = %q, want public", cfg.DB.Schema)
+	}
+
+	t.Setenv("ALT_DB_SCHEMA", "")
+	envCfg, err := Load("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if envCfg.DB.Schema != "public" {
+		t.Errorf("empty env schema = %q; an empty env var must not be mistaken for an opt-out", envCfg.DB.Schema)
+	}
+
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("db:\n  schema: \"\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fileCfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fileCfg.DB.Schema != "" {
+		t.Errorf("file schema = %q, want empty; the config file is the only working opt-out", fileCfg.DB.Schema)
+	}
+}

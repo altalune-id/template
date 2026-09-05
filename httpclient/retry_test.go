@@ -776,3 +776,27 @@ func TestNew_TimeoutBounds(t *testing.T) {
 		})
 	}
 }
+
+func TestRestyRetry_UnbuiltRequestDoesNotPanic(t *testing.T) {
+	rc := NewResty(RestyOptions{Retry: fastPolicy(3, false)})
+
+	require.NotPanics(t, func() {
+		_, err := rc.R().SetContext(t.Context()).Get("http://[::1]:namedport/x")
+		require.Error(t, err, "a malformed URL must surface as an error, not a retry")
+	})
+}
+
+func TestRestyRetry_TransportErrorStillRetries(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	dead := srv.URL
+	srv.Close()
+
+	var attempts atomic.Int64
+	p := fastPolicy(3, false)
+	p.OnRetry = func(RetryAttempt) { attempts.Add(1) }
+	rc := NewResty(RestyOptions{AllowPrivateHosts: true, Retry: p})
+
+	_, err := rc.R().SetContext(t.Context()).Get(dead)
+	require.Error(t, err)
+	require.Positive(t, attempts.Load(), "a refused connection is still worth retrying")
+}

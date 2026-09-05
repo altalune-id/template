@@ -230,11 +230,21 @@ func TestValidate_ModeInvariants(t *testing.T) {
 			wantSub: "",
 		},
 		{
-			name: "selfhosted with genesis password alone is allowed",
+			name: "selfhosted with genesis password alone fails",
 			mutate: func(c *Config) {
 				c.Genesis = GenesisConfig{Password: "x"}
 			},
-			wantSub: "",
+			wantSub: "genesis.password without genesis.email",
+		},
+		{
+			name: "cloud with genesis password alone fails",
+			mutate: func(c *Config) {
+				c.Mode = ModeCloud
+				c.OIDC = OIDCConfig{Issuer: "https://iss.example.com", ClientID: "c", ClientSecret: "s"}
+				c.DB.Driver = "postgres"
+				c.Genesis = GenesisConfig{Password: "x", BreakGlass: true}
+			},
+			wantSub: "genesis.password without genesis.email",
 		},
 	}
 	for _, tc := range tests {

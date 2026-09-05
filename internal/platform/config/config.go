@@ -230,6 +230,9 @@ func validate() *validator.Validate { return v10 }
 
 // validateInvariants enforces conditional and cross-field rules that struct-tag validation can't express — each helper focuses on one rule and emits a specific, actionable error message.
 func validateInvariants(c *Config) error {
+	if err := validateGenesisPasswordNeedsEmail(c); err != nil {
+		return err
+	}
 	switch c.Mode {
 	case ModeSelfhosted:
 		return validateSelfhosted(c)
@@ -283,6 +286,13 @@ func validateCloudDBDriver(c *Config) error {
 func validateCloudGenesisEmail(c *Config) error {
 	if c.Genesis.Email == "" {
 		return errors.New("config: mode=cloud requires genesis.email — first-boot admin identity, matched against OIDC subject email (set ALT_GENESIS_EMAIL)")
+	}
+	return nil
+}
+
+func validateGenesisPasswordNeedsEmail(c *Config) error {
+	if c.Genesis.Password != "" && c.Genesis.Email == "" {
+		return errors.New("config: genesis.password without genesis.email — no account is created, so the password is silently ignored (set ALT_GENESIS_EMAIL, or unset ALT_GENESIS_PASSWORD)")
 	}
 	return nil
 }

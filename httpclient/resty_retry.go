@@ -40,8 +40,10 @@ func restyResponseRetryAfter(resp *resty.Response) time.Duration {
 // SECURITY: resty applies a condition to every method, so the idempotency check below is the only thing keeping POST off the ladder.
 func restyRetryCondition(p RetryPolicy) resty.RetryConditionFunc {
 	return func(resp *resty.Response, err error) bool {
+		// NOTE: resty hands back a nil response only when the request was never built, and its own
+		// SetRetryResetReaders path dereferences that nil — so this branch must never retry.
 		if resp == nil || resp.Request == nil {
-			return err != nil && retryableResult(nil, err)
+			return false
 		}
 		if !methodReplayable(p, resp.Request.Method) {
 			return false
