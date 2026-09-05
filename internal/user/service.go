@@ -21,8 +21,9 @@ var tracer trace.Tracer = otel.Tracer("altalune.id/template/internal/user")
 
 // GenesisConfig names the built-in admin identity used by EnsureGenesis.
 type GenesisConfig struct {
-	Email string
-	Name  string
+	Email    string
+	Name     string
+	Password string
 }
 
 // Claims is the subset of an OIDC identity token used by EnsureFromOIDC.
@@ -177,6 +178,13 @@ func (s *Service) EnsureGenesis(ctx context.Context) (*User, error) {
 	u, err := New(s.genesis.Email, s.genesis.Name, SourceGenesis)
 	if err != nil {
 		return nil, err
+	}
+	if pw := strings.TrimSpace(s.genesis.Password); pw != "" {
+		hash, hashErr := password.Hash(pw)
+		if hashErr != nil {
+			return nil, fmt.Errorf("user.EnsureGenesis: hash: %w", hashErr)
+		}
+		u.PasswordHash = hash
 	}
 	now := time.Now().UTC()
 	u.TermsAcceptedAt = &now

@@ -77,7 +77,7 @@ func buildServices(cfg *config.Config, k *platform.Kernel, caps capabilities.Cap
 
 	users := user.NewService(
 		userStore,
-		user.GenesisConfig{Email: cfg.Genesis.Email, Name: cfg.Genesis.Email},
+		user.GenesisConfig{Email: cfg.Genesis.Email, Name: cfg.Genesis.Email, Password: cfg.Genesis.Password},
 		log,
 		reporter.Unexpected,
 		user.WithInviteFinder(invites),

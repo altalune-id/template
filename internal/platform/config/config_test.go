@@ -171,14 +171,24 @@ func TestValidate_ModeInvariants(t *testing.T) {
 			wantSub: "",
 		},
 		{
-			name: "cloud with break-glass but no password fails",
+			name: "cloud with email only (no password, no break-glass) is allowed",
 			mutate: func(c *Config) {
 				c.Mode = ModeCloud
 				c.OIDC = OIDCConfig{Issuer: "https://iss.example.com", ClientID: "c", ClientSecret: "s"}
 				c.DB.Driver = "postgres"
-				c.Genesis = GenesisConfig{Email: "root@example.com", BreakGlass: true}
+				c.Genesis = GenesisConfig{Email: "root@example.com"}
 			},
-			wantSub: "'required_with'",
+			wantSub: "",
+		},
+		{
+			name: "cloud with password but no break-glass fails",
+			mutate: func(c *Config) {
+				c.Mode = ModeCloud
+				c.OIDC = OIDCConfig{Issuer: "https://iss.example.com", ClientID: "c", ClientSecret: "s"}
+				c.DB.Driver = "postgres"
+				c.Genesis = GenesisConfig{Email: "root@example.com", Password: "s3cret"}
+			},
+			wantSub: "requires genesis.breakGlass",
 		},
 		{
 			name: "cloud without genesis email fails",
@@ -213,18 +223,18 @@ func TestValidate_ModeInvariants(t *testing.T) {
 			wantSub: "singletonOrg.name",
 		},
 		{
-			name: "selfhosted with genesis email without password fails",
+			name: "selfhosted with genesis email alone is allowed",
 			mutate: func(c *Config) {
 				c.Genesis = GenesisConfig{Email: "root@example.com"}
 			},
-			wantSub: "'required_with'",
+			wantSub: "",
 		},
 		{
-			name: "selfhosted with genesis password without email fails",
+			name: "selfhosted with genesis password alone is allowed",
 			mutate: func(c *Config) {
 				c.Genesis = GenesisConfig{Password: "x"}
 			},
-			wantSub: "'required_with'",
+			wantSub: "",
 		},
 	}
 	for _, tc := range tests {

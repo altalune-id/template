@@ -87,6 +87,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("db.driver", "sqlite")
 	v.SetDefault("db.dsn", filepath.Join(homeDir(), ".altempl", "altempl.db"))
 	v.SetDefault("db.autoMigrate", true)
+	v.SetDefault("db.schema", "public")
 	v.SetDefault("db.tablePrefix", "altempl_")
 	v.SetDefault("db.connectTimeout", "30s")
 	v.SetDefault("db.connectBackoff", "250ms")

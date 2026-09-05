@@ -72,8 +72,8 @@ type HTTPConfig struct {
 
 // GenesisConfig configures the built-in admin account.
 type GenesisConfig struct {
-	Email      string `yaml:"email"      mapstructure:"email"      awareness:"bootstrap"           validate:"required_with=Password"`
-	Password   string `yaml:"password"   mapstructure:"password"   awareness:"bootstrap,secret"    validate:"required_with=Email"`
+	Email      string `yaml:"email"      mapstructure:"email"      awareness:"bootstrap"`
+	Password   string `yaml:"password"   mapstructure:"password"   awareness:"bootstrap,secret"`
 	BreakGlass bool   `yaml:"breakGlass" mapstructure:"breakGlass" awareness:"bootstrap,mode:cloud"`
 }
 
@@ -251,6 +251,9 @@ func validateCloud(c *Config) error {
 	if err := validateCloudGenesisEmail(c); err != nil {
 		return err
 	}
+	if err := validateCloudGenesisPasswordBreakGlass(c); err != nil {
+		return err
+	}
 	if err := validateCloudSingletonOrg(c); err != nil {
 		return err
 	}
@@ -280,6 +283,13 @@ func validateCloudDBDriver(c *Config) error {
 func validateCloudGenesisEmail(c *Config) error {
 	if c.Genesis.Email == "" {
 		return errors.New("config: mode=cloud requires genesis.email — first-boot admin identity, matched against OIDC subject email (set ALT_GENESIS_EMAIL)")
+	}
+	return nil
+}
+
+func validateCloudGenesisPasswordBreakGlass(c *Config) error {
+	if c.Genesis.Password != "" && !c.Genesis.BreakGlass {
+		return errors.New("config: mode=cloud with genesis.password requires genesis.breakGlass=true — the /login local form is hidden in cloud otherwise (set ALT_GENESIS_BREAK_GLASS=true, or unset ALT_GENESIS_PASSWORD)")
 	}
 	return nil
 }
