@@ -86,6 +86,7 @@ CREATE TABLE {{.Schema}}.{{.TablePrefix}}todos (
 
 CREATE INDEX {{.TablePrefix}}todos_org_project_created_idx
   ON {{.Schema}}.{{.TablePrefix}}todos (org_id, project_id, created_at DESC);
+{{if .Role}}RESET ROLE;{{end}}
 
 -- +goose StatementEnd
 
@@ -104,5 +105,6 @@ DROP TABLE IF EXISTS {{.Schema}}.{{.TablePrefix}}memberships;
 DROP TABLE IF EXISTS {{.Schema}}.{{.TablePrefix}}orgs;
 DROP INDEX IF EXISTS {{.Schema}}.{{.TablePrefix}}users_idp_idx;
 DROP TABLE IF EXISTS {{.Schema}}.{{.TablePrefix}}users;
+{{if .Role}}RESET ROLE;{{end}}
 
 -- +goose StatementEnd

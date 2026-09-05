@@ -92,7 +92,7 @@ db:
   # [bootstrap] env: ALT_DB_ROLE
   role: ""
   # [bootstrap] env: ALT_DB_SCHEMA
-  schema: ""
+  schema: public
   # [bootstrap] env: ALT_DB_TABLE_PREFIX
   tablePrefix: altempl_
 
