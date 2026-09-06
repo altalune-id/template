@@ -19,10 +19,9 @@ import (
 //nolint:gochecknoglobals // OTel tracer is a package-level fixture, not runtime state.
 var tracer trace.Tracer = otel.Tracer("altalune.id/template/internal/user")
 
-// GenesisConfig names the built-in admin identity used by EnsureGenesis.
+// GenesisConfig names the built-in admin identity reconciled by ReconcileGenesisAdmin.
 type GenesisConfig struct {
 	Email    string
-	Name     string
 	Password string
 }
 
@@ -161,40 +160,40 @@ func (s *Service) HasLocalUsers(ctx context.Context) (bool, error) {
 	return has, nil
 }
 
-// EnsureGenesis idempotently ensures the configured genesis user exists; returns (nil, nil) if unconfigured.
-func (s *Service) EnsureGenesis(ctx context.Context) (*User, error) {
-	ctx, span := tracer.Start(ctx, "user.EnsureGenesis")
+// Outcome reports what ReconcileGenesisAdmin found for the configured genesis address.
+type Outcome string
+
+// Outcomes reported by ReconcileGenesisAdmin.
+const (
+	OutcomeUnconfigured Outcome = "unconfigured"
+	OutcomeSatisfied    Outcome = "satisfied"
+	OutcomeClaimed      Outcome = "claimed"
+	OutcomeUnclaimed    Outcome = "unclaimed"
+)
+
+// ReconcileGenesisAdmin promotes the configured genesis address when a matching user exists, writing nothing otherwise.
+func (s *Service) ReconcileGenesisAdmin(ctx context.Context) (Outcome, error) {
+	ctx, span := tracer.Start(ctx, "user.ReconcileGenesisAdmin")
 	defer span.End()
-	if strings.TrimSpace(s.genesis.Email) == "" {
-		return nil, nil
+
+	email := strings.ToLower(strings.TrimSpace(s.genesis.Email))
+	if email == "" {
+		return OutcomeUnconfigured, nil
 	}
-	existing, err := s.store.ByEmail(ctx, strings.ToLower(strings.TrimSpace(s.genesis.Email)))
-	if err == nil {
-		return existing, nil
-	}
-	if !IsNotFoundError(err) {
-		return nil, s.unexpected(ctx, "user.EnsureGenesis: byEmail", err)
-	}
-	u, err := New(s.genesis.Email, s.genesis.Name, SourceGenesis)
+	u, err := s.store.ByEmail(ctx, email)
 	if err != nil {
-		return nil, err
-	}
-	if pw := strings.TrimSpace(s.genesis.Password); pw != "" {
-		hash, hashErr := password.Hash(pw)
-		if hashErr != nil {
-			return nil, fmt.Errorf("user.EnsureGenesis: hash: %w", hashErr)
+		if IsNotFoundError(err) {
+			return OutcomeUnclaimed, nil
 		}
-		u.PasswordHash = hash
+		return "", s.unexpected(ctx, "user.ReconcileGenesisAdmin: byEmail", err)
 	}
-	now := time.Now().UTC()
-	u.TermsAcceptedAt = &now
-	if err := s.store.Save(ctx, u); err != nil {
-		if IsAlreadyExistsError(err) {
-			return s.store.ByEmail(ctx, u.Email)
-		}
-		return nil, s.unexpected(ctx, "user.EnsureGenesis: save", err)
+	if u.IsAdmin {
+		return OutcomeSatisfied, nil
 	}
-	return u, nil
+	if err := s.Promote(ctx, u.ID); err != nil {
+		return "", err
+	}
+	return OutcomeClaimed, nil
 }
 
 // EnsureFromOIDC upserts the user identified by claims.

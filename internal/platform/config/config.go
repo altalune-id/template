@@ -34,6 +34,7 @@ type Config struct {
 	HTTP          HTTPConfig          `yaml:"http"          mapstructure:"http"`
 	DB            db.DBConfig         `yaml:"db"            mapstructure:"db"`
 	Genesis       GenesisConfig       `yaml:"genesis"       mapstructure:"genesis"       awareness:"bootstrap"`
+	Onboard       OnboardConfig       `yaml:"onboard"       mapstructure:"onboard"`
 	Tenant        TenantConfig        `yaml:"tenant"        mapstructure:"tenant"`
 	OIDC          OIDCConfig          `yaml:"oidc"          mapstructure:"oidc"          awareness:"required,mode:cloud"`
 	Tokens        tokens.Config       `yaml:"tokens"        mapstructure:"tokens"`
@@ -72,9 +73,14 @@ type HTTPConfig struct {
 
 // GenesisConfig configures the built-in admin account.
 type GenesisConfig struct {
-	Email      string `yaml:"email"      mapstructure:"email"      awareness:"bootstrap"`
+	Email      string `yaml:"email"      mapstructure:"email"      awareness:"-"`
 	Password   string `yaml:"password"   mapstructure:"password"   awareness:"bootstrap,secret"`
 	BreakGlass bool   `yaml:"breakGlass" mapstructure:"breakGlass" awareness:"bootstrap,mode:cloud"`
+}
+
+// OnboardConfig configures the first-time setup flow at /onboard.
+type OnboardConfig struct {
+	SetupToken string `yaml:"setupToken" mapstructure:"setupToken" awareness:"-,secret"`
 }
 
 // TenantConfig configures multi-tenant partitioning and RLS-audit inputs.

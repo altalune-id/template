@@ -38,6 +38,8 @@ import (
 	"altalune.id/template/worker"
 )
 
+const setupTokenLen = 32
+
 // Server is the fully-wired dependency graph produced by BootServer.
 type Server struct {
 	Cfg      *config.Config
@@ -55,6 +57,9 @@ type Server struct {
 	Onboard *user.OnboardWorkflow
 
 	Onboarded bool
+
+	// SetupToken gates /onboard while onboarding is still required; empty once onboarded.
+	SetupToken string
 
 	Web        http.Handler
 	API        *api.Server
@@ -143,7 +148,7 @@ func BootServer(ctx context.Context, cfg *config.Config, opts ...Option) (*Serve
 		return nil, err
 	}
 
-	onboarded, err := bootstrap(ctx, cfg, svcs.Users, svcs.Orgs, svcs.Projects, svcs.Onboards, log)
+	onboarded, err := bootstrap(ctx, cfg, svcs.Users, svcs.Onboards, log)
 	if err != nil {
 		_ = pool.Close()
 		_ = shutdownOTel(context.Background())
@@ -213,8 +218,21 @@ func BootServer(ctx context.Context, cfg *config.Config, opts ...Option) (*Serve
 
 	required := &atomic.Bool{}
 	required.Store(!onboarded)
+
+	var setup string
+	if required.Load() {
+		t, tErr := setupToken(cfg)
+		if tErr != nil {
+			_ = pool.Close()
+			_ = shutdownOTel(context.Background())
+			return nil, fmt.Errorf("boot: setup token: %w", tErr)
+		}
+		setup = t
+		logSetupToken(cfg, log, setup)
+	}
+
 	webHandler := buildWebHandler(cfg, kernel, caps, log, reporter, healthOK,
-		svcs.Auth, svcs.Users, svcs.Orgs, svcs.Projects, svcs.Todos, svcs.Invites, svcs.Onboards, required, apiHandler, bundle, defaultLoc)
+		svcs.Auth, svcs.Users, svcs.Orgs, svcs.Projects, svcs.Todos, svcs.Invites, svcs.Onboards, required, setup, apiHandler, bundle, defaultLoc)
 
 	httpHandler := webHandler
 	if o.schedulerOnly {
@@ -234,6 +252,7 @@ func BootServer(ctx context.Context, cfg *config.Config, opts ...Option) (*Serve
 		Invites:      svcs.Invites,
 		Onboards:     svcs.Onboards,
 		Onboarded:    onboarded,
+		SetupToken:   setup,
 		Onboard:      svcs.Onboard,
 		Web:          webHandler,
 		API:          apiSrv,
@@ -263,6 +282,31 @@ func (s *Server) Close() error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+func setupToken(cfg *config.Config) (string, error) {
+	if t := strings.TrimSpace(cfg.Onboard.SetupToken); t != "" {
+		return t, nil
+	}
+	return nanoid.New(setupTokenLen)
+}
+
+func logSetupToken(cfg *config.Config, log *slog.Logger, token string) {
+	url := onboardURL(cfg)
+	if strings.TrimSpace(cfg.Onboard.SetupToken) != "" {
+		log.Info("boot: setup required — /onboard is gated by the configured onboard.setupToken",
+			slog.String("url", url))
+		return
+	}
+	// SECURITY: the token rides in the url value because logger.Redact masks any attr key matching /token/,
+	// which would otherwise leave a fresh deployment unable to reach its own setup page.
+	log.Info("boot: setup required — open this one-time onboarding URL",
+		slog.String("url", url+"?token="+token),
+	)
+}
+
+func onboardURL(cfg *config.Config) string {
+	return strings.TrimRight(cfg.HTTP.BaseURL, "/") + cfg.HTTP.BasePath + "/onboard"
 }
 
 // NOTE: path must match "GET /oauth/callback" in internal/web/handlers/auth.go.

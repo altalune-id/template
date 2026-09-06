@@ -74,6 +74,27 @@ func (h *AuthHandler) resolveActiveTenant(ctx context.Context, p session.Princip
 	return p
 }
 
+func (h *AuthHandler) reconcileGenesis(ctx context.Context, p session.Principal) session.Principal {
+	if h.Users == nil {
+		return p
+	}
+	outcome, err := h.Users.ReconcileGenesisAdmin(ctx)
+	if err != nil {
+		h.LogErr("web auth: reconcile genesis admin", err)
+		return p
+	}
+	if p.IsAdmin || outcome == user.OutcomeUnconfigured || outcome == user.OutcomeUnclaimed {
+		return p
+	}
+	u, err := h.Users.ByID(ctx, p.UserID)
+	if err != nil {
+		h.LogErr("web auth: reload user after genesis reconcile", err)
+		return p
+	}
+	p.IsAdmin = u.IsAdmin
+	return p
+}
+
 // localAuthEnabled reports whether the login page should render the local email+password form.
 func (h *AuthHandler) localAuthEnabled(ctx context.Context) bool {
 	if h.Caps.LocalIdentity {
@@ -144,6 +165,7 @@ func (h *AuthHandler) PostLogin(w http.ResponseWriter, r *http.Request) {
 		}))
 		return
 	}
+	principal = h.reconcileGenesis(r.Context(), principal)
 	principal = h.resolveActiveTenant(r.Context(), principal)
 	if err := h.WriteSession(w, r, principal); err != nil {
 		h.ErrorPage(w, r, http.StatusInternalServerError, "Sign-in failed", "Could not persist session.")
@@ -191,6 +213,7 @@ func (h *AuthHandler) OIDCComplete(ctx context.Context, w http.ResponseWriter, r
 		return nil
 	}
 	principal.IDToken = ident.IDToken
+	principal = h.reconcileGenesis(ctx, principal)
 	principal = h.resolveActiveTenant(ctx, principal)
 	if err := h.WriteSession(w, r, principal); err != nil {
 		h.LogErr("web auth: oidc write session", err)

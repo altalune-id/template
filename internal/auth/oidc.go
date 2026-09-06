@@ -148,6 +148,7 @@ func (o *OIDCLogin) Execute(ctx context.Context, claims OIDCClaims) (session.Pri
 		IDPSubject:      claims.Subject,
 		ActiveOrgID:     orgID,
 		ActiveProjectID: projectID,
+		IsAdmin:         u.IsAdmin,
 		Locale:          u.Locale,
 		IssuedAt:        o.now(),
 	}

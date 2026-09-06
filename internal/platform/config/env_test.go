@@ -211,7 +211,7 @@ func TestWalkEnvKeys_Awareness(t *testing.T) {
 		{env: "ALT_DB_DSN", mustHave: []string{"required", "secret"}},
 		{env: "ALT_DB_DRIVER", mustHave: []string{"required", "bootstrap"}},
 		{env: "ALT_OIDC_CLIENT_SECRET", mustHave: []string{"required", "mode:cloud", "secret"}},
-		{env: "ALT_GENESIS_EMAIL", mustHave: []string{"bootstrap"}},
+		{env: "ALT_ONBOARD_SETUP_TOKEN", mustHave: []string{"secret"}},
 		{env: "ALT_GENESIS_PASSWORD", mustHave: []string{"bootstrap", "secret"}},
 		{env: "ALT_MAIL_SMTP_PASS", mustHave: []string{"secret"}},
 	}

@@ -65,6 +65,7 @@ func (s userStoreForAuth) ByEmail(ctx context.Context, email string) (*auth.User
 		Email:           u.Email,
 		Name:            u.Name,
 		Source:          u.Source,
+		IsAdmin:         u.IsAdmin,
 		Locale:          u.Locale,
 		PasswordHash:    u.PasswordHash,
 		TermsAcceptedAt: u.TermsAcceptedAt,
@@ -77,6 +78,7 @@ func (s userStoreForAuth) Save(ctx context.Context, u *auth.UserRef) error {
 		Email:        u.Email,
 		Name:         u.Name,
 		Source:       u.Source,
+		IsAdmin:      u.IsAdmin,
 		PasswordHash: u.PasswordHash,
 	})
 }

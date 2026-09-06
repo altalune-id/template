@@ -37,25 +37,51 @@ Every `.env.example` field carries a marker in `[brackets]`:
 | Org creation from UI | disabled               | enabled                                              |
 | Public signup        | disabled               | enabled                                              |
 
-Onboarding, first-org seeding, and admin bootstrap are uniform across modes.
+Onboarding and admin bootstrap differ by _identity mechanism_, not by mode.
+Mode only decides which mechanisms are enabled.
+
+| Identity          | How the first admin is established                                   | Reversible by config?  |
+| ----------------- | -------------------------------------------------------------------- | ---------------------- |
+| OIDC              | `genesis.email` is a standing claim, applied on first matching login | Yes, until claimed     |
+| Local password    | The `/onboard` form — a human types it and consents                  | N/A, human-driven      |
+| Local, unattended | `genesis.email` + `genesis.password`, seeded once, never overwritten | No, one-shot by design |
 
 ## First-boot
 
+Boot writes nothing. It reconciles the genesis claim and reports:
+
 ```
-onboarded row exists?    → skip; boot into dashboard
-GENESIS_EMAIL empty?     → all web routes → /onboard
-GENESIS_EMAIL set?       → create admin + first org + first project; mark onboarded
+bootstrap row exists?      → skip; boot into dashboard
+genesis.email matches an admin?     → satisfied, silent
+genesis.email matches a non-admin?  → promote, log "genesis admin promoted"
+genesis.email matches nobody?       → log a warning every boot until claimed
+genesis.email empty?                → nothing to reconcile
 ```
 
-Bootstrap seeds use `ALT_TENANT_SINGLETON_ORG_SLUG` (default `default`),
+The first org, its owner membership and the bootstrap row are created on
+first login or through `/onboard` — not at boot. `orgs.created_by` is
+`NOT NULL REFERENCES users(id)`, so there is no org to create until a user
+exists. Seeds use `ALT_TENANT_SINGLETON_ORG_SLUG` (default `default`),
 `ALT_TENANT_SINGLETON_ORG_NAME` (default `Default Organization`), and
-`ALT_TENANT_PERSONAL_PROJECT_SLUG` (default `default`) — both modes.
+`ALT_TENANT_PERSONAL_PROJECT_SLUG` (default `default`).
 
-**The `/onboard` form** — shown when no genesis env vars are set. Local
-path (email + password + org + project → dashboard) is available when
-`caps.LocalIdentity` is on; OIDC path (provider roundtrip → app creates
-first org + project) when `caps.ExternalIdentity` is on. Cloud shows only
-OIDC by default; selfhosted shows both.
+**Changing `genesis.email` after boot** takes effect on the next boot: the
+claim is re-evaluated every time, so a typo is corrected by fixing the env
+var. A previously claimed admin keeps its `is_admin` flag — demote it in the
+app. This is why `genesis.email` is not a `bootstrap` value.
+
+**The `/onboard` form** is gated by a one-time setup token. When
+`onboard.setupToken` is unset, boot mints one and logs the ready-to-use URL:
+
+```
+boot: setup required — open this one-time onboarding URL url=https://host/onboard?token=<token>
+```
+
+Pin it with `ALT_ONBOARD_SETUP_TOKEN` for automated installs; a pinned token
+is never echoed to the logs. Local path (email + password + org + project →
+dashboard) is available when `caps.LocalIdentity` is on; OIDC path when
+`caps.ExternalIdentity` is on. Cloud shows only OIDC by default; selfhosted
+shows both.
 
 **Cloud + genesis + break-glass** — setting `ALT_GENESIS_EMAIL` +
 `ALT_GENESIS_PASSWORD` in cloud requires `ALT_GENESIS_BREAK_GLASS=true`.
