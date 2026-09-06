@@ -262,3 +262,18 @@ func IsCreationDisabledError(err error) bool {
 	_, ok := errors.AsType[*CreationDisabledError](err)
 	return ok
 }
+
+// UnreadableExistingOrgError reports a slug that already exists but is invisible to the current tenant scope.
+type UnreadableExistingOrgError struct {
+	Slug string
+}
+
+func (e *UnreadableExistingOrgError) Error() string {
+	return fmt.Sprintf("org: %q already exists but is not visible under the current tenant scope — the row belongs to a different org id (row-level security)", e.Slug)
+}
+
+// IsUnreadableExistingOrgError reports whether err (or anything it wraps) is an UnreadableExistingOrgError.
+func IsUnreadableExistingOrgError(err error) bool {
+	var target *UnreadableExistingOrgError
+	return errors.As(err, &target)
+}
