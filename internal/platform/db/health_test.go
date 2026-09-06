@@ -25,7 +25,7 @@ func TestHealthMonitor_NotReadyBeforeFirstProbe(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = sqlDB.Close() })
 
-	m := db.NewHealthMonitor(db.Pool{W: sqlDB, R: sqlDB, M: sqlDB}, healthCfg(), testHealthLogger(), nil)
+	m := db.NewHealthMonitor(db.Pool{W: sqlDB, R: sqlDB}, healthCfg(), testHealthLogger(), nil)
 	require.False(t, m.Ready(), "readiness must be false until the first probe lands")
 	require.Nil(t, m.Snapshot())
 }
@@ -36,7 +36,7 @@ func TestHealthMonitor_ProbeSuccess(t *testing.T) {
 	t.Cleanup(func() { _ = sqlDB.Close() })
 	mock.ExpectPing()
 
-	m := db.NewHealthMonitor(db.Pool{W: sqlDB, R: sqlDB, M: sqlDB}, healthCfg(), testHealthLogger(), nil)
+	m := db.NewHealthMonitor(db.Pool{W: sqlDB, R: sqlDB}, healthCfg(), testHealthLogger(), nil)
 	require.NoError(t, m.Probe(t.Context()))
 
 	require.True(t, m.Ready())
@@ -55,7 +55,7 @@ func TestHealthMonitor_ProbeFailureClearsReadiness(t *testing.T) {
 	t.Cleanup(func() { _ = sqlDB.Close() })
 	mock.ExpectPing().WillReturnError(context.DeadlineExceeded)
 
-	m := db.NewHealthMonitor(db.Pool{W: sqlDB, R: sqlDB, M: sqlDB}, healthCfg(), testHealthLogger(), nil)
+	m := db.NewHealthMonitor(db.Pool{W: sqlDB, R: sqlDB}, healthCfg(), testHealthLogger(), nil)
 	require.Error(t, m.Probe(t.Context()))
 
 	require.False(t, m.Ready())
@@ -76,7 +76,7 @@ func TestHealthMonitor_ProbesEachDistinctHandle(t *testing.T) {
 	wm.ExpectPing()
 	rm.ExpectPing()
 
-	m := db.NewHealthMonitor(db.Pool{W: writer, R: reader, M: writer}, healthCfg(), testHealthLogger(), nil)
+	m := db.NewHealthMonitor(db.Pool{W: writer, R: reader}, healthCfg(), testHealthLogger(), nil)
 	require.NoError(t, m.Probe(t.Context()))
 
 	snap := m.Snapshot()
@@ -91,7 +91,7 @@ func TestHealthMonitor_IsAStandaloneWorker(t *testing.T) {
 	t.Cleanup(func() { _ = sqlDB.Close() })
 
 	var w worker.Worker = db.NewHealthMonitor(
-		db.Pool{W: sqlDB, R: sqlDB, M: sqlDB}, healthCfg(), testHealthLogger(), nil)
+		db.Pool{W: sqlDB, R: sqlDB}, healthCfg(), testHealthLogger(), nil)
 	require.Equal(t, "db-health", w.Name())
 }
 
@@ -101,7 +101,7 @@ func TestHealthMonitor_RunProbesOnceBeforeTheFirstTick(t *testing.T) {
 	t.Cleanup(func() { _ = sqlDB.Close() })
 	mock.ExpectPing()
 
-	m := db.NewHealthMonitor(db.Pool{W: sqlDB, R: sqlDB, M: sqlDB}, healthCfg(), testHealthLogger(), nil)
+	m := db.NewHealthMonitor(db.Pool{W: sqlDB, R: sqlDB}, healthCfg(), testHealthLogger(), nil)
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
 	go func() { done <- m.Run(ctx) }()
@@ -117,7 +117,7 @@ func TestHealthMonitor_RunSwallowsProbeFailures(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = sqlDB.Close() })
 
-	m := db.NewHealthMonitor(db.Pool{W: sqlDB, R: sqlDB, M: sqlDB},
+	m := db.NewHealthMonitor(db.Pool{W: sqlDB, R: sqlDB},
 		db.HealthConfig{Interval: time.Millisecond, Timeout: 50 * time.Millisecond},
 		testHealthLogger(), nil)
 	ctx, cancel := context.WithCancel(t.Context())
@@ -152,7 +152,7 @@ func TestHealthMonitor_RunClampsNonPositiveConfigToDefaults(t *testing.T) {
 			t.Cleanup(func() { _ = sqlDB.Close() })
 			mock.ExpectPing()
 
-			m := db.NewHealthMonitor(db.Pool{W: sqlDB, R: sqlDB, M: sqlDB}, tt.cfg, testHealthLogger(), nil)
+			m := db.NewHealthMonitor(db.Pool{W: sqlDB, R: sqlDB}, tt.cfg, testHealthLogger(), nil)
 			ctx, cancel := context.WithCancel(t.Context())
 			done := make(chan error, 1)
 			require.NotPanics(t, func() { go func() { done <- m.Run(ctx) }() },
@@ -171,7 +171,7 @@ func TestHealthMonitor_ProbeSucceedsWithZeroConfiguredTimeout(t *testing.T) {
 	t.Cleanup(func() { _ = sqlDB.Close() })
 	mock.ExpectPing()
 
-	m := db.NewHealthMonitor(db.Pool{W: sqlDB, R: sqlDB, M: sqlDB}, db.HealthConfig{}, testHealthLogger(), nil)
+	m := db.NewHealthMonitor(db.Pool{W: sqlDB, R: sqlDB}, db.HealthConfig{}, testHealthLogger(), nil)
 	require.NoError(t, m.Probe(t.Context()))
 	require.True(t, m.Ready())
 	require.NoError(t, mock.ExpectationsWereMet())

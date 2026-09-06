@@ -82,8 +82,8 @@ func TestDBConfig_Validate(t *testing.T) {
 		{"negative connectBackoff", db.DBConfig{Driver: db.DriverSQLite, DSN: ":memory:", ConnectBackoff: -1}, true},
 		{"negative health.interval", db.DBConfig{Driver: db.DriverSQLite, DSN: ":memory:", Health: db.HealthConfig{Interval: -1}}, true},
 		{"negative health.timeout", db.DBConfig{Driver: db.DriverSQLite, DSN: ":memory:", Health: db.HealthConfig{Timeout: -1}}, true},
-		{"negative maintenance.maxOpenConns", db.DBConfig{Driver: db.DriverSQLite, DSN: ":memory:", Maintenance: db.MaintenanceConfig{MaxOpenConns: -1}}, true},
-		{"ok maintenance and health set", db.DBConfig{Driver: db.DriverSQLite, DSN: ":memory:", Maintenance: db.MaintenanceConfig{DSN: "postgres://x", MaxOpenConns: 2}, Health: db.HealthConfig{Interval: 30 * time.Second, Timeout: 2 * time.Second}}, false},
+		{"negative reader.maxOpenConns", db.DBConfig{Driver: db.DriverSQLite, DSN: ":memory:", Reader: db.ReaderConfig{MaxOpenConns: -1}}, true},
+		{"ok reader and health set", db.DBConfig{Driver: db.DriverSQLite, DSN: ":memory:", Reader: db.ReaderConfig{DSN: "postgres://x", MaxOpenConns: 2}, Health: db.HealthConfig{Interval: 30 * time.Second, Timeout: 2 * time.Second}}, false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -109,7 +109,7 @@ func TestOpen_RetriesThenFailsWithinBudget(t *testing.T) {
 	require.GreaterOrEqual(t, time.Since(start), 2*time.Second, "must have retried across the budget")
 }
 
-func TestOpenPool_MaintenanceAliasesWriterWhenUnset(t *testing.T) {
+func TestOpenPool_ReaderAliasesWriterWhenUnset(t *testing.T) {
 	cfg := db.DBConfig{Driver: db.DriverSQLite, DSN: ":memory:"}
 	p, err := db.OpenPool(t.Context(), cfg, nil)
 	require.NoError(t, err)
@@ -117,7 +117,6 @@ func TestOpenPool_MaintenanceAliasesWriterWhenUnset(t *testing.T) {
 
 	require.NotNil(t, p.W)
 	require.Same(t, p.W, p.R, "reader must alias writer when unset")
-	require.Same(t, p.W, p.M, "maintenance must alias writer when unset")
 }
 
 func TestPool_Close_HandlesAliasing(t *testing.T) {
@@ -125,8 +124,8 @@ func TestPool_Close_HandlesAliasing(t *testing.T) {
 		name string
 		pool func(w *sql.DB) db.Pool
 	}{
-		{"all aliased", func(w *sql.DB) db.Pool { return db.Pool{W: w, R: w, M: w} }},
-		{"nil reader and maintenance", func(w *sql.DB) db.Pool { return db.Pool{W: w} }},
+		{"reader aliased", func(w *sql.DB) db.Pool { return db.Pool{W: w, R: w} }},
+		{"nil reader", func(w *sql.DB) db.Pool { return db.Pool{W: w} }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -137,16 +136,16 @@ func TestPool_Close_HandlesAliasing(t *testing.T) {
 	}
 }
 
-func TestPool_Close_ThreeDistinctHandles(t *testing.T) {
+func TestPool_Close_DistinctHandles(t *testing.T) {
 	open := func() *sql.DB {
 		d, err := sql.Open("sqlite", ":memory:")
 		require.NoError(t, err)
 		return d
 	}
-	w, r, m := open(), open(), open()
-	require.NoError(t, db.Pool{W: w, R: r, M: m}.Close())
+	w, r := open(), open()
+	require.NoError(t, db.Pool{W: w, R: r}.Close())
 
-	for name, d := range map[string]*sql.DB{"writer": w, "reader": r, "maintenance": m} {
+	for name, d := range map[string]*sql.DB{"writer": w, "reader": r} {
 		require.Error(t, d.PingContext(t.Context()), "%s must be closed", name)
 	}
 }

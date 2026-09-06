@@ -7,21 +7,25 @@ DECLARE
   wrong_seq    int;
   missing_defs int;
   offenders    text;
-  maint_bypass bool;
+  owner_bypass bool;
 BEGIN
   SELECT rolbypassrls
-    INTO maint_bypass
+    INTO owner_bypass
     FROM pg_roles
-   WHERE rolname = '@@APP@@_maintenance';
+   WHERE rolname = '@@APP@@_owner';
 
-  IF maint_bypass IS NULL THEN
-    RAISE EXCEPTION 'verify: role @@APP@@_maintenance does not exist'
-      USING HINT = 'Re-run bootstrap. Tenant-scoped jobs need it to enumerate orgs past RLS.';
+  IF owner_bypass IS NULL THEN
+    RAISE EXCEPTION 'verify: role @@APP@@_owner does not exist'
+      USING HINT = 'Re-run bootstrap.';
   END IF;
 
-  IF NOT maint_bypass THEN
-    RAISE EXCEPTION 'verify: @@APP@@_maintenance lacks BYPASSRLS'
-      USING HINT = 'ALTER ROLE @@APP@@_maintenance BYPASSRLS; without it tenant sweeps see zero orgs.';
+  IF NOT owner_bypass THEN
+    RAISE EXCEPTION 'verify: @@APP@@_owner lacks BYPASSRLS'
+      USING HINT = 'ALTER ROLE @@APP@@_owner BYPASSRLS; without it the SECURITY DEFINER org readers it owns see zero orgs.';
+  END IF;
+
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '@@APP@@_maintenance') THEN
+    RAISE NOTICE 'verify: @@APP@@_maintenance still exists — retired; drop it once nothing connects as it';
   END IF;
 
   SELECT count(*),
