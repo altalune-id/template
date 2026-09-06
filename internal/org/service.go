@@ -10,6 +10,7 @@ import (
 
 	"altalune.id/template/internal/apperror"
 	"altalune.id/template/internal/platform/capabilities"
+	"altalune.id/template/internal/platform/tenant"
 )
 
 //nolint:gochecknoglobals // OTel tracer is a package-level fixture, not runtime state.
@@ -33,6 +34,11 @@ func NewService(store Store, caps capabilities.Capabilities, log *slog.Logger, u
 func (s *Service) BootstrapSingleton(ctx context.Context, slug, name string, ownerID uuid.UUID) (*Org, error) {
 	ctx, span := tracer.Start(ctx, "org.BootstrapSingleton")
 	defer span.End()
+
+	// NOTE: bootstrap runs before any tenant exists, but the postgres store needs a tenant scope and
+	// the orgs RLS policy is `id = current_setting('app.current_org_id')` — so scope to the org this
+	// call will create, and reuse that id when inserting so the row satisfies its own policy.
+	ctx, orgID := scopeForBootstrap(ctx, ownerID)
 
 	existing, err := s.store.BySlug(ctx, slug)
 	if err == nil {
@@ -71,10 +77,13 @@ func (s *Service) BootstrapSingleton(ctx context.Context, slug, name string, own
 	if err != nil {
 		return nil, err
 	}
+	o.ID = orgID
 	o.System = true
 	if err := s.store.Save(ctx, o); err != nil {
 		if IsAlreadyExistsError(err) {
-			return s.store.BySlug(ctx, slug)
+			// NOTE: the slug exists but the lookup above could not see it — under RLS that means the row
+			// belongs to a different org id, so report it plainly instead of a misleading not-found.
+			return nil, s.unexpected(ctx, "org.BootstrapSingleton: Save", &UnreadableExistingOrgError{Slug: slug}, "slug", slug)
 		}
 		return nil, s.unexpected(ctx, "org.BootstrapSingleton: Save", err, "slug", slug)
 	}
@@ -276,4 +285,13 @@ func (s *Service) ListMemberProfiles(ctx context.Context, orgID uuid.UUID) ([]*M
 		return nil, s.unexpected(ctx, "org.ListMemberProfiles", fmt.Errorf("org.ListMemberProfiles: %w", err), "org_id", orgID.String())
 	}
 	return ps, nil
+}
+
+// scopeForBootstrap returns ctx carrying a tenant scope and the org id that scope names, minting both when absent.
+func scopeForBootstrap(ctx context.Context, ownerID uuid.UUID) (context.Context, uuid.UUID) {
+	if tc, err := tenant.From(ctx); err == nil && tc.OrgID != uuid.Nil {
+		return ctx, tc.OrgID
+	}
+	id := uuid.New()
+	return tenant.Into(ctx, tenant.Context{OrgID: id, UserID: ownerID}), id
 }

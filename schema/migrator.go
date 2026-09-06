@@ -76,7 +76,6 @@ func migrationProvider(sqldb *sql.DB, cfg *config.Config) (*goose.Provider, erro
 	tpl := newTemplatedFS(sub, templateVars{
 		Schema:      cfg.DB.Schema,
 		TablePrefix: cfg.DB.TablePrefix,
-		Role:        cfg.DB.Role,
 		RLSEnforce:  cfg.Tenant.RLSEnforce,
 	})
 	store, err := database.NewStore(dbDialect, migrationsBookkeepingTable(cfg))

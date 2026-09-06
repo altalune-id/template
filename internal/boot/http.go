@@ -52,6 +52,7 @@ func buildWebHandler(
 	invites *invite.Service,
 	onboards *onboard.Service,
 	required *atomic.Bool,
+	setupToken string,
 	apiHandler http.Handler,
 	bundle *i18npkg.Bundle,
 	defaultLoc i18npkg.Locale,
@@ -63,7 +64,7 @@ func buildWebHandler(
 
 	authHandler := webhandlers.NewAuthHandler(deps, auths, users, orgs, projects, kernel.AltAuth, required)
 	onboardingHandler := webhandlers.NewOnboardingHandler(deps, users)
-	onboardHandler := webhandlers.NewOnboardHandler(deps, users, orgs, projects, onboards, required)
+	onboardHandler := webhandlers.NewOnboardHandler(deps, users, orgs, projects, onboards, required, setupToken)
 	homeHandler := webhandlers.NewHomeHandler(deps, orgs, projects)
 	orgHandler := webhandlers.NewOrgHandler(deps, orgs)
 	projectHandler := webhandlers.NewProjectHandler(deps, projects)

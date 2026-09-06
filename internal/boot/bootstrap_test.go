@@ -4,12 +4,12 @@ import (
 	"context"
 	"testing"
 
-	"github.com/google/uuid"
-
 	"altalune.id/template/internal/boot"
+	"altalune.id/template/internal/org"
+	"altalune.id/template/internal/user"
 )
 
-func TestBoot_Bootstrap_SeedsGenesisAndSingletonOrg(t *testing.T) {
+func TestBoot_Bootstrap_UnclaimedGenesisSeedsNothing(t *testing.T) {
 	cfg := newSmokeCfg(t)
 	srv, err := boot.BootServer(context.Background(), cfg)
 	if err != nil {
@@ -17,15 +17,16 @@ func TestBoot_Bootstrap_SeedsGenesisAndSingletonOrg(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = srv.Close() })
 
-	orgs, err := srv.Orgs.List(context.Background(), mustGenesisID(t, srv))
-	if err != nil {
-		t.Fatalf("orgs.List: %v", err)
+	if srv.Onboarded {
+		t.Error("an unclaimed genesis address must leave the deployment un-onboarded")
 	}
-	if len(orgs) != 1 {
-		t.Fatalf("want 1 org for genesis, got %d", len(orgs))
+	if !srv.Caps.OnboardingRequired {
+		t.Error("caps.OnboardingRequired must stay true until someone onboards")
 	}
-	if orgs[0].Slug != "default" {
-		t.Errorf("org slug=%q, want %q", orgs[0].Slug, "default")
+	assertNoSeededOrg(t, srv, cfg.Tenant.SingletonOrg.Slug)
+	assertNoSeededUser(t, srv)
+	if srv.SetupToken == "" {
+		t.Error("a deployment that still needs onboarding must hold a setup token")
 	}
 }
 
@@ -36,7 +37,8 @@ func TestBoot_Bootstrap_Idempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first boot: %v", err)
 	}
-	genesisID := mustGenesisID(t, srv1)
+	firstToken := srv1.SetupToken
+	assertNoSeededUser(t, srv1)
 	_ = srv1.Close()
 
 	srv2, err := boot.BootServer(context.Background(), cfg)
@@ -45,23 +47,41 @@ func TestBoot_Bootstrap_Idempotent(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = srv2.Close() })
 
-	orgs, err := srv2.Orgs.List(context.Background(), genesisID)
-	if err != nil {
-		t.Fatalf("orgs.List: %v", err)
+	if srv2.Onboarded {
+		t.Error("a second boot must not onboard the deployment either")
 	}
-	if len(orgs) != 1 {
-		t.Errorf("expected exactly 1 singleton org after second boot, got %d", len(orgs))
+	assertNoSeededOrg(t, srv2, cfg.Tenant.SingletonOrg.Slug)
+	assertNoSeededUser(t, srv2)
+	if srv2.SetupToken == firstToken {
+		t.Error("each boot must mint a fresh setup token")
 	}
 }
 
-func mustGenesisID(t *testing.T, srv *boot.Server) uuid.UUID {
+func assertNoSeededOrg(t *testing.T, srv *boot.Server, slug string) {
 	t.Helper()
-	u, err := srv.Users.EnsureGenesis(context.Background())
+	o, err := srv.Orgs.BySlug(context.Background(), slug)
+	if err == nil {
+		t.Fatalf("boot must not create an org, got %q", o.Slug)
+	}
+	if !org.IsNotFoundError(err) {
+		t.Fatalf("orgs.BySlug: %v", err)
+	}
+}
+
+func assertNoSeededUser(t *testing.T, srv *boot.Server) {
+	t.Helper()
+	has, err := srv.Users.HasLocalUsers(context.Background())
 	if err != nil {
-		t.Fatalf("EnsureGenesis: %v", err)
+		t.Fatalf("users.HasLocalUsers: %v", err)
 	}
-	if u == nil {
-		t.Fatalf("genesis user unexpectedly nil")
+	if has {
+		t.Error("boot must not create a user row for the genesis address")
 	}
-	return u.ID
+	outcome, err := srv.Users.ReconcileGenesisAdmin(context.Background())
+	if err != nil {
+		t.Fatalf("ReconcileGenesisAdmin: %v", err)
+	}
+	if outcome != user.OutcomeUnclaimed {
+		t.Errorf("outcome=%q, want %q", outcome, user.OutcomeUnclaimed)
+	}
 }

@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"cmp"
+	"crypto/subtle"
 	"net/http"
 	"net/url"
 	"strings"
@@ -23,6 +24,11 @@ import (
 
 const minOnboardPasswordLen = 8
 
+// SetupCookieName carries the /onboard setup token across the OIDC round-trip.
+const SetupCookieName = "altempl_setup"
+
+const setupCookieTTL = 30 * time.Minute
+
 // OnboardHandler renders and processes the first-time bootstrap flow at /onboard.
 type OnboardHandler struct {
 	Deps
@@ -31,6 +37,9 @@ type OnboardHandler struct {
 	Projects *project.Service
 	Onboards *onboard.Service
 	Required *atomic.Bool
+
+	// SetupToken gates every /onboard route while it is non-empty.
+	SetupToken string
 }
 
 // NewOnboardHandler wires the /onboard handler.
@@ -41,14 +50,16 @@ func NewOnboardHandler(
 	projects *project.Service,
 	onboards *onboard.Service,
 	required *atomic.Bool,
+	setupToken string,
 ) *OnboardHandler {
 	return &OnboardHandler{
-		Deps:     d,
-		Users:    users,
-		Orgs:     orgs,
-		Projects: projects,
-		Onboards: onboards,
-		Required: required,
+		Deps:       d,
+		Users:      users,
+		Orgs:       orgs,
+		Projects:   projects,
+		Onboards:   onboards,
+		Required:   required,
+		SetupToken: setupToken,
 	}
 }
 
@@ -61,12 +72,59 @@ func (h *OnboardHandler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /onboard/complete", h.PostOIDCComplete)
 }
 
+// SECURITY: constant-time comparison — the token gates a privileged action and an attacker can retry freely.
+func (h *OnboardHandler) tokenOK(r *http.Request) bool {
+	if h.SetupToken == "" {
+		return true
+	}
+	if constantTimeEqual(r.FormValue("token"), h.SetupToken) {
+		return true
+	}
+	c, err := r.Cookie(SetupCookieName)
+	if err != nil {
+		return false
+	}
+	value, err := web.VerifyCookie(h.SecretBytes(), c.Value)
+	if err != nil {
+		return false
+	}
+	return constantTimeEqual(value, h.SetupToken)
+}
+
+func constantTimeEqual(got, want string) bool {
+	return subtle.ConstantTimeCompare([]byte(got), []byte(want)) == 1
+}
+
+// SECURITY: the refusal never reveals whether a token was supplied but wrong.
+func (h *OnboardHandler) denySetup(w http.ResponseWriter, r *http.Request) {
+	h.ErrorPage(w, r, http.StatusForbidden, "Setup is locked",
+		"First-time setup requires the one-time setup token printed in the server logs.")
+}
+
+func (h *OnboardHandler) rememberSetupToken(w http.ResponseWriter) {
+	if h.SetupToken == "" {
+		return
+	}
+	web.SetCookie(w, web.CookieOpts{
+		Name:         SetupCookieName,
+		Value:        web.SignCookie(h.SecretBytes(), h.SetupToken),
+		BasePath:     h.Cfg.HTTP.BasePath,
+		CookieSecure: h.Cfg.HTTP.CookieSecure,
+		MaxAge:       int(setupCookieTTL.Seconds()),
+	})
+}
+
 // GetOnboard renders the setup page.
 func (h *OnboardHandler) GetOnboard(w http.ResponseWriter, r *http.Request) {
 	if h.Required != nil && !h.Required.Load() {
 		http.Redirect(w, r, web.Path(h.Cfg.HTTP.BasePath, "/"), http.StatusSeeOther)
 		return
 	}
+	if !h.tokenOK(r) {
+		h.denySetup(w, r)
+		return
+	}
+	h.rememberSetupToken(w)
 	Render(w, r, templates.OnboardLayout(h.Base(r, "First-time setup"), h.defaultView()))
 }
 
@@ -76,6 +134,10 @@ func (h *OnboardHandler) GetOnboard(w http.ResponseWriter, r *http.Request) {
 func (h *OnboardHandler) PostLocal(w http.ResponseWriter, r *http.Request) {
 	if h.Required != nil && !h.Required.Load() {
 		http.Redirect(w, r, web.Path(h.Cfg.HTTP.BasePath, "/"), http.StatusSeeOther)
+		return
+	}
+	if !h.tokenOK(r) {
+		h.denySetup(w, r)
 		return
 	}
 	if err := r.ParseForm(); err != nil {
@@ -198,6 +260,11 @@ func (h *OnboardHandler) GetOIDCStart(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, web.Path(h.Cfg.HTTP.BasePath, "/"), http.StatusSeeOther)
 		return
 	}
+	if !h.tokenOK(r) {
+		h.denySetup(w, r)
+		return
+	}
+	h.rememberSetupToken(w)
 	dest := web.Path(h.Cfg.HTTP.BasePath, "/login/oidc") + "?return_to=" + url.QueryEscape(web.Path(h.Cfg.HTTP.BasePath, "/onboard/complete"))
 	http.Redirect(w, r, dest, http.StatusSeeOther)
 }
@@ -206,6 +273,10 @@ func (h *OnboardHandler) GetOIDCStart(w http.ResponseWriter, r *http.Request) {
 func (h *OnboardHandler) GetOIDCComplete(w http.ResponseWriter, r *http.Request) {
 	if h.Required != nil && !h.Required.Load() {
 		http.Redirect(w, r, web.Path(h.Cfg.HTTP.BasePath, "/"), http.StatusSeeOther)
+		return
+	}
+	if !h.tokenOK(r) {
+		h.denySetup(w, r)
 		return
 	}
 	p, _, ok := h.LoadSession(r)
@@ -220,6 +291,10 @@ func (h *OnboardHandler) GetOIDCComplete(w http.ResponseWriter, r *http.Request)
 func (h *OnboardHandler) PostOIDCComplete(w http.ResponseWriter, r *http.Request) {
 	if h.Required != nil && !h.Required.Load() {
 		http.Redirect(w, r, web.Path(h.Cfg.HTTP.BasePath, "/"), http.StatusSeeOther)
+		return
+	}
+	if !h.tokenOK(r) {
+		h.denySetup(w, r)
 		return
 	}
 	p, sid, ok := h.LoadSession(r)
@@ -257,13 +332,11 @@ func (h *OnboardHandler) PostOIDCComplete(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	if strings.TrimSpace(h.Cfg.Genesis.Email) == "" {
-		if err := h.Users.Promote(r.Context(), p.UserID); err != nil {
-			h.LogErr("web onboard: promote oidc admin", err)
-			view.Error = "Could not promote admin."
-			h.render(w, r, view)
-			return
-		}
+	if err := h.Users.Promote(r.Context(), p.UserID); err != nil {
+		h.LogErr("web onboard: promote oidc admin", err)
+		view.Error = "Could not promote admin."
+		h.render(w, r, view)
+		return
 	}
 	o, err := h.Orgs.BootstrapSingleton(r.Context(), orgSlug, orgName, p.UserID)
 	if err != nil {
@@ -318,6 +391,7 @@ func (h *OnboardHandler) oidcFinalizeView(p session.Principal, errMsg string, fi
 		ProjectName:  "Default Project",
 		FieldErrors:  fieldErrs,
 		Error:        errMsg,
+		SetupToken:   h.SetupToken,
 	}
 }
 
@@ -330,6 +404,7 @@ func (h *OnboardHandler) defaultView() templates.OnboardView {
 		ProjectSlug: "default",
 		ProjectName: "Default Project",
 		FieldErrors: map[string]string{},
+		SetupToken:  h.SetupToken,
 	}
 }
 

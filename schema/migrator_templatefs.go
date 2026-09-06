@@ -14,7 +14,6 @@ import (
 type templateVars struct {
 	Schema      string
 	TablePrefix string
-	Role        string
 	RLSEnforce  bool
 }
 
@@ -22,7 +21,6 @@ func (v templateVars) toMap() map[string]any {
 	return map[string]any{
 		"Schema":      v.Schema,
 		"TablePrefix": v.TablePrefix,
-		"Role":        v.Role,
 		"RLSEnforce":  v.RLSEnforce,
 	}
 }

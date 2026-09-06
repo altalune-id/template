@@ -1,6 +1,10 @@
 package templates
 
-import "altalune.id/template/internal/web"
+import (
+	"net/url"
+
+	"altalune.id/template/internal/web"
+)
 
 type OnboardView struct {
 	Error         string
@@ -14,6 +18,7 @@ type OnboardView struct {
 	OrgName       string
 	ProjectSlug   string
 	ProjectName   string
+	SetupToken    string
 }
 
 func fieldErr(m map[string]string, key string) string {
@@ -39,6 +44,7 @@ templ OnboardPage(d web.LayoutData, v OnboardView) {
 					<p class="mt-0.5 truncate font-medium text-foreground">{ v.Email }</p>
 				</div>
 				<form method="post" action={ templ.SafeURL(d.Href("/onboard/complete")) } class="space-y-8" novalidate>
+					@onboardSetupToken(v.SetupToken)
 					<div class="space-y-4">
 						<div class="border-b border-border/50 pb-2">
 							<h2 class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{ d.Tr("onboard.org_section") }</h2>
@@ -61,7 +67,7 @@ templ OnboardPage(d web.LayoutData, v OnboardView) {
 					</button>
 				</form>
 			} else if v.OIDCAuth {
-				<a class="btn-sso" href={ templ.SafeURL(d.Href("/onboard/oidc")) }>
+				<a class="btn-sso" href={ templ.SafeURL(d.Href("/onboard/oidc") + onboardTokenQuery(v.SetupToken)) }>
 					<img class="btn-sso__logo" src={ d.OIDCButtonLogoURL() } alt="" aria-hidden="true" width="24" height="24"/>
 					<span class="btn-sso__label">{ d.OIDCButtonLabel(d.Tr("onboard.oidc_button")) }</span>
 					<span class="btn-sso__chev" aria-hidden="true">→</span>
@@ -77,6 +83,7 @@ templ OnboardPage(d web.LayoutData, v OnboardView) {
 					</div>
 				}
 				<form method="post" action={ templ.SafeURL(d.Href("/onboard/local")) } class="space-y-8" novalidate>
+					@onboardSetupToken(v.SetupToken)
 					<div class="space-y-4">
 						<div class="border-b border-border/50 pb-2">
 							<h2 class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{ d.Tr("onboard.admin_section") }</h2>
@@ -112,6 +119,19 @@ templ OnboardPage(d web.LayoutData, v OnboardView) {
 			}
 		</div>
 	</section>
+}
+
+templ onboardSetupToken(token string) {
+	if token != "" {
+		<input type="hidden" name="token" value={ token }/>
+	}
+}
+
+func onboardTokenQuery(token string) string {
+	if token == "" {
+		return ""
+	}
+	return "?token=" + url.QueryEscape(token)
 }
 
 templ onboardField(id, label, kind, autocomplete, placeholder, value string, errs map[string]string, required bool) {

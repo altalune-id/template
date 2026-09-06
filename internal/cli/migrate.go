@@ -8,17 +8,14 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"altalune.id/template/internal/boot"
 	"altalune.id/template/internal/platform/config"
 	"altalune.id/template/internal/platform/db"
 	"altalune.id/template/schema"
 )
 
 func openMigratorDB(ctx context.Context, cfg *config.Config) (*sql.DB, *config.Config, error) {
-	dbCfg := cfg.DB
-	if cfg.DB.Migrator.DSN != "" {
-		dbCfg.DSN = cfg.DB.Migrator.DSN
-		dbCfg.Role = cfg.DB.Migrator.Role
-	}
+	dbCfg := boot.MigratorDBConfig(cfg)
 	sqldb, err := db.Open(ctx, dbCfg, slog.Default())
 	if err != nil {
 		return nil, nil, fmt.Errorf("open migrator: %w", err)

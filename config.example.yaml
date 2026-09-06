@@ -99,7 +99,7 @@ db:
 genesis:
   # [bootstrap, mode:cloud] env: ALT_GENESIS_BREAK_GLASS
   breakGlass: false
-  # [bootstrap] env: ALT_GENESIS_EMAIL
+  # env: ALT_GENESIS_EMAIL
   email: ""
   # [bootstrap, secret] env: ALT_GENESIS_PASSWORD
   password: ""
@@ -185,6 +185,10 @@ oidc:
   resource: ""
   # env: ALT_OIDC_SCOPES
   scopes: openid,email,profile
+
+onboard:
+  # [secret] env: ALT_ONBOARD_SETUP_TOKEN
+  setupToken: ""
 
 scheduler:
   # [bootstrap] env: ALT_SCHEDULER_ENABLED

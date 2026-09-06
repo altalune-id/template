@@ -2,11 +2,30 @@ package db
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"time"
 )
 
 const maxConnectBackoff = 5 * time.Second
+
+type permanentError struct{ err error }
+
+func (e *permanentError) Error() string { return e.err.Error() }
+
+func (e *permanentError) Unwrap() error { return e.err }
+
+func permanent(err error) error {
+	if err == nil {
+		return nil
+	}
+	return &permanentError{err: err}
+}
+
+func isPermanentError(err error) bool {
+	_, ok := errors.AsType[*permanentError](err)
+	return ok
+}
 
 func attemptWithin(ctx context.Context, remaining time.Duration, attempt func(context.Context) error) error {
 	if remaining <= 0 {
@@ -31,6 +50,9 @@ func retry(ctx context.Context, budget, backoff time.Duration, attempt func(cont
 		err := attemptWithin(ctx, remaining, attempt)
 		if err == nil {
 			return nil
+		}
+		if isPermanentError(err) {
+			return err
 		}
 		lastErr = err
 		if ctxErr := ctx.Err(); ctxErr != nil {

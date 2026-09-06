@@ -26,41 +26,6 @@ func noopUnexpected() apperror.UnexpectedFunc {
 	}
 }
 
-func TestEnsureGenesis_CreatesWhenMissing(t *testing.T) {
-	t.Parallel()
-	store := fakes.NewUser()
-	s := user.NewService(store, user.GenesisConfig{Email: "root@example.com", Name: "Root"}, newTestLogger(), noopUnexpected())
-	u, err := s.EnsureGenesis(context.Background())
-	require.NoError(t, err)
-	require.NotNil(t, u)
-	assert.Equal(t, "root@example.com", u.Email)
-	assert.Equal(t, user.SourceGenesis, u.Source)
-	assert.Equal(t, 1, store.Len())
-}
-
-func TestEnsureGenesis_ReturnsExisting(t *testing.T) {
-	t.Parallel()
-	store := fakes.NewUser()
-	existing, err := user.New("root@example.com", "Root", user.SourceGenesis)
-	require.NoError(t, err)
-	require.NoError(t, store.Save(context.Background(), existing))
-
-	s := user.NewService(store, user.GenesisConfig{Email: "root@example.com", Name: "Root"}, newTestLogger(), noopUnexpected())
-	u, err := s.EnsureGenesis(context.Background())
-	require.NoError(t, err)
-	assert.Equal(t, existing.ID, u.ID)
-	assert.Equal(t, 1, store.Len())
-}
-
-func TestEnsureGenesis_NilWhenNoEmail(t *testing.T) {
-	t.Parallel()
-	store := fakes.NewUser()
-	s := user.NewService(store, user.GenesisConfig{}, newTestLogger(), noopUnexpected())
-	u, err := s.EnsureGenesis(context.Background())
-	require.NoError(t, err)
-	assert.Nil(t, u)
-}
-
 func TestEnsureFromOIDC_CreatesWhenMissing(t *testing.T) {
 	t.Parallel()
 	store := fakes.NewUser()

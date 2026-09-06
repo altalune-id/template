@@ -127,3 +127,18 @@ func TestRetry_HungAttemptsStayWithinBudgetAcrossRetries(t *testing.T) {
 			"the hung second attempt must be clamped to the remaining budget")
 	})
 }
+
+func TestRetry_PermanentErrorStopsImmediately(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		boom := errors.New("role does not exist")
+		var calls int
+		start := time.Now()
+		err := retry(t.Context(), 30*time.Second, time.Second, func(context.Context) error {
+			calls++
+			return permanent(boom)
+		})
+		require.ErrorIs(t, err, boom)
+		require.Equal(t, 1, calls, "a permanent failure must not be retried")
+		require.Equal(t, time.Duration(0), time.Since(start), "a permanent failure must not sleep out the budget")
+	})
+}

@@ -30,13 +30,22 @@ func openDBAndMigrate(ctx context.Context, cfg *config.Config, log *slog.Logger)
 	return pool, tenant.NewPgConn(pool.W), nil
 }
 
-func runMigrations(ctx context.Context, cfg *config.Config, log *slog.Logger) error {
+// MigratorDBConfig shapes the connection migrations run on: the migrator DSN when set, the migrator role always, on a single session.
+func MigratorDBConfig(cfg *config.Config) db.DBConfig {
 	migCfg := cfg.DB
-	usingMigratorDSN := cfg.DB.Migrator.DSN != ""
-	if usingMigratorDSN {
+	if cfg.DB.Migrator.DSN != "" {
 		migCfg.DSN = cfg.DB.Migrator.DSN
-		migCfg.Role = cfg.DB.Migrator.Role
 	}
+	migCfg.Role = cfg.DB.Migrator.Role
+	// NOTE: one session keeps goose's advisory lock and SET ROLE state on the same connection.
+	migCfg.MaxOpenConns = 1
+	migCfg.MaxIdleConns = 1
+	return migCfg
+}
+
+func runMigrations(ctx context.Context, cfg *config.Config, log *slog.Logger) error {
+	migCfg := MigratorDBConfig(cfg)
+	usingMigratorDSN := cfg.DB.Migrator.DSN != ""
 	migDB, err := db.Open(ctx, migCfg, log)
 	if err != nil {
 		return fmt.Errorf("boot: open migrator: %w", err)

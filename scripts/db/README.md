@@ -34,6 +34,9 @@ provider admin  (neondb_owner / postgres / rds_superuser)
 Only `<app>_migrator` does DDL. `<app>_service` does DML. Humans in `_editor`
 edit rows, `_reader` reads, `_ops` manages other humans.
 
+`SET ROLE <app>_owner` is applied once per migration connection from
+`ALT_DB_MIGRATOR_ROLE`; the migration files carry no role statements.
+
 `<app>_maintenance` stands outside the `_owner` tree — it owns nothing and
 only reads. Tenant-scoped scheduler jobs enumerate every org, which the
 `FORCE ROW LEVEL SECURITY` policy on `orgs` hides from `<app>_service`;

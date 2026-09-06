@@ -567,7 +567,7 @@ func TestOnboardHandler_Register_MountsRoutes(t *testing.T) {
 	f := newFixture(t)
 	req := &atomicBoolWrapper{}
 	req.b.Store(true)
-	h := handlers.NewOnboardHandler(f.Deps, f.Users, f.Orgs, f.Projects, f.Onboards, &req.b)
+	h := handlers.NewOnboardHandler(f.Deps, f.Users, f.Orgs, f.Projects, f.Onboards, &req.b, "")
 	mux := http.NewServeMux()
 	h.Register(mux)
 
@@ -581,7 +581,7 @@ func TestOnboardHandler_GetOnboard_RedirectsWhenNotRequired(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
 	req := &atomicBoolWrapper{}
-	h := handlers.NewOnboardHandler(f.Deps, f.Users, f.Orgs, f.Projects, f.Onboards, &req.b)
+	h := handlers.NewOnboardHandler(f.Deps, f.Users, f.Orgs, f.Projects, f.Onboards, &req.b, "")
 	mux := http.NewServeMux()
 	h.Register(mux)
 
@@ -595,7 +595,7 @@ func TestOnboardHandler_PostLocal_MissingFields(t *testing.T) {
 	f := newFixture(t)
 	req := &atomicBoolWrapper{}
 	req.b.Store(true)
-	h := handlers.NewOnboardHandler(f.Deps, f.Users, f.Orgs, f.Projects, f.Onboards, &req.b)
+	h := handlers.NewOnboardHandler(f.Deps, f.Users, f.Orgs, f.Projects, f.Onboards, &req.b, "")
 	mux := http.NewServeMux()
 	h.Register(mux)
 
@@ -613,7 +613,7 @@ func TestOnboardHandler_PostLocal_HappyPath(t *testing.T) {
 	f := newFixture(t)
 	req := &atomicBoolWrapper{}
 	req.b.Store(true)
-	h := handlers.NewOnboardHandler(f.Deps, f.Users, f.Orgs, f.Projects, f.Onboards, &req.b)
+	h := handlers.NewOnboardHandler(f.Deps, f.Users, f.Orgs, f.Projects, f.Onboards, &req.b, "")
 	mux := http.NewServeMux()
 	h.Register(mux)
 
@@ -632,7 +632,7 @@ func TestOnboardHandler_GetOIDCStart_RedirectsToOIDC(t *testing.T) {
 	f := newFixture(t)
 	req := &atomicBoolWrapper{}
 	req.b.Store(true)
-	h := handlers.NewOnboardHandler(f.Deps, f.Users, f.Orgs, f.Projects, f.Onboards, &req.b)
+	h := handlers.NewOnboardHandler(f.Deps, f.Users, f.Orgs, f.Projects, f.Onboards, &req.b, "")
 	mux := http.NewServeMux()
 	h.Register(mux)
 	rec := httptest.NewRecorder()
@@ -646,7 +646,7 @@ func TestOnboardHandler_GetOIDCComplete_RedirectsUnauth(t *testing.T) {
 	f := newFixture(t)
 	req := &atomicBoolWrapper{}
 	req.b.Store(true)
-	h := handlers.NewOnboardHandler(f.Deps, f.Users, f.Orgs, f.Projects, f.Onboards, &req.b)
+	h := handlers.NewOnboardHandler(f.Deps, f.Users, f.Orgs, f.Projects, f.Onboards, &req.b, "")
 	mux := http.NewServeMux()
 	h.Register(mux)
 	rec := httptest.NewRecorder()
@@ -664,7 +664,7 @@ func TestOnboardHandler_GetOIDCComplete_RendersFinalizeForm(t *testing.T) {
 	req := &atomicBoolWrapper{}
 	req.b.Store(true)
 
-	h := handlers.NewOnboardHandler(f.Deps, f.Users, f.Orgs, f.Projects, f.Onboards, &req.b)
+	h := handlers.NewOnboardHandler(f.Deps, f.Users, f.Orgs, f.Projects, f.Onboards, &req.b, "")
 	mux := http.NewServeMux()
 	h.Register(mux)
 	rec := httptest.NewRecorder()
@@ -683,7 +683,7 @@ func TestOnboardHandler_PostOIDCComplete_PromotesAndClears(t *testing.T) {
 	req := &atomicBoolWrapper{}
 	req.b.Store(true)
 
-	h := handlers.NewOnboardHandler(f.Deps, f.Users, f.Orgs, f.Projects, f.Onboards, &req.b)
+	h := handlers.NewOnboardHandler(f.Deps, f.Users, f.Orgs, f.Projects, f.Onboards, &req.b, "")
 	mux := http.NewServeMux()
 	h.Register(mux)
 	rec := httptest.NewRecorder()
@@ -691,6 +691,10 @@ func TestOnboardHandler_PostOIDCComplete_PromotesAndClears(t *testing.T) {
 	mux.ServeHTTP(rec, f.authedRequest(t, http.MethodPost, "/onboard/complete", body, session.Principal{UserID: u.ID, Email: u.Email}))
 	assert.Equal(t, http.StatusSeeOther, rec.Code)
 	assert.False(t, req.b.Load(), "POST must close onboarding")
+
+	after, err := f.UserStore.ByID(ctx, u.ID)
+	require.NoError(t, err)
+	assert.True(t, after.IsAdmin, "the onboarding user must actually be promoted, not just redirected")
 }
 
 func TestOnboardingHandler_GetOnboarding_Unauth(t *testing.T) {
@@ -954,11 +958,13 @@ func (a *authUserStore) ByEmail(ctx context.Context, email string) (*auth.UserRe
 	if err != nil {
 		return nil, err
 	}
-	return &auth.UserRef{ID: u.ID, Email: u.Email, Name: u.Name, Source: u.Source, Locale: u.Locale, PasswordHash: u.PasswordHash}, nil
+	return &auth.UserRef{ID: u.ID, Email: u.Email, Name: u.Name, Source: u.Source, IsAdmin: u.IsAdmin, Locale: u.Locale, PasswordHash: u.PasswordHash}, nil
 }
 
+// NOTE: mirrors the write-time rule both real stores apply (internal/user/pgwriter.go, internal/user/sqlite.go); fakes.User does not.
 func (a *authUserStore) Save(ctx context.Context, u *auth.UserRef) error {
-	return a.store.Save(ctx, &user.User{ID: u.ID, Email: u.Email, Name: u.Name, Source: u.Source, PasswordHash: u.PasswordHash, Locale: u.Locale})
+	isAdmin := u.IsAdmin || u.Source == user.SourceGenesis || u.Source == user.SourceLocal
+	return a.store.Save(ctx, &user.User{ID: u.ID, Email: u.Email, Name: u.Name, Source: u.Source, IsAdmin: isAdmin, PasswordHash: u.PasswordHash, Locale: u.Locale})
 }
 
 func TestLocaleHandler_NoI18nSkipsRegister(t *testing.T) {

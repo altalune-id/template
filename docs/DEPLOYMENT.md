@@ -56,7 +56,7 @@ and Mailpit's open SMTP — production settings go under `mail.smtp.*` (or
 **Production** — role graph provisioned via `scripts/db/provision.sh`:
 
 - `altempl_owner` (`NOLOGIN`) owns every schema object.
-- `altempl_migrator` (`LOGIN`, member of `altempl_owner`) runs migrations under `SET ROLE altempl_owner`.
+- `altempl_migrator` (`LOGIN`, member of `altempl_owner`) runs migrations under `SET ROLE altempl_owner`, issued once per connection from `db.migrator.role` rather than inside the migration SQL.
 - `altempl_service` (`LOGIN`, `NOBYPASSRLS`) is the runtime DSN. DML granted via `ALTER DEFAULT PRIVILEGES`.
 
 Provision idempotently (interactive; prompts for admin URL, DB name, passwords):
@@ -73,6 +73,9 @@ ALT_DB_MIGRATOR_DSN=postgres://altempl_migrator:<mig-pw>@host:5432/altempl?sslmo
 ALT_DB_MIGRATOR_ROLE=altempl_owner
 ALT_DB_ALLOW_BYPASS_RLS=false
 ```
+
+`db.migrator.role` is the sole source of the migration role; `db.role` applies only to runtime
+connections and never reaches migrations.
 
 Boot fails if the runtime role has `BYPASSRLS` and `db.allowBypassRLS` is `false`.
 

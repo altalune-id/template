@@ -33,6 +33,7 @@ type UserRef struct {
 	Email           string
 	Name            string
 	Source          string
+	IsAdmin         bool
 	Locale          string
 	PasswordHash    string
 	TermsAcceptedAt *time.Time
@@ -168,6 +169,7 @@ func principalFromRef(u *UserRef, src session.Source, now time.Time) session.Pri
 		Email:    u.Email,
 		Name:     u.Name,
 		Source:   src,
+		IsAdmin:  u.IsAdmin,
 		Locale:   u.Locale,
 		IssuedAt: now,
 	}
