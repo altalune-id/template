@@ -13,15 +13,16 @@ import (
 	pdb "altalune.id/template/internal/platform/db"
 )
 
+// SECURITY: resolves a slug before any tenant scope exists; the SECURITY DEFINER wrapper is what lifts RLS, not the caller's role.
 func (s *postgresStore) BySlug(ctx context.Context, slug string) (*Org, error) {
-	tx, owned, err := s.txAcquire(ctx)
+	orgs, err := s.scanOrgs(ctx, s.resolveBySlugStmt, postgres.RawArgs{"#slug": slug})
 	if err != nil {
 		return nil, err
 	}
-	if owned {
-		defer func() { _ = tx.Rollback() }()
+	if len(orgs) == 0 {
+		return nil, &NotFoundError{Slug: slug}
 	}
-	return s.queryOrg(ctx, tx, s.orgs.Slug.EQ(postgres.String(slug)), &NotFoundError{Slug: slug})
+	return orgs[0], nil
 }
 
 func (s *postgresStore) ByID(ctx context.Context, id uuid.UUID) (*Org, error) {
@@ -35,28 +36,9 @@ func (s *postgresStore) ByID(ctx context.Context, id uuid.UUID) (*Org, error) {
 	return s.queryOrg(ctx, tx, s.orgs.ID.EQ(postgres.UUID(id)), &NotFoundError{ID: id.String()})
 }
 
-// SECURITY: bypasses tenant scope; caller has no active tenant yet and is choosing one.
+// SECURITY: lists a user's orgs before any tenant scope exists; the SECURITY DEFINER wrapper is what lifts RLS, not the caller's role.
 func (s *postgresStore) List(ctx context.Context, userID uuid.UUID) ([]*Org, error) {
-	if tx, ok := pdb.CurrentTx(ctx); ok {
-		return s.listOn(ctx, tx, userID)
-	}
-	return s.listOn(ctx, s.pc.DB, userID)
-}
-
-func (s *postgresStore) listOn(ctx context.Context, execer qrm.DB, userID uuid.UUID) ([]*Org, error) {
-	stmt := postgres.SELECT(s.orgs.ID, s.orgs.Slug, s.orgs.Name, s.orgs.CreatedBy, s.orgs.CreatedAt, s.orgs.System).
-		FROM(s.orgs.INNER_JOIN(s.members, s.members.OrgID.EQ(s.orgs.ID))).
-		WHERE(s.members.UserID.EQ(postgres.UUID(userID))).
-		ORDER_BY(s.orgs.CreatedAt.ASC())
-	var rows []pgOrgRow
-	if err := stmt.QueryContext(ctx, execer, &rows); err != nil {
-		return nil, fmt.Errorf("org.postgres: List: %w", err)
-	}
-	out := make([]*Org, 0, len(rows))
-	for i := range rows {
-		out = append(out, rows[i].toOrg())
-	}
-	return out, nil
+	return s.scanOrgs(ctx, s.listForUserStmt, postgres.RawArgs{"#userID": userID})
 }
 
 func (s *postgresStore) MembershipOf(ctx context.Context, orgID, userID uuid.UUID) (*Membership, error) {
@@ -131,6 +113,25 @@ func (s *postgresStore) ListMemberProfiles(ctx context.Context, orgID uuid.UUID)
 	out := make([]*MemberProfile, 0, len(rows))
 	for i := range rows {
 		out = append(out, rows[i].toProfile())
+	}
+	return out, nil
+}
+
+func (s *postgresStore) execer(ctx context.Context) qrm.DB {
+	if tx, ok := pdb.CurrentTx(ctx); ok {
+		return tx
+	}
+	return s.pc.DB
+}
+
+func (s *postgresStore) scanOrgs(ctx context.Context, rawQuery string, args postgres.RawArgs) ([]*Org, error) {
+	var rows []pgOrgRow
+	if err := postgres.RawStatement(rawQuery, args).QueryContext(ctx, s.execer(ctx), &rows); err != nil {
+		return nil, fmt.Errorf("org.postgres: query: %w", err)
+	}
+	out := make([]*Org, 0, len(rows))
+	for i := range rows {
+		out = append(out, rows[i].toOrg())
 	}
 	return out, nil
 }

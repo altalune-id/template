@@ -7,7 +7,7 @@ on Neon, RDS, CloudSQL, Supabase, and self-hosted.
 
 - `provision.sh` — entry point. Creates the DB, renders templates for a given
   app prefix, runs bootstrap + ops.
-- `bootstrap.template.sql` — seven-role graph, ownership, default privileges.
+- `bootstrap.template.sql` — six-role graph, ownership, default privileges.
 - `ops.template.sql` — SECURITY DEFINER procedures for day-2 role/user ops.
 - `verify.template.sql` — post-migration invariant check.
 
@@ -20,30 +20,49 @@ them via `sed` at run time.
 provider admin  (neondb_owner / postgres / rds_superuser)
     │  only used during provisioning
     ▼
-<app>_owner        NOLOGIN CREATEROLE — owns schema, tables, sequences, ops
+<app>_owner        NOLOGIN CREATEROLE BYPASSRLS — owns schema, tables, sequences, ops
     │
     ├── <app>_migrator  LOGIN — runs migrations under SET ROLE <app>_owner
     ├── <app>_service   LOGIN — DML on tables (default privileges)
     ├── <app>_editor    NOLOGIN group — SELECT + UPDATE for humans
     ├── <app>_reader    NOLOGIN group — SELECT via pg_read_all_data
     └── <app>_ops       NOLOGIN group — EXECUTE on ops procedures
-
-<app>_maintenance  LOGIN BYPASSRLS — read-only cross-tenant reads
 ```
 
 Only `<app>_migrator` does DDL. `<app>_service` does DML. Humans in `_editor`
-edit rows, `_reader` reads, `_ops` manages other humans.
+edit rows, `_reader` reads, `_ops` manages other humans. No role in the graph
+holds a LOGIN + `BYPASSRLS` combination.
 
 `SET ROLE <app>_owner` is applied once per migration connection from
 `ALT_DB_MIGRATOR_ROLE`; the migration files carry no role statements.
 
-`<app>_maintenance` stands outside the `_owner` tree — it owns nothing and
-only reads. Tenant-scoped scheduler jobs enumerate every org, which the
-`FORCE ROW LEVEL SECURITY` policy on `orgs` hides from `<app>_service`;
-`BYPASSRLS` is the only attribute that lifts it (owning the table does not,
-and `pg_read_all_data` alone does not either). Export it as
-`ALT_DB_MAINTENANCE_DSN`. Creating it requires an admin that itself has
-`BYPASSRLS` or `SUPERUSER`.
+### Cross-tenant reads
+
+Tenant-scoped scheduler jobs enumerate every org, which the `FORCE ROW LEVEL
+SECURITY` policy on `orgs` hides from `<app>_service`. `BYPASSRLS` is the only
+attribute that lifts it — owning the table does not, and `pg_read_all_data`
+alone does not either.
+
+`<app>_owner` holds `BYPASSRLS` and is NOLOGIN. Cross-tenant reads go through
+`SECURITY DEFINER` functions owned by it; `<app>_service` calls them and holds
+no bypass of its own.
+
+**`BYPASSRLS` is a role attribute, not a privilege.** `GRANT <app>_owner TO
+<app>_migrator` does not confer it. Only `SET ROLE`, or a `SECURITY DEFINER`
+function owned by `<app>_owner`, actually runs as owner and picks the attribute
+up — so the function ownership is load-bearing and must not be simplified away.
+
+Provisioning requires an admin that itself has `BYPASSRLS` or `SUPERUSER`,
+since Postgres only lets a role confer an attribute it holds.
+
+`<app>_reader` still holds `pg_read_all_data`, which also reads across tenants.
+It is NOLOGIN and granted to humans deliberately, so this model reduces the
+number of cross-tenant-capable credentials rather than eliminating them.
+
+Bootstrap also drops `<app>_maintenance`, the retired LOGIN + `BYPASSRLS`
+credential this model replaces. Roles are cluster-scoped, so dropping the
+database does not remove it. The drop is skipped with a notice if something
+still depends on the role.
 
 ## Quick start
 
@@ -117,7 +136,6 @@ sed "s/@@APP@@/$APP/g" scripts/db/bootstrap.template.sql | \
   psql --single-transaction \
        -v migrator_password="$MIG_PW" \
        -v service_password="$SVC_PW" \
-       -v maintenance_password="$MNT_PW" \
        "$ADMIN_URL/authdb"
 
 sed "s/@@APP@@/$APP/g" scripts/db/ops.template.sql | \
@@ -135,5 +153,4 @@ APP=auth sed "s/@@APP@@/$APP/g" scripts/db/verify.template.sql \
 ```
 
 Fails loudly if any `public.*` object isn't owned by `<app>_owner`, if
-default privileges are missing, or if `<app>_maintenance` is absent or has
-lost `BYPASSRLS`.
+default privileges are missing, or if `<app>_owner` has lost `BYPASSRLS`.

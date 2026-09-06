@@ -53,14 +53,13 @@ NOTE: "platform package" is a **category, not a directory**. Some live under
 | `app.current_org_id` | `internal/platform/tenant/pgconn.go:11`                     | The Postgres GUC RLS policies read. Set per transaction via `set_config`.                                  |
 | `BeginTenanted`      | `internal/platform/tenant/pgconn.go:22`                     | Opens a transaction with that GUC applied. The only sanctioned way to read tenant data.                    |
 
-Four DB credentials, four jobs:
+Three DB credentials, three jobs:
 
-| Key                  | Role                                                                                     |
-| -------------------- | ---------------------------------------------------------------------------------------- |
-| `db.dsn`             | The app. Must be `NOBYPASSRLS`.                                                          |
-| `db.migrator.dsn`    | Schema changes only; opened at boot, then closed.                                        |
-| `db.reader.dsn`      | Replica reads. Falls back to the writer pool when empty.                                 |
-| `db.maintenance.dsn` | Cross-tenant maintenance reads (tenant enumeration). Expected `BYPASSRLS` and read-only. |
+| Key               | Role                                                     |
+| ----------------- | -------------------------------------------------------- |
+| `db.dsn`          | The app. Must be `NOBYPASSRLS`.                          |
+| `db.migrator.dsn` | Schema changes only; opened at boot, then closed.        |
+| `db.reader.dsn`   | Replica reads. Falls back to the writer pool when empty. |
 
 ## Identity and lifecycle
 
@@ -92,7 +91,7 @@ left in place deliberately — removing it touches auth flows.
 | `Scope`        | `scheduler/scheduler.go:24` | `ScopeSystem` (`"system"`) runs once per tick; `ScopeTenant` (`"tenant"`) fans out over every tenant with a tenant-bound ctx. |
 | `Singleton`    | `Job.Singleton`             | Take the cross-process lock first; skip the tick if another replica holds it.                                                 |
 | `Provider`     | `scheduler/provider.go`     | The zero-arg port a domain's `Scheduler` adapter implements to contribute jobs (`SchedulerJobs() []Job`).                     |
-| `Tenants`      | `scheduler/provider.go`     | Enumerates tenants for a `ScopeTenant` job. Impl `tenant.PgTenants`, reading on the maintenance handle.                       |
+| `Tenants`      | `scheduler/provider.go`     | Enumerates tenants for a `ScopeTenant` job. Impl `tenant.Enumerator`, reading through `tenant.OrgReader`.                     |
 | `Locker`       | `scheduler/provider.go`     | Serializes a `Singleton` job across processes. Impl `db.PgLocker` on `pg_try_advisory_lock`.                                  |
 | `LocationFunc` | `scheduler/timezone.go:6`   | `func(jobName string) *time.Location` — resolves a job's wall-clock zone.                                                     |
 | `Status`       | `scheduler/scheduler.go:34` | Run outcome: `success`, `error`, `overlap`, `not_leader`, `panic`.                                                            |

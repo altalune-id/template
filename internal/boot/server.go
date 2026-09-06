@@ -183,13 +183,12 @@ func BootServer(ctx context.Context, cfg *config.Config, opts ...Option) (*Serve
 	case !cfg.Scheduler.Enabled:
 		log.Info("boot: scheduler disabled by scheduler.enabled=false")
 	default:
-		r, hasTenantJobs, sErr := buildScheduler(cfg, kernel, svcs, log)
+		r, sErr := buildScheduler(cfg, kernel, svcs, log)
 		if sErr != nil {
 			_ = pool.Close()
 			_ = shutdownOTel(context.Background())
 			return nil, sErr
 		}
-		warnIfTenantJobsCannotSeeTenants(cfg, hasTenantJobs, log)
 		runner = r
 		sup.Register(runner)
 	}

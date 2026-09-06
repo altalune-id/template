@@ -117,9 +117,6 @@ func (m *HealthMonitor) handles() []namedHandle {
 	if m.pool.R != nil && m.pool.R != m.pool.W {
 		out = append(out, namedHandle{name: "reader", db: m.pool.R})
 	}
-	if m.pool.M != nil && m.pool.M != m.pool.W && m.pool.M != m.pool.R {
-		out = append(out, namedHandle{name: "maintenance", db: m.pool.M})
-	}
 	return out
 }
 

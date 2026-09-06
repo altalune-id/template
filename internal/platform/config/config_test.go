@@ -316,9 +316,6 @@ func TestDefaults_SchedulerAndDBKeys(t *testing.T) {
 	if cfg.DB.Health.Timeout != 2*time.Second {
 		t.Errorf("db.health.timeout = %s, want 2s", cfg.DB.Health.Timeout)
 	}
-	if cfg.DB.Maintenance.MaxOpenConns != 2 {
-		t.Errorf("db.maintenance.maxOpenConns = %d, want 2", cfg.DB.Maintenance.MaxOpenConns)
-	}
 }
 
 func TestMode_IsProduction(t *testing.T) {

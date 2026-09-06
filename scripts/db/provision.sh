@@ -3,18 +3,16 @@
 #
 # Env:
 #   APP         Role prefix (e.g. auth, billing). Roles created: <APP>_owner,
-#               _migrator, _service, _editor, _reader, _ops, _maintenance.
+#               _migrator, _service, _editor, _reader, _ops.
 #   ADMIN_URL   Provider admin URL WITHOUT /<db> suffix.
 #   DB_NAME     Application database name (e.g. authalunedb).
 #   ADMIN_DB    Provider default DB used for CREATE DATABASE
 #               (auto: neondb if host contains neon.tech, else postgres).
 #   MIG_PW      <APP>_migrator password (>=16 chars).
 #   SVC_PW      <APP>_service password  (>=16 chars).
-#   MNT_PW      <APP>_maintenance password (>=16 chars). BYPASSRLS read-only
-#               role used for cross-tenant reads (tenant enumeration).
 #   PSQL        psql binary (default: psql on PATH).
 #
-# Interactive when any of APP/ADMIN_URL/DB_NAME/MIG_PW/SVC_PW/MNT_PW is unset.
+# Interactive when any of APP/ADMIN_URL/DB_NAME/MIG_PW/SVC_PW is unset.
 
 set -euo pipefail
 
@@ -86,13 +84,11 @@ DB_NAME="${DB_NAME-}"
 ADMIN_DB="${ADMIN_DB-}"
 MIG_PW="${MIG_PW-}"
 SVC_PW="${SVC_PW-}"
-MNT_PW="${MNT_PW-}"
 MIG_PW_GEN=0
 SVC_PW_GEN=0
-MNT_PW_GEN=0
 
 interactive=false
-if [[ -z "$APP" || -z "$ADMIN_URL" || -z "$DB_NAME" || -z "$MIG_PW" || -z "$SVC_PW" || -z "$MNT_PW" ]]; then
+if [[ -z "$APP" || -z "$ADMIN_URL" || -z "$DB_NAME" || -z "$MIG_PW" || -z "$SVC_PW" ]]; then
   if is_tty; then
     interactive=true
     echo
@@ -100,7 +96,7 @@ if [[ -z "$APP" || -z "$ADMIN_URL" || -z "$DB_NAME" || -z "$MIG_PW" || -z "$SVC_
     echo "--------------"
   else
     echo "Missing required env vars and stdin is not a TTY." >&2
-    echo "Set APP, ADMIN_URL, DB_NAME, MIG_PW, SVC_PW, MNT_PW — or run interactively." >&2
+    echo "Set APP, ADMIN_URL, DB_NAME, MIG_PW, SVC_PW — or run interactively." >&2
     exit 1
   fi
 fi
@@ -137,18 +133,12 @@ fi
 if [[ -z "$SVC_PW" ]]; then
   ask_secret "SVC_PW (${APP}_service password)"  SVC_PW SVC_PW_GEN
 fi
-if [[ -z "$MNT_PW" ]]; then
-  ask_secret "MNT_PW (${APP}_maintenance password)" MNT_PW MNT_PW_GEN
-fi
 
 if [[ ${#MIG_PW} -lt 16 ]]; then
   echo "MIG_PW must be at least 16 characters (got ${#MIG_PW})" >&2; exit 1
 fi
 if [[ ${#SVC_PW} -lt 16 ]]; then
   echo "SVC_PW must be at least 16 characters (got ${#SVC_PW})" >&2; exit 1
-fi
-if [[ ${#MNT_PW} -lt 16 ]]; then
-  echo "MNT_PW must be at least 16 characters (got ${#MNT_PW})" >&2; exit 1
 fi
 if [[ ! "$DB_NAME" =~ ^[a-zA-Z_][a-zA-Z0-9_]{0,62}$ ]]; then
   echo "DB_NAME must match [a-zA-Z_][a-zA-Z0-9_]{0,62} (got: $DB_NAME)" >&2; exit 1
@@ -183,7 +173,6 @@ Ready to provision:
   DB_NAME     $DB_NAME
   MIG_PW      $(mask "$MIG_PW")   → ${APP}_migrator
   SVC_PW      $(mask "$SVC_PW")   → ${APP}_service
-  MNT_PW      $(mask "$MNT_PW")   → ${APP}_maintenance
 
 Will run:
   1) CREATE DATABASE "$DB_NAME"                (idempotent)
@@ -237,7 +226,6 @@ echo "==> [2/2] applying bootstrap + ops in a single transaction (prefix ${APP}_
 } | "$PSQL" -v ON_ERROR_STOP=1 \
             -v "migrator_password=$MIG_PW" \
             -v "service_password=$SVC_PW" \
-            -v "maintenance_password=$MNT_PW" \
             "$(with_db "$ADMIN_URL" "$DB_NAME")" || {
   echo
   echo "==> bootstrap/ops failed — transaction rolled back"
@@ -248,12 +236,11 @@ echo "==> [2/2] applying bootstrap + ops in a single transaction (prefix ${APP}_
 echo
 echo "==> done."
 
-if (( MIG_PW_GEN == 1 )) || (( SVC_PW_GEN == 1 )) || (( MNT_PW_GEN == 1 )); then
+if (( MIG_PW_GEN == 1 )) || (( SVC_PW_GEN == 1 )); then
   echo
   echo "GENERATED PASSWORDS — save these to your secrets manager NOW:"
   (( MIG_PW_GEN == 1 )) && echo "  MIG_PW=$MIG_PW"
   (( SVC_PW_GEN == 1 )) && echo "  SVC_PW=$SVC_PW"
-  (( MNT_PW_GEN == 1 )) && echo "  MNT_PW=$MNT_PW"
 fi
 
 cat <<EOF
@@ -263,7 +250,7 @@ Next steps:
   2) Verify:
        APP=$APP sed "s/@@APP@@/\$APP/g" $script_dir/verify.template.sql | psql "\$ADMIN_URL/$DB_NAME"
   3) Point runtime services at ${APP}_service (pooled endpoint on Neon).
-  4) Tenant-scoped scheduler jobs need the BYPASSRLS reader — without it they
-     enumerate zero tenants and silently do nothing:
-       ALT_DB_MAINTENANCE_DSN=postgresql://${APP}_maintenance:<MNT_PW>@<host>/$DB_NAME
+  4) Cross-tenant reads run through SECURITY DEFINER functions owned by
+     ${APP}_owner, which holds BYPASSRLS. ${APP}_service needs no bypass of
+     its own and there is no separate maintenance DSN.
 EOF

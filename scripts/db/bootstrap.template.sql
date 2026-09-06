@@ -19,13 +19,12 @@ BEGIN
     RAISE EXCEPTION 'bootstrap requires CREATEROLE or SUPERUSER (current role: %)', current_user;
   END IF;
 
-  -- Postgres only lets a role that has BYPASSRLS confer it; checked up front so
-  -- a caller who can't gets a legible error instead of a mid-transaction abort.
+  -- Postgres only lets a role that already holds BYPASSRLS confer it.
   IF NOT (caller_super OR caller_bypass)
      AND NOT EXISTS (SELECT 1 FROM pg_roles
-                      WHERE rolname = '@@APP@@_maintenance' AND rolbypassrls) THEN
-    RAISE EXCEPTION 'bootstrap requires BYPASSRLS or SUPERUSER to create @@APP@@_maintenance (current role: %)', current_user
-      USING HINT = 'Have a superuser run: CREATE ROLE @@APP@@_maintenance LOGIN BYPASSRLS PASSWORD ''<pw>''; then re-run.';
+                      WHERE rolname = '@@APP@@_owner' AND rolbypassrls) THEN
+    RAISE EXCEPTION 'bootstrap requires BYPASSRLS or SUPERUSER to grant it to @@APP@@_owner (current role: %)', current_user
+      USING HINT = 'Have a superuser run: CREATE ROLE @@APP@@_owner NOLOGIN CREATEROLE INHERIT BYPASSRLS; (or ALTER ROLE @@APP@@_owner BYPASSRLS if it exists) then re-run.';
   END IF;
 
   IF current_database() IN ('postgres', 'template0', 'template1') THEN
@@ -39,12 +38,18 @@ END $$;
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 CREATE EXTENSION IF NOT EXISTS citext;
 
--- @@APP@@_owner has CREATEROLE so ops.sql SECURITY DEFINER procedures (owned
--- by it) can manage human roles. PG 16+ scopes CREATEROLE to roles the
--- grantor created, limiting blast radius.
+-- CREATEROLE: ops.sql SECURITY DEFINER procedures owned by @@APP@@_owner manage human roles.
+-- SECURITY: BYPASSRLS is a role attribute, not a privilege — `GRANT @@APP@@_owner TO x` does not
+-- confer it; only SET ROLE, or a SECURITY DEFINER function owned by @@APP@@_owner, picks it up.
 DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '@@APP@@_owner') THEN
-    CREATE ROLE @@APP@@_owner NOLOGIN NOSUPERUSER NOCREATEDB CREATEROLE INHERIT;
+    CREATE ROLE @@APP@@_owner NOLOGIN NOSUPERUSER NOCREATEDB CREATEROLE INHERIT BYPASSRLS;
+  END IF;
+END $$;
+
+DO $$ BEGIN
+  IF NOT (SELECT rolbypassrls FROM pg_roles WHERE rolname = '@@APP@@_owner') THEN
+    ALTER ROLE @@APP@@_owner BYPASSRLS;
   END IF;
 END $$;
 
@@ -60,19 +65,6 @@ SELECT NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '@@APP@@_service') AS 
 \if :need_service
 CREATE ROLE @@APP@@_service LOGIN PASSWORD :'service_password' NOSUPERUSER NOCREATEDB NOCREATEROLE INHERIT;
 \endif
-
--- BYPASSRLS: tenant-scoped jobs enumerate every org, and orgs FORCEs RLS on
--- app.current_org_id — owning the table isn't enough, only BYPASSRLS sees them.
-SELECT NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '@@APP@@_maintenance') AS need_maintenance \gset
-\if :need_maintenance
-CREATE ROLE @@APP@@_maintenance LOGIN PASSWORD :'maintenance_password' BYPASSRLS NOSUPERUSER NOCREATEDB NOCREATEROLE INHERIT;
-\endif
-
-DO $$ BEGIN
-  IF NOT (SELECT rolbypassrls FROM pg_roles WHERE rolname = '@@APP@@_maintenance') THEN
-    ALTER ROLE @@APP@@_maintenance BYPASSRLS;
-  END IF;
-END $$;
 
 DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '@@APP@@_editor') THEN
@@ -95,10 +87,6 @@ END $$;
 GRANT @@APP@@_owner TO @@APP@@_migrator;
 GRANT pg_read_all_data TO @@APP@@_reader;
 
--- Covers tables later migrations add, so no ALTER DEFAULT PRIVILEGES needed.
--- Read-only on purpose: the role only enumerates tenants.
-GRANT pg_read_all_data TO @@APP@@_maintenance;
-
 GRANT @@APP@@_editor TO @@APP@@_owner WITH ADMIN OPTION;
 GRANT @@APP@@_reader TO @@APP@@_owner WITH ADMIN OPTION;
 GRANT @@APP@@_ops    TO @@APP@@_owner WITH ADMIN OPTION;
@@ -109,11 +97,11 @@ END $$;
 
 DO $$ BEGIN
   EXECUTE format(
-    'GRANT CONNECT ON DATABASE %I TO @@APP@@_migrator, @@APP@@_service, @@APP@@_editor, @@APP@@_reader, @@APP@@_ops, @@APP@@_maintenance',
+    'GRANT CONNECT ON DATABASE %I TO @@APP@@_migrator, @@APP@@_service, @@APP@@_editor, @@APP@@_reader, @@APP@@_ops',
     current_database());
 END $$;
 
-GRANT USAGE ON SCHEMA public TO @@APP@@_service, @@APP@@_editor, @@APP@@_reader, @@APP@@_maintenance;
+GRANT USAGE ON SCHEMA public TO @@APP@@_service, @@APP@@_editor, @@APP@@_reader;
 
 ALTER SCHEMA public OWNER TO @@APP@@_owner;
 
@@ -138,6 +126,17 @@ ALTER DEFAULT PRIVILEGES FOR ROLE @@APP@@_owner IN SCHEMA public
   GRANT UPDATE ON TABLES TO @@APP@@_editor;
 ALTER DEFAULT PRIVILEGES FOR ROLE @@APP@@_owner IN SCHEMA public
   GRANT SELECT ON SEQUENCES TO @@APP@@_editor;
+
+-- SECURITY: @@APP@@_maintenance was a LOGIN BYPASSRLS credential. Roles are cluster-scoped,
+-- so dropping the database does not remove it. Skipped with a notice if something depends on it.
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '@@APP@@_maintenance') THEN
+    EXECUTE 'DROP OWNED BY @@APP@@_maintenance';
+    EXECUTE 'DROP ROLE @@APP@@_maintenance';
+  END IF;
+EXCEPTION WHEN dependent_objects_still_exist OR insufficient_privilege THEN
+  RAISE NOTICE 'skipped dropping @@APP@@_maintenance (%)', SQLERRM;
+END $$;
 
 DO $$ BEGIN
   EXECUTE format('REVOKE @@APP@@_owner FROM %I', current_user);

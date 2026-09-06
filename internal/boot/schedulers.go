@@ -47,43 +47,40 @@ func buildScheduler(
 	k *platform.Kernel,
 	s *Services,
 	log *slog.Logger,
-) (runner *scheduler.Runner, hasTenantJobs bool, err error) {
+) (*scheduler.Runner, error) {
 	loc, err := cfg.Scheduler.Locations()
 	if err != nil {
-		return nil, false, err
+		return nil, err
 	}
 
 	providers := schedulerProviders(s, loc, log)
 	if wErr := assertSchedulerWiring(providers); wErr != nil {
-		return nil, false, wErr
+		return nil, wErr
 	}
 
-	runner, err = scheduler.New(scheduler.Options{
+	runner, err := scheduler.New(scheduler.Options{
 		Logger:        log,
 		Reporter:      reporterAdapter{report: k.Reporter.Unexpected, log: log},
 		Meter:         k.Meter,
-		Tenants:       tenant.NewPgTenants(k.Pool, cfg.DB.Driver, cfg.DB.Schema, cfg.DB.TablePrefix, log),
+		Tenants:       tenant.NewEnumerator(tenant.NewOrgReader(k.Pool, cfg.DB.Driver, cfg.DB.Schema, cfg.DB.TablePrefix), log),
 		Locker:        db.NewLocker(cfg.DB, k.Pool, log),
 		ShutdownGrace: cfg.Scheduler.ShutdownGrace,
 	})
 	if err != nil {
-		return nil, false, fmt.Errorf("boot: scheduler: %w", err)
+		return nil, fmt.Errorf("boot: scheduler: %w", err)
 	}
 
 	wallClock := map[string]bool{}
 	for _, p := range providers {
 		for _, j := range p.SchedulerJobs() {
 			if rErr := runner.Register(j); rErr != nil {
-				return nil, false, fmt.Errorf("boot: register job %q: %w", j.Name, rErr)
+				return nil, fmt.Errorf("boot: register job %q: %w", j.Name, rErr)
 			}
 			wallClock[j.Name] = scheduler.UsesWallClock(j.Schedule)
-			if j.Scope == scheduler.ScopeTenant {
-				hasTenantJobs = true
-			}
 		}
 	}
 	warnUnusedTimezoneOverrides(cfg, wallClock, log)
-	return runner, hasTenantJobs, nil
+	return runner, nil
 }
 
 func warnUnusedTimezoneOverrides(cfg *config.Config, wallClock map[string]bool, log *slog.Logger) {
@@ -102,17 +99,6 @@ func warnUnusedTimezoneOverrides(cfg *config.Config, wallClock map[string]bool, 
 				slog.String("job", name), slog.String("timezone", jc.Timezone))
 		}
 	}
-}
-
-func warnIfTenantJobsCannotSeeTenants(cfg *config.Config, hasTenantJobs bool, log *slog.Logger) {
-	if !hasTenantJobs || cfg.DB.Driver != db.DriverPostgres {
-		return
-	}
-	if !cfg.Tenant.RLSEnforce || cfg.DB.Maintenance.DSN != "" {
-		return
-	}
-	log.Warn("boot: tenant-scoped scheduler jobs will see zero tenants - " +
-		"tenant.rlsEnforce is true and db.maintenance.dsn is empty; set ALT_DB_MAINTENANCE_DSN to a BYPASSRLS role")
 }
 
 var _ scheduler.ErrorReporter = reporterAdapter{}

@@ -79,32 +79,25 @@ connections and never reaches migrations.
 
 Boot fails if the runtime role has `BYPASSRLS` and `db.allowBypassRLS` is `false`.
 
-### Maintenance role
+### Cross-tenant reads
 
 Tenant-scoped scheduler jobs must first ask "which tenants exist?" — a
 question no single tenant's scope can answer. `altempl_service` is
-`NOBYPASSRLS`, so under `tenant.rlsEnforce=true` it sees zero orgs. That is
-what `db.maintenance.dsn` is for: a fourth credential used only for
-cross-tenant maintenance reads.
+`NOBYPASSRLS`, so under `tenant.rlsEnforce=true` a direct read of
+`<prefix>orgs` returns zero rows.
 
-Grant it narrowly — `BYPASSRLS` and **read-only**:
+`SECURITY DEFINER` wrapper functions answer it instead. Migration 005 creates
+them owned by `altempl_owner`, which holds `BYPASSRLS`, with `search_path`
+pinned and `EXECUTE` revoked from `PUBLIC`. `altempl_service` reaches them
+through the `ALTER DEFAULT PRIVILEGES … GRANT EXECUTE ON FUNCTIONS` grant in
+`scripts/db/provision.sh`.
 
-```sql
-CREATE ROLE altempl_maint LOGIN PASSWORD '<maint-pw>' BYPASSRLS;
-GRANT CONNECT ON DATABASE altempl TO altempl_maint;
-GRANT USAGE ON SCHEMA public TO altempl_maint;
-GRANT SELECT ON ALL TABLES IN SCHEMA public TO altempl_maint;
-ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO altempl_maint;
-```
+No fourth credential is involved. `BYPASSRLS` is a role attribute, not a
+privilege, so granting `altempl_owner` to another role does not confer it —
+only executing a function owned by `altempl_owner` does.
 
-```
-ALT_DB_MAINTENANCE_DSN=postgres://altempl_maint:<maint-pw>@host:5432/altempl?sslmode=require
-```
-
-Leaving `db.maintenance.dsn` empty under `tenant.rlsEnforce=true` makes every
-tenant-scoped job **silently no-op** — tenant enumeration returns zero rows,
-so the job runs, reports success, and touches nothing. Boot logs a warning
-when it detects this combination; treat that warning as a misconfiguration.
+Migration 005 refuses to apply if the migration role lacks `BYPASSRLS`, and
+names the `ALTER ROLE` that fixes it.
 
 ## Reader replica
 

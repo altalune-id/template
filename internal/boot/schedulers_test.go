@@ -103,44 +103,6 @@ func TestWarnUnusedTimezoneOverrides(t *testing.T) {
 	}
 }
 
-func TestWarnIfTenantJobsCannotSeeTenants(t *testing.T) {
-	tests := []struct {
-		name          string
-		driver        db.Driver
-		rlsEnforce    bool
-		maintenance   string
-		hasTenantJobs bool
-		wantWarn      bool
-	}{
-		{"warns", db.DriverPostgres, true, "", true, true},
-		{"no tenant jobs", db.DriverPostgres, true, "", false, false},
-		{"sqlite", db.DriverSQLite, true, "", true, false},
-		{"rls not enforced", db.DriverPostgres, false, "", true, false},
-		{"maintenance dsn set", db.DriverPostgres, true, "postgres://m", true, false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			var buf bytes.Buffer
-			log := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn}))
-			cfg := &config.Config{
-				DB: db.DBConfig{
-					Driver:      tt.driver,
-					Maintenance: db.MaintenanceConfig{DSN: tt.maintenance},
-				},
-				Tenant: config.TenantConfig{RLSEnforce: tt.rlsEnforce},
-			}
-
-			warnIfTenantJobsCannotSeeTenants(cfg, tt.hasTenantJobs, log)
-
-			if !tt.wantWarn {
-				require.Empty(t, buf.String())
-				return
-			}
-			require.Contains(t, buf.String(), "zero tenants")
-		})
-	}
-}
-
 func TestBootServer_RegistersEveryProvidersJobs(t *testing.T) {
 	srv, err := BootServer(context.Background(), schedulerBootCfg(t))
 	require.NoError(t, err)

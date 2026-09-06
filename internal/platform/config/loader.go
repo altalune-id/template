@@ -93,7 +93,6 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("db.connectBackoff", "250ms")
 	v.SetDefault("db.health.interval", "30s")
 	v.SetDefault("db.health.timeout", "2s")
-	v.SetDefault("db.maintenance.maxOpenConns", 2)
 
 	v.SetDefault("scheduler.enabled", true)
 	v.SetDefault("scheduler.timezone", "UTC")

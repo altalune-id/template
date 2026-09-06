@@ -112,29 +112,22 @@ timezone is an operator knob.
 
 ## Database
 
-| Key                              | Default | Awareness          | Meaning                                                                                                                                      |
-| -------------------------------- | ------- | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| `db.maintenance.dsn`             | —       | `secret,bootstrap` | Credential for cross-tenant maintenance reads (tenant enumeration). Expected `BYPASSRLS` and read-only. Empty falls back to the writer pool. |
-| `db.maintenance.role`            | —       | `bootstrap`        | `SET ROLE` applied on each maintenance connection.                                                                                           |
-| `db.maintenance.maxOpenConns`    | `2`     | `-`                | Cap on the maintenance pool. Small on purpose — it only enumerates tenants.                                                                  |
-| `db.maintenance.maxIdleConns`    | `0`     | `-`                | Idle cap on the maintenance pool.                                                                                                            |
-| `db.maintenance.connMaxLifetime` | `0`     | `-`                | Max lifetime of a maintenance connection.                                                                                                    |
-| `db.maintenance.connMaxIdleTime` | `0`     | `-`                | Max idle time of a maintenance connection.                                                                                                   |
-| `db.connectTimeout`              | `30s`   | `-`                | Total budget for the initial connect-and-ping at boot, retries included. `0` disables retrying.                                              |
-| `db.connectBackoff`              | `250ms` | `-`                | Starting backoff between connect attempts; doubles per attempt, capped at 5s, and never overruns `connectTimeout`.                           |
-| `db.health.interval`             | `30s`   | `-`                | Tick cadence of the `db-health` worker.                                                                                                      |
-| `db.health.timeout`              | `2s`    | `-`                | Per-handle ping timeout within one probe round.                                                                                              |
+| Key                  | Default | Awareness | Meaning                                                                                                            |
+| -------------------- | ------- | --------- | ------------------------------------------------------------------------------------------------------------------ |
+| `db.connectTimeout`  | `30s`   | `-`       | Total budget for the initial connect-and-ping at boot, retries included. `0` disables retrying.                    |
+| `db.connectBackoff`  | `250ms` | `-`       | Starting backoff between connect attempts; doubles per attempt, capped at 5s, and never overruns `connectTimeout`. |
+| `db.health.interval` | `30s`   | `-`       | Tick cadence of the `db-health` worker.                                                                            |
+| `db.health.timeout`  | `2s`    | `-`       | Per-handle ping timeout within one probe round.                                                                    |
 
-The separate reader and maintenance handles are Postgres-only; under
-`driver: sqlite` their DSNs are ignored and every handle aliases the writer.
+The separate reader handle is Postgres-only; under `driver: sqlite` its DSN is
+ignored and the reader aliases the writer.
 
 `/readyz` reports the snapshot the `db-health` worker writes, so
 `db.health.interval` sets how stale a readiness answer can be. Boot takes one
 synchronous probe, so `/readyz` is accurate before the first tick. The worker
 is independent of the scheduler and runs in every replica, so `/readyz` stays
 DB-aware under `scheduler.enabled=false` and `serve --no-scheduler` alike. See
-[`DEPLOYMENT.md`](DEPLOYMENT.md) for the maintenance role's grants and the
-RLS interaction.
+[`DEPLOYMENT.md`](DEPLOYMENT.md) for the role grants and the RLS interaction.
 
 ## Validation
 
