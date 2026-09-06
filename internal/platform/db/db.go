@@ -3,14 +3,17 @@ package db
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 
-	_ "github.com/jackc/pgx/v5/stdlib" // postgres driver: registers "pgx" with database/sql
-	_ "modernc.org/sqlite"             // sqlite driver: registers "sqlite" with database/sql
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/stdlib"
+	_ "modernc.org/sqlite" // sqlite driver: registers "sqlite" with database/sql
 )
 
 // Open opens the driver-specific *sql.DB, pings it with bounded retry, and applies pool tuning.
@@ -21,27 +24,23 @@ func Open(ctx context.Context, cfg DBConfig, log *slog.Logger) (*sql.DB, error) 
 
 	var (
 		driver string
-		dsn    = cfg.DSN
+		db     *sql.DB
+		err    error
 	)
 	switch cfg.Driver {
 	case DriverSQLite:
-		if err := ensureDirFor(dsn); err != nil {
-			return nil, err
-		}
-		if !strings.HasPrefix(dsn, "file:") && dsn != ":memory:" {
-			dsn = fmt.Sprintf("file:%s?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)", dsn)
-		}
 		driver = "sqlite"
+		db, err = openSQLite(cfg)
 	case DriverPostgres:
 		driver = "pgx"
+		db, err = openPostgres(cfg)
 	default:
 		return nil, fmt.Errorf("db: unknown driver %q", cfg.Driver)
 	}
-
-	db, err := sql.Open(driver, dsn)
 	if err != nil {
-		return nil, fmt.Errorf("db: open %s: %w", driver, err)
+		return nil, err
 	}
+
 	pingErr := retry(withRetryLogger(ctx, log), cfg.ConnectTimeout, cfg.ConnectBackoff,
 		func(attemptCtx context.Context) error { return db.PingContext(attemptCtx) })
 	if pingErr != nil {
@@ -73,6 +72,47 @@ func Open(ctx context.Context, cfg DBConfig, log *slog.Logger) (*sql.DB, error) 
 	}
 
 	return db, nil
+}
+
+func openSQLite(cfg DBConfig) (*sql.DB, error) {
+	dsn := cfg.DSN
+	if err := ensureDirFor(dsn); err != nil {
+		return nil, err
+	}
+	if !strings.HasPrefix(dsn, "file:") && dsn != ":memory:" {
+		dsn = fmt.Sprintf("file:%s?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)", dsn)
+	}
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		return nil, fmt.Errorf("db: open sqlite: %w", err)
+	}
+	return db, nil
+}
+
+func openPostgres(cfg DBConfig) (*sql.DB, error) {
+	connCfg, err := pgx.ParseConfig(cfg.DSN)
+	if err != nil {
+		return nil, fmt.Errorf("db: parse dsn: %w", err)
+	}
+	if cfg.Role == "" {
+		return stdlib.OpenDB(*connCfg), nil
+	}
+	if err := validateRoleIdent(cfg.Role); err != nil {
+		return nil, err
+	}
+	stmt := "SET ROLE " + quoteIdent(cfg.Role)
+	afterConnect := func(ctx context.Context, conn *pgx.Conn) error {
+		_, execErr := conn.Exec(ctx, stmt)
+		if execErr == nil {
+			return nil
+		}
+		wrapped := fmt.Errorf("db: SET ROLE %q: %w", cfg.Role, execErr)
+		if _, ok := errors.AsType[*pgconn.PgError](execErr); ok {
+			return permanent(wrapped)
+		}
+		return wrapped
+	}
+	return stdlib.OpenDB(*connCfg, stdlib.OptionAfterConnect(afterConnect)), nil
 }
 
 func ensureDirFor(path string) error {
