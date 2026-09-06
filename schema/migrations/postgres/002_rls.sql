@@ -34,6 +34,7 @@ CREATE POLICY {{.TablePrefix}}todos_tenant
   ON {{.Schema}}.{{.TablePrefix}}todos
   USING (org_id = current_setting('app.current_org_id', true)::uuid);
 {{end}}
+{{if .Role}}RESET ROLE;{{end}}
 
 -- +goose StatementEnd
 
@@ -63,5 +64,6 @@ DROP POLICY IF EXISTS {{.TablePrefix}}orgs_tenant ON {{.Schema}}.{{.TablePrefix}
 ALTER TABLE {{.Schema}}.{{.TablePrefix}}orgs NO FORCE ROW LEVEL SECURITY;
 ALTER TABLE {{.Schema}}.{{.TablePrefix}}orgs DISABLE ROW LEVEL SECURITY;
 {{end}}
+{{if .Role}}RESET ROLE;{{end}}
 
 -- +goose StatementEnd

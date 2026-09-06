@@ -9,6 +9,7 @@ CREATE TABLE {{.Schema}}.{{.TablePrefix}}bootstrap (
   onboarded_by  UUID NOT NULL REFERENCES {{.Schema}}.{{.TablePrefix}}users(id),
   method        TEXT NOT NULL CHECK (method IN ('env-genesis','web-onboard','cli-init'))
 );
+{{if .Role}}RESET ROLE;{{end}}
 
 -- +goose StatementEnd
 
@@ -18,5 +19,6 @@ CREATE TABLE {{.Schema}}.{{.TablePrefix}}bootstrap (
 {{if .Role}}SET ROLE {{.Role}};{{end}}
 
 DROP TABLE IF EXISTS {{.Schema}}.{{.TablePrefix}}bootstrap;
+{{if .Role}}RESET ROLE;{{end}}
 
 -- +goose StatementEnd
