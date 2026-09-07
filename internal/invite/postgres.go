@@ -17,13 +17,30 @@ import (
 )
 
 type postgresStore struct {
-	pool  pdb.Pool
-	pc    *tenant.PgConn
-	table *pgent.Invites
+	pool               pdb.Pool
+	pc                 *tenant.PgConn
+	table              *pgent.Invites
+	byTokenHashStmt    string
+	pendingByEmailStmt string
 }
 
 func newPostgresStore(pool pdb.Pool, pc *tenant.PgConn, schema, tablePrefix string) *postgresStore {
-	return &postgresStore{pool: pool, pc: pc, table: pgent.NewInvites(schema, tablePrefix)}
+	if schema == "" {
+		schema = "public"
+	}
+	cols := `i.id AS "invites.id", i.org_id AS "invites.org_id", i.email AS "invites.email", ` +
+		`i.role AS "invites.role", i.token_hash AS "invites.token_hash", ` +
+		`i.expires_at AS "invites.expires_at", i.accepted_at AS "invites.accepted_at", ` +
+		`i.created_at AS "invites.created_at"`
+	fn := schema + "." + tablePrefix
+	return &postgresStore{
+		pool:  pool,
+		pc:    pc,
+		table: pgent.NewInvites(schema, tablePrefix),
+		// NOTE: RawStatement because go-jet has no builder for a set-returning function in FROM position.
+		byTokenHashStmt:    "SELECT " + cols + " FROM " + fn + "resolve_invite_by_token_hash(#hash) i",
+		pendingByEmailStmt: "SELECT " + cols + " FROM " + fn + "list_pending_invites_for_email(#email) i",
+	}
 }
 
 type pgInviteRow struct {

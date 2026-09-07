@@ -24,7 +24,10 @@ func TestMigrateUp_DefinerFunctionsAreOwnedByTheMigrationRole(t *testing.T) {
 	require.True(t, cfg.Tenant.RLSEnforce, "the wrappers only matter under FORCE row level security")
 	require.NoError(t, schema.MigrateUp(t.Context(), migDB, cfg))
 
-	for _, sig := range []string{"list_org_ids()", "resolve_org_by_slug(text)", "list_orgs_for_user(uuid)"} {
+	for _, sig := range []string{
+		"list_org_ids()", "resolve_org_by_slug(text)", "list_orgs_for_user(uuid)",
+		"resolve_invite_by_token_hash(text)", "list_pending_invites_for_email(text)",
+	} {
 		name := prefix + strings.SplitN(sig, "(", 2)[0]
 
 		var owner string
@@ -53,7 +56,7 @@ func wrapperCount(t *testing.T, conn *sql.DB, prefix string) int {
 	var n int
 	require.NoError(t, conn.QueryRowContext(t.Context(),
 		`SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
-		  WHERE n.nspname = 'public' AND p.proname LIKE $1`,
+		  WHERE n.nspname = 'public' AND p.proname LIKE $1 AND p.prosecdef`,
 		prefix+"%").Scan(&n))
 	return n
 }
