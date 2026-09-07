@@ -217,8 +217,13 @@ func (s *Service) RemoveMember(ctx context.Context, orgID, userID uuid.UUID) err
 		}
 		return s.unexpected(ctx, "org.RemoveMember: MembershipOf", fmt.Errorf("org.RemoveMember: MembershipOf: %w", err), "org_id", orgID.String(), "user_id", userID.String())
 	}
-	if m.System {
-		return &SystemProtectedError{Op: "remove_member", OrgID: orgID.String(), UserID: userID.String(), Resource: "membership"}
+	// SECURITY: refused here rather than in the handler so every transport — web, API, CLI — is gated.
+	tc, tErr := tenant.From(ctx)
+	if tErr != nil {
+		return tErr
+	}
+	if refusal := RemovalRefusal(orgID, tc.UserID, userID, m.Role, m.System); refusal != nil {
+		return refusal
 	}
 	if err := s.store.RemoveMember(ctx, orgID, userID); err != nil {
 		if IsMembershipMissingError(err) {

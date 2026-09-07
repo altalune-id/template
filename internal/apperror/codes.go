@@ -27,6 +27,8 @@ const (
 	CodeOrgMembershipMissing = "org.membership_missing"
 	CodeOrgCreationDisabled  = "org.creation_disabled"
 	CodeOrgSystemProtected   = "org.system_protected"
+	CodeOrgSelfRemoval       = "org.self_removal"
+	CodeOrgOwnerRemoval      = "org.owner_removal"
 
 	CodeProjectNotFound        = "project.not_found"
 	CodeProjectAlreadyExists   = "project.already_exists"

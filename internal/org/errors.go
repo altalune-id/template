@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/google/uuid"
 	"google.golang.org/grpc/codes"
 
 	apperrorv1 "altalune.id/template/gen/go/apperror/v1"
@@ -234,6 +235,78 @@ func (e *SystemProtectedError) ToAppError() *apperror.AppError {
 		codes.FailedPrecondition,
 		&apperrorv1.ErrorDetail{Code: apperror.CodeOrgSystemProtected},
 	)
+}
+
+// RemovalRefusal reports why actor may not remove the target membership, or nil when removal is allowed.
+// SECURITY: the service gate and the members view both consult this, so a hidden button and a refused post cannot drift apart.
+func RemovalRefusal(orgID, actor, target uuid.UUID, role Role, system bool) error {
+	switch {
+	case system:
+		return &SystemProtectedError{Op: "remove_member", OrgID: orgID.String(), UserID: target.String(), Resource: "membership"}
+	case actor == target:
+		return &SelfRemovalError{OrgID: orgID.String(), UserID: target.String()}
+	case role == RoleOwner:
+		return &OwnerRemovalError{OrgID: orgID.String(), UserID: target.String()}
+	}
+	return nil
+}
+
+// SelfRemovalError signals that a caller tried to remove their own membership.
+type SelfRemovalError struct {
+	OrgID  string
+	UserID string
+}
+
+func (e *SelfRemovalError) Error() string {
+	if e == nil {
+		return "org: cannot remove your own membership"
+	}
+	return fmt.Sprintf("org: cannot remove your own membership: org=%s user=%s", e.OrgID, e.UserID)
+}
+
+// ToAppError maps SelfRemovalError to a FailedPrecondition envelope.
+func (e *SelfRemovalError) ToAppError() *apperror.AppError {
+	return apperror.New(
+		apperror.CodeOrgSelfRemoval,
+		"You cannot remove your own membership",
+		codes.FailedPrecondition,
+		&apperrorv1.ErrorDetail{Code: apperror.CodeOrgSelfRemoval},
+	)
+}
+
+// IsSelfRemovalError reports whether err's tree contains a *SelfRemovalError.
+func IsSelfRemovalError(err error) bool {
+	_, ok := errors.AsType[*SelfRemovalError](err)
+	return ok
+}
+
+// OwnerRemovalError signals that a caller tried to remove a membership carrying the owner role.
+type OwnerRemovalError struct {
+	OrgID  string
+	UserID string
+}
+
+func (e *OwnerRemovalError) Error() string {
+	if e == nil {
+		return "org: cannot remove an owner"
+	}
+	return fmt.Sprintf("org: cannot remove an owner: org=%s user=%s", e.OrgID, e.UserID)
+}
+
+// ToAppError maps OwnerRemovalError to a FailedPrecondition envelope.
+func (e *OwnerRemovalError) ToAppError() *apperror.AppError {
+	return apperror.New(
+		apperror.CodeOrgOwnerRemoval,
+		"An owner cannot be removed",
+		codes.FailedPrecondition,
+		&apperrorv1.ErrorDetail{Code: apperror.CodeOrgOwnerRemoval},
+	)
+}
+
+// IsOwnerRemovalError reports whether err's tree contains an *OwnerRemovalError.
+func IsOwnerRemovalError(err error) bool {
+	_, ok := errors.AsType[*OwnerRemovalError](err)
+	return ok
 }
 
 // IsSystemProtectedError reports whether err's tree contains a *SystemProtectedError.

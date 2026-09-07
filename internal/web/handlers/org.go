@@ -135,7 +135,7 @@ func (h *OrgHandler) GetShow(w http.ResponseWriter, r *http.Request) {
 	canManage, _ := h.isManager(ctx, o.ID, p.UserID)
 	Render(w, r, templates.MembersLayout(h.LayoutForOrg(r, o.Name, slug, "members"), templates.MembersView{
 		OrgSlug:   slug,
-		Members:   memberProfileRows(profiles),
+		Members:   memberProfileRows(profiles, o.ID, p.UserID),
 		CanManage: canManage,
 	}))
 }
@@ -169,6 +169,14 @@ func (h *OrgHandler) PostRemoveMember(w http.ResponseWriter, r *http.Request) {
 		}
 		if org.IsMembershipMissingError(err) || org.IsNotFoundError(err) {
 			h.ErrorPage(w, r, http.StatusNotFound, "Member not found", "That person is not a member of this organization.")
+			return
+		}
+		if org.IsSelfRemovalError(err) {
+			h.ErrorPage(w, r, http.StatusConflict, "Remove not allowed", "You cannot remove your own membership.")
+			return
+		}
+		if org.IsOwnerRemovalError(err) {
+			h.ErrorPage(w, r, http.StatusConflict, "Remove not allowed", "An owner cannot be removed.")
 			return
 		}
 		// SECURITY: err.Error() names internal ids, so it stays in the log and never reaches the page.
@@ -218,15 +226,17 @@ func orgSummaries(items []*org.Org) []templates.OrgSummary {
 	return out
 }
 
-func memberProfileRows(items []*org.MemberProfile) []templates.MemberRow {
+func memberProfileRows(items []*org.MemberProfile, orgID, viewer uuid.UUID) []templates.MemberRow {
 	out := make([]templates.MemberRow, 0, len(items))
 	for _, m := range items {
 		out = append(out, templates.MemberRow{
-			UserID: m.UserID.String(),
-			Email:  m.Email,
-			Name:   m.Name,
-			Role:   string(m.Role),
-			System: m.System,
+			UserID:    m.UserID.String(),
+			Email:     m.Email,
+			Name:      m.Name,
+			Role:      string(m.Role),
+			System:    m.System,
+			IsSelf:    m.UserID == viewer,
+			Removable: org.RemovalRefusal(orgID, viewer, m.UserID, m.Role, m.System) == nil,
 		})
 	}
 	return out

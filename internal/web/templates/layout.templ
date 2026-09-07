@@ -39,7 +39,8 @@ templ Layout(d web.LayoutData) {
 			@topNav(d)
 			if d.Principal != nil && d.ActiveNav.Scope != web.NavScopeNone {
 				<div class="flex min-h-[calc(100vh-3.5rem)]">
-					<aside class="sticky top-14 hidden h-[calc(100vh-3.5rem)] shrink-0 flex-col md:flex md:w-60 md:border-r border-subtle" style="background:hsl(var(--card));color:hsl(var(--card-foreground));">
+					<aside class="sticky top-14 z-20 hidden h-[calc(100vh-3.5rem)] shrink-0 flex-col md:flex md:w-60 md:border-r border-subtle" style="background:hsl(var(--card));color:hsl(var(--card-foreground));">
+						@orgSwitcherHeader(d)
 						<div class="flex-1 overflow-y-auto">
 							@orgSidebar(d)
 						</div>
@@ -186,9 +187,16 @@ func userInitial(email string) string {
 	return string(first)
 }
 
+// NOTE: the switcher renders outside the sidebar's scroll container — an overflow ancestor clips an
+// absolutely positioned dropdown no matter its z-index, which is what buried this popover under the page.
+templ orgSwitcherHeader(d web.LayoutData) {
+	<div class="shrink-0 px-3 pt-3">
+		@orgSwitcherPill(d)
+	</div>
+}
+
 templ orgSidebar(d web.LayoutData) {
 	<div class="flex flex-col gap-1 p-3">
-		@orgSwitcherPill(d)
 		if d.ActiveOrg != nil {
 			<p class="mt-4 mb-2 px-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground/70">{ d.ActiveOrg.Name }</p>
 			@orgMenu(d, d.ActiveOrg.Slug)
@@ -568,6 +576,7 @@ templ mobileDrawer(d web.LayoutData) {
 				@icons.Icon("x", "h-5 w-5")
 			</label>
 		</div>
+		@orgSwitcherHeader(d)
 		<div class="flex-1 overflow-y-auto">
 			@orgSidebar(d)
 			if d.ActiveNav.Scope == web.NavScopeProject {
