@@ -22,12 +22,32 @@ func (s *postgresStore) ByID(ctx context.Context, id uuid.UUID) (*Invite, error)
 	return s.queryOne(ctx, tx, s.table.ID.EQ(postgres.UUID(id)), &NotFoundError{ID: id.String()})
 }
 
-// SECURITY: bypasses tenant scope; the token hash is unguessable so cross-tenant lookup is safe.
+// SECURITY: resolves a token before any tenant scope exists; the SECURITY DEFINER wrapper lifts RLS, and the token hash is unguessable.
 func (s *postgresStore) ByTokenHash(ctx context.Context, hash string) (*Invite, error) {
-	if tx, ok := pdb.CurrentTx(ctx); ok {
-		return s.queryOne(ctx, tx, s.table.TokenHash.EQ(postgres.String(hash)), &NotFoundError{})
+	rows, err := s.scanWrapped(ctx, s.byTokenHashStmt, postgres.RawArgs{"#hash": hash})
+	if err != nil {
+		return nil, err
 	}
-	return s.queryOne(ctx, s.pc.DB, s.table.TokenHash.EQ(postgres.String(hash)), &NotFoundError{})
+	if len(rows) == 0 {
+		return nil, &NotFoundError{}
+	}
+	return rows[0], nil
+}
+
+func (s *postgresStore) scanWrapped(ctx context.Context, rawQuery string, args postgres.RawArgs) ([]*Invite, error) {
+	execer := qrm.DB(s.pc.DB)
+	if tx, ok := pdb.CurrentTx(ctx); ok {
+		execer = tx
+	}
+	var rows []pgInviteRow
+	if err := postgres.RawStatement(rawQuery, args).QueryContext(ctx, execer, &rows); err != nil {
+		return nil, fmt.Errorf("invite.postgres: %w", err)
+	}
+	out := make([]*Invite, 0, len(rows))
+	for i := range rows {
+		out = append(out, rows[i].toInvite())
+	}
+	return out, nil
 }
 
 func (s *postgresStore) ListPending(ctx context.Context, orgID uuid.UUID) ([]*Invite, error) {
@@ -54,24 +74,7 @@ func (s *postgresStore) ListPending(ctx context.Context, orgID uuid.UUID) ([]*In
 	return out, nil
 }
 
-// SECURITY: cross-tenant lookup by email is required to route invited OIDC signups; the email is scoped to the caller's own identity.
+// SECURITY: lists invites across orgs to route invited signups before any tenant scope exists; the SECURITY DEFINER wrapper lifts RLS, and the email is the caller's own.
 func (s *postgresStore) FindPendingForEmail(ctx context.Context, email string) ([]*Invite, error) {
-	var execer qrm.DB = s.pc.DB
-	if tx, ok := pdb.CurrentTx(ctx); ok {
-		execer = tx
-	}
-	stmt := postgres.SELECT(s.table.AllColumns).
-		FROM(s.table).
-		WHERE(s.table.Email.EQ(postgres.String(email)).
-			AND(s.table.AcceptedAt.IS_NULL())).
-		ORDER_BY(s.table.CreatedAt.ASC())
-	var rows []pgInviteRow
-	if err := stmt.QueryContext(ctx, execer, &rows); err != nil {
-		return nil, fmt.Errorf("invite.postgres.FindPendingForEmail: %w", err)
-	}
-	out := make([]*Invite, 0, len(rows))
-	for i := range rows {
-		out = append(out, rows[i].toInvite())
-	}
-	return out, nil
+	return s.scanWrapped(ctx, s.pendingByEmailStmt, postgres.RawArgs{"#email": email})
 }

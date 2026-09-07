@@ -4,14 +4,14 @@ How altempl isolates tenants and routes sign-ins. Read in five minutes.
 
 ## Modes
 
-| | `selfhosted` | `cloud` |
-|---|---|---|
-| DB driver | `sqlite` or `postgres` | `postgres` only (enforced) |
-| OIDC | optional | required (enforced) |
-| Local `/login` password | on by default | off; `ALT_GENESIS_BREAK_GLASS=true` to re-enable |
-| Org creation from UI | disabled | enabled |
-| Public OIDC signup | disabled (invite-only) | enabled |
-| Invites | require OIDC configured | always available |
+|                         | `selfhosted`            | `cloud`                                          |
+| ----------------------- | ----------------------- | ------------------------------------------------ |
+| DB driver               | `sqlite` or `postgres`  | `postgres` only (enforced)                       |
+| OIDC                    | optional                | required (enforced)                              |
+| Local `/login` password | on by default           | off; `ALT_GENESIS_BREAK_GLASS=true` to re-enable |
+| Org creation from UI    | disabled                | enabled                                          |
+| Public OIDC signup      | disabled (invite-only)  | enabled                                          |
+| Invites                 | require OIDC configured | always available                                 |
 
 ## Data isolation — how tenants stay separated
 
@@ -23,11 +23,11 @@ How altempl isolates tenants and routes sign-ins. Read in five minutes.
 
 ## Three connection tiers (Postgres, production)
 
-| Role | Purpose | BYPASSRLS |
-|---|---|---|
-| `altempl_owner` | Owns objects (tables, indices) | no |
-| `altempl_migrator` | Runs migrations under `SET ROLE altempl_owner` | no |
-| `altempl_service` | Runtime connection | no |
+| Role               | Purpose                                        | BYPASSRLS |
+| ------------------ | ---------------------------------------------- | --------- |
+| `altempl_owner`    | Owns objects (tables, indices)                 | no        |
+| `altempl_migrator` | Runs migrations under `SET ROLE altempl_owner` | no        |
+| `altempl_service`  | Runtime connection                             | no        |
 
 Provision via `scripts/db/provision.sh` (`APP=altempl DB_NAME=altempl`). Point `ALT_DB_MIGRATOR_DSN` at `altempl_migrator` (`ALT_DB_MIGRATOR_ROLE=altempl_owner`) and `ALT_DB_DSN` at `altempl_service`. Boot uses migrator briefly for migrations, closes it, then serves from service.
 
@@ -102,7 +102,8 @@ flowchart TD
    - `CREATE TABLE {{.Schema}}.{{.TablePrefix}}<name> ( … org_id UUID NOT NULL REFERENCES … );`
    - `ALTER TABLE {{.Schema}}.{{.TablePrefix}}<name> ENABLE ROW LEVEL SECURITY;`
    - `ALTER TABLE {{.Schema}}.{{.TablePrefix}}<name> FORCE ROW LEVEL SECURITY;`
-   - `CREATE POLICY {{.TablePrefix}}<name>_tenant ON {{.Schema}}.{{.TablePrefix}}<name> USING (org_id = current_setting('app.current_org_id')::uuid);`
+   - `CREATE POLICY {{.TablePrefix}}<name>_tenant ON {{.Schema}}.{{.TablePrefix}}<name> USING (org_id = {{.Schema}}.{{.TablePrefix}}current_org_id());`
+   - Call the helper — never inline `current_setting(...)::uuid`. `schema` guards this with a test.
 2. Mirror in `schema/migrations/sqlite/NNN_<name>.sql` (no RLS).
 3. Bump `schema/migrations/postgres/VERSION` and `schema/migrations/sqlite/VERSION`.
 4. `make tenant-tables` — regenerates `schema/tenant_tables_gen.go`.
@@ -110,6 +111,9 @@ flowchart TD
 6. Register in `internal/boot/server.go`.
 
 ## Common pitfalls
+
+- **Inlining `current_setting('app.current_org_id')::uuid` in a policy** → a transaction-local `set_config` resets to `''`, not NULL, when the transaction ends, so any pooled connection that once served a tenant makes `''::uuid` raise `22P02` on every later cross-tenant read. Use `{{.Schema}}.{{.TablePrefix}}current_org_id()`, which wraps it in `NULLIF`.
+- **Reading a tenant table before a tenant exists** — invite-by-token, invite-by-email, org-by-slug. RLS hides every row, so the query returns empty rather than failing. Add a `SECURITY DEFINER` wrapper in `005_definer_functions.sql` and read through it.
 
 - **Forgetting `set_config` in a tx** → RLS blocks all rows for `altempl_service`. Symptom: empty result sets in prod, works in dev under superuser. Fix: use `tenant.PgConn.BeginTenanted` (stores already do).
 - **Cross-tenant leak in a service method** — a service that accepts `orgID` as a parameter but doesn't compare against `tenant.From(ctx).OrgID`. Always use the org from ctx as source of truth; parameters are for scoping within the same tenant only.
