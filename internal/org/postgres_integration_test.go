@@ -26,14 +26,14 @@ func newPostgresStoreForTest(t *testing.T) (store org.Store, tc tenant.Context, 
 	cfg := config.Defaults()
 	cfg.DB.Driver = "postgres"
 	cfg.DB.DSN = h.DSN
-	cfg.DB.Schema = "public"
+	cfg.DB.Schema = h.Schema
 	cfg.DB.AllowBypassRLS = true
 
 	require.NoError(t, schema.MigrateUp(t.Context(), sqlDB, cfg))
 
 	pc := tenant.NewPgConn(sqlDB)
 	prefix = cfg.DB.TablePrefix
-	store = org.NewStore(db.DBConfig{Driver: db.DriverPostgres, Schema: "public", TablePrefix: prefix}, db.Pool{W: sqlDB, R: sqlDB}, pc)
+	store = org.NewStore(db.DBConfig{Driver: db.DriverPostgres, Schema: h.Schema, TablePrefix: prefix}, db.Pool{W: sqlDB, R: sqlDB}, pc)
 
 	ownerID := uuid.New()
 	now := time.Now().UTC()

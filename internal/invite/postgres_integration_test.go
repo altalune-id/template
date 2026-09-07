@@ -27,7 +27,7 @@ func newInviteStoreForTest(t *testing.T) (invite.Store, uuid.UUID, uuid.UUID) { 
 	cfg := config.Defaults()
 	cfg.DB.Driver = "postgres"
 	cfg.DB.DSN = h.DSN
-	cfg.DB.Schema = "public"
+	cfg.DB.Schema = h.Schema
 	cfg.DB.AllowBypassRLS = true
 
 	require.NoError(t, schema.MigrateUp(t.Context(), sqlDB, cfg))
@@ -36,7 +36,7 @@ func newInviteStoreForTest(t *testing.T) (invite.Store, uuid.UUID, uuid.UUID) { 
 	userID, orgID := seedInviteUserAndOrg(t, sqlDB, prefix)
 
 	pc := tenant.NewPgConn(sqlDB)
-	store := invite.NewStore(db.DBConfig{Driver: db.DriverPostgres, Schema: "public", TablePrefix: prefix}, db.Pool{W: sqlDB, R: sqlDB}, pc)
+	store := invite.NewStore(db.DBConfig{Driver: db.DriverPostgres, Schema: h.Schema, TablePrefix: prefix}, db.Pool{W: sqlDB, R: sqlDB}, pc)
 	return store, orgID, userID
 }
 

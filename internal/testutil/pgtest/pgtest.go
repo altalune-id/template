@@ -8,22 +8,27 @@ import (
 	"database/sql"
 	"net/url"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
-	// pgx stdlib driver registration for sql.Open("pgx", dsn).
-	_ "github.com/jackc/pgx/v5/stdlib"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/stdlib"
 	"github.com/moby/moby/client"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
+
+	"altalune.id/template/nanoid"
 )
 
 const (
-	envDSN     = "TEST_PG_DSN"
-	labelOwner = "id.altalune.pgtest"
-	staleAfter = 30 * time.Minute
+	envDSN       = "TEST_PG_DSN"
+	labelOwner   = "id.altalune.pgtest"
+	staleAfter   = 30 * time.Minute
+	schemaPrefix = "pgt_"
+	schemaLen    = 16
 )
 
 //nolint:gochecknoglobals // the stale-container sweep runs once per test binary, not once per test.
@@ -32,6 +37,7 @@ var sweepOnce sync.Once
 // Handle wraps an ephemeral or shared Postgres instance for a test.
 type Handle struct {
 	DSN       string
+	Schema    string
 	container testcontainers.Container
 }
 
@@ -52,7 +58,7 @@ func (h *Handle) Close() error {
 func New(t *testing.T) *Handle {
 	t.Helper()
 	if dsn := os.Getenv(envDSN); dsn != "" {
-		return &Handle{DSN: dsn}
+		return &Handle{DSN: dsn, Schema: uniqueSchema(t)}
 	}
 
 	t.Setenv("TESTCONTAINERS_RYUK_DISABLED", "true")
@@ -83,7 +89,7 @@ func New(t *testing.T) *Handle {
 		t.Fatalf("pgtest: connection string: %v", err)
 	}
 
-	h := &Handle{DSN: dsn, container: c}
+	h := &Handle{DSN: dsn, Schema: uniqueSchema(t), container: c}
 	t.Cleanup(func() {
 		if err := h.Close(); err != nil {
 			t.Logf("pgtest: terminate: %v", err)
@@ -138,21 +144,45 @@ func DSNWithUser(t *testing.T, baseDSN, user, pass string) string {
 	return u.String()
 }
 
-// OpenDB returns a *sql.DB against the handle's DSN with a fresh public schema, so each test starts from a clean slate on a shared instance.
+// OpenDB returns a *sql.DB whose search_path is pinned to the handle's own schema, dropped when the test ends.
+// NOTE: isolating per handle instead of resetting the public schema is what lets packages run in parallel against one shared TEST_PG_DSN.
 func (h *Handle) OpenDB(t *testing.T) *sql.DB {
 	t.Helper()
-	db, err := sql.Open("pgx", h.DSN)
-	if err != nil {
-		t.Fatalf("pgtest: sql.Open: %v", err)
+	if h.Schema == "" {
+		h.Schema = uniqueSchema(t)
 	}
-	if err := db.Ping(); err != nil {
-		_ = db.Close()
+	connCfg, err := pgx.ParseConfig(h.DSN)
+	if err != nil {
+		t.Fatalf("pgtest: parse DSN: %v", err)
+	}
+	connCfg.RuntimeParams["search_path"] = h.Schema
+
+	sqlDB := stdlib.OpenDB(*connCfg)
+	if err := sqlDB.PingContext(t.Context()); err != nil {
+		_ = sqlDB.Close()
 		t.Fatalf("pgtest: ping: %v", err)
 	}
-	if _, err := db.ExecContext(t.Context(), "DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;"); err != nil {
-		_ = db.Close()
-		t.Fatalf("pgtest: reset public schema: %v", err)
+
+	quoted := pgx.Identifier{h.Schema}.Sanitize()
+	if _, err := sqlDB.ExecContext(t.Context(), "CREATE SCHEMA IF NOT EXISTS "+quoted); err != nil {
+		_ = sqlDB.Close()
+		t.Fatalf("pgtest: create schema %s: %v", h.Schema, err)
 	}
-	t.Cleanup(func() { _ = db.Close() })
-	return db
+	// NOTE: t.Context() is already canceled by the time cleanups run, so teardown needs its own context.
+	t.Cleanup(func() {
+		if _, dropErr := sqlDB.ExecContext(context.Background(), "DROP SCHEMA IF EXISTS "+quoted+" CASCADE"); dropErr != nil {
+			t.Errorf("pgtest: leaked schema %s: %v", h.Schema, dropErr)
+		}
+		_ = sqlDB.Close()
+	})
+	return sqlDB
+}
+
+func uniqueSchema(t *testing.T) string {
+	t.Helper()
+	id, err := nanoid.New(schemaLen)
+	if err != nil {
+		t.Fatalf("pgtest: nanoid: %v", err)
+	}
+	return schemaPrefix + strings.ToLower(strings.NewReplacer("-", "", "_", "").Replace(id))
 }

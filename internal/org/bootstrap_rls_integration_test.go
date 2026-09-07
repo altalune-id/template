@@ -33,7 +33,7 @@ func TestPostgres_BootstrapSingleton_WithoutTenantContext_UnderRLS(t *testing.T)
 	cfg := config.Defaults()
 	cfg.DB.Driver = "postgres"
 	cfg.DB.DSN = h.DSN
-	cfg.DB.Schema = "public"
+	cfg.DB.Schema = h.Schema
 	cfg.DB.AllowBypassRLS = false
 	cfg.Tenant.RLSEnforce = true
 	require.NoError(t, schema.MigrateUp(t.Context(), sqlDB, cfg))
@@ -48,7 +48,7 @@ func TestPostgres_BootstrapSingleton_WithoutTenantContext_UnderRLS(t *testing.T)
 	require.NoError(t, err)
 
 	store := org.NewStore(
-		db.DBConfig{Driver: db.DriverPostgres, Schema: "public", TablePrefix: prefix},
+		db.DBConfig{Driver: db.DriverPostgres, Schema: h.Schema, TablePrefix: prefix},
 		db.Pool{W: sqlDB, R: sqlDB},
 		tenant.NewPgConn(sqlDB),
 	)
