@@ -16,6 +16,7 @@ type SignupCompleteView struct {
 	ProjectSlug    string
 	FieldErrors    map[string]string
 	Error          string
+	ErrorCode string
 }
 
 templ SignupCompletePage(d web.LayoutData, v SignupCompleteView) {
@@ -31,7 +32,7 @@ templ SignupCompletePage(d web.LayoutData, v SignupCompleteView) {
 			</p>
 		</header>
 		if v.Error != "" {
-			@ErrorBanner(d, v.Error)
+			@ErrorBanner(d, v.Error, v.ErrorCode)
 		}
 		<form method="post" action={ templ.SafeURL(d.Href("/signup/complete")) } class="mt-6 space-y-6" novalidate>
 			if v.AskDisplayName {

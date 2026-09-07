@@ -201,6 +201,7 @@ func (h *OnboardHandler) PostLocal(w http.ResponseWriter, r *http.Request) {
 		default:
 			h.LogErr("web onboard: create user", err)
 			view.Error = "Could not create admin."
+			view.ErrorCode = ErrorRef(err)
 		}
 		h.render(w, r, view)
 		return
@@ -210,6 +211,7 @@ func (h *OnboardHandler) PostLocal(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		h.LogErr("web onboard: bootstrap org", err)
 		view.Error = "Could not create organization."
+		view.ErrorCode = ErrorRef(err)
 		h.render(w, r, view)
 		return
 	}
@@ -226,6 +228,7 @@ func (h *OnboardHandler) PostLocal(w http.ResponseWriter, r *http.Request) {
 		if !onboard.IsAlreadyOnboardedError(err) {
 			h.LogErr("web onboard: mark bootstrap", err)
 			view.Error = "Could not mark deployment as onboarded."
+			view.ErrorCode = ErrorRef(err)
 			h.render(w, r, view)
 			return
 		}
@@ -244,6 +247,7 @@ func (h *OnboardHandler) PostLocal(w http.ResponseWriter, r *http.Request) {
 	if err := h.WriteSession(w, r, principal); err != nil {
 		h.LogErr("web onboard: write session", err)
 		view.Error = "Setup completed, but sign-in failed. Please sign in manually."
+		view.ErrorCode = ErrorRef(err)
 		h.render(w, r, view)
 		return
 	}
@@ -335,6 +339,7 @@ func (h *OnboardHandler) PostOIDCComplete(w http.ResponseWriter, r *http.Request
 	if err := h.Users.Promote(r.Context(), p.UserID); err != nil {
 		h.LogErr("web onboard: promote oidc admin", err)
 		view.Error = "Could not promote admin."
+		view.ErrorCode = ErrorRef(err)
 		h.render(w, r, view)
 		return
 	}
@@ -342,6 +347,7 @@ func (h *OnboardHandler) PostOIDCComplete(w http.ResponseWriter, r *http.Request
 	if err != nil {
 		h.LogErr("web onboard: bootstrap org for oidc admin", err)
 		view.Error = "Could not create the first organization."
+		view.ErrorCode = ErrorRef(err)
 		h.render(w, r, view)
 		return
 	}
@@ -356,6 +362,7 @@ func (h *OnboardHandler) PostOIDCComplete(w http.ResponseWriter, r *http.Request
 		if !onboard.IsAlreadyOnboardedError(err) {
 			h.LogErr("web onboard: oidc complete", err)
 			view.Error = "Could not mark deployment as onboarded."
+			view.ErrorCode = ErrorRef(err)
 			h.render(w, r, view)
 			return
 		}

@@ -9,6 +9,7 @@ type ProjectsView struct {
 	OrgSlug  string
 	Projects []ProjectSummary
 	Error    string
+	ErrorCode string
 }
 
 templ ProjectsPage(d web.LayoutData, v ProjectsView) {
@@ -24,7 +25,7 @@ templ ProjectsPage(d web.LayoutData, v ProjectsView) {
 			</a>
 		</header>
 		if v.Error != "" {
-			@ErrorBanner(d, v.Error)
+			@ErrorBanner(d, v.Error, v.ErrorCode)
 		}
 		if len(v.Projects) == 0 {
 			<div class="mt-6 rounded-lg border border-dashed border-border bg-card p-8 text-center">
@@ -34,17 +35,25 @@ templ ProjectsPage(d web.LayoutData, v ProjectsView) {
 		} else {
 			<ul class="mt-6 divide-y divide-border/50 overflow-hidden rounded-lg border border-border bg-card shadow-sm">
 				for _, p := range v.Projects {
-					<li class="flex items-center justify-between px-4 py-3">
-						<div class="min-w-0">
-							<p class="flex items-center gap-2 truncate text-sm font-medium text-foreground">
-								<span class="truncate">{ p.Name }</span>
-								if p.System {
-									<span class="inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800 ring-1 ring-inset ring-amber-200 dark:bg-amber-500/15 dark:text-amber-300 dark:ring-amber-500/25">{ d.Tr("common.system") }</span>
-								}
-							</p>
-							<p class="truncate text-xs text-muted-foreground">{ p.Slug }</p>
-						</div>
-						<a href={ templ.SafeURL(d.Href("/projects/" + p.Slug + "/overview")) } class="ml-4 text-sm font-medium text-muted-foreground hover:text-foreground">{ d.Tr("common.open") }</a>
+					<li>
+						<a
+							href={ templ.SafeURL(d.Href("/projects/" + p.Slug + "/overview")) }
+							class="group flex items-center gap-3 px-4 py-3 hover:bg-muted/60 focus-visible:bg-muted/60 focus-visible:outline-none"
+						>
+							<span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-border bg-background text-muted-foreground group-hover:text-foreground">
+								@icons.Icon("folder", "h-4 w-4")
+							</span>
+							<span class="min-w-0 flex-1">
+								<span class="flex items-center gap-2">
+									<span class="truncate text-sm font-medium text-foreground">{ p.Name }</span>
+									if p.System {
+										<span class="inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800 ring-1 ring-inset ring-amber-200 dark:bg-amber-500/15 dark:text-amber-300 dark:ring-amber-500/25">{ d.Tr("common.system") }</span>
+									}
+								</span>
+								<span class="mt-0.5 block truncate text-xs text-muted-foreground">{ p.Slug }</span>
+							</span>
+							@icons.Icon("chevron-right", "h-4 w-4 shrink-0 text-muted-foreground/50 transition-transform group-hover:translate-x-0.5 group-hover:text-foreground")
+						</a>
 					</li>
 				}
 			</ul>

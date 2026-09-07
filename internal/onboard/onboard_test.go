@@ -6,6 +6,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"altalune.id/template/internal/apperror"
 	"altalune.id/template/internal/onboard"
 )
 
@@ -81,7 +82,7 @@ func TestNotOnboardedError_ToAppError(t *testing.T) {
 	if ae == nil {
 		t.Fatal("nil AppError")
 	}
-	if ae.Code() != "onboarding.required" {
+	if ae.Code() != apperror.CodeOnboardingRequired {
 		t.Errorf("code=%q", ae.Code())
 	}
 }
@@ -90,7 +91,7 @@ func TestAlreadyOnboardedError_ToAppError(t *testing.T) {
 	t.Parallel()
 	e := &onboard.AlreadyOnboardedError{}
 	ae := e.ToAppError()
-	if ae.Code() != "onboarding.already_done" {
+	if ae.Code() != apperror.CodeOnboardingAlreadyDone {
 		t.Errorf("code=%q", ae.Code())
 	}
 }

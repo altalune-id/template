@@ -18,6 +18,7 @@ type InvitesView struct {
 	CanManage bool
 	Disabled  bool
 	Error     string
+	ErrorCode string
 }
 
 templ InvitesPage(d web.LayoutData, v InvitesView) {
@@ -30,7 +31,7 @@ templ InvitesPage(d web.LayoutData, v InvitesView) {
 			<div class="mt-4 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200">{ d.Tr("invites.disabled_banner") }</div>
 		}
 		if v.Error != "" {
-			@ErrorBanner(d, v.Error)
+			@ErrorBanner(d, v.Error, v.ErrorCode)
 		}
 		<ul class="mt-6 divide-y divide-border/50 overflow-hidden rounded-lg border border-border bg-card shadow-sm">
 			if len(v.Invites) == 0 {

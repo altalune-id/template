@@ -11,6 +11,10 @@ type MemberRow struct {
 	Name   string
 	Role   string
 	System bool
+	// IsSelf marks the row belonging to the signed-in user, who cannot remove their own membership.
+	IsSelf bool
+	// Removable comes from org.RemovalRefusal, so the button only shows where the post would succeed.
+	Removable bool
 }
 
 type MembersView struct {
@@ -18,6 +22,7 @@ type MembersView struct {
 	Members   []MemberRow
 	CanManage bool
 	Error     string
+	ErrorCode string
 }
 
 templ MembersPage(d web.LayoutData, v MembersView) {
@@ -35,7 +40,7 @@ templ MembersPage(d web.LayoutData, v MembersView) {
 			}
 		</header>
 		if v.Error != "" {
-			@ErrorBanner(d, v.Error)
+			@ErrorBanner(d, v.Error, v.ErrorCode)
 		}
 		<ul class="mt-6 divide-y divide-border/50 overflow-hidden rounded-lg border border-border bg-card shadow-sm">
 			if len(v.Members) == 0 {
@@ -44,11 +49,16 @@ templ MembersPage(d web.LayoutData, v MembersView) {
 			for _, m := range v.Members {
 				<li class="flex items-center justify-between px-4 py-3">
 					<div class="min-w-0">
-						<p class="truncate text-sm font-medium text-foreground">
-							if m.Name != "" {
-								{ m.Name }
-							} else {
-								{ m.Email }
+						<p class="flex items-center gap-2 truncate text-sm font-medium text-foreground">
+							<span class="truncate">
+								if m.Name != "" {
+									{ m.Name }
+								} else {
+									{ m.Email }
+								}
+							</span>
+							if m.IsSelf {
+								<span class="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">{ d.Tr("members.you") }</span>
 							}
 						</p>
 						<p class="truncate text-xs text-muted-foreground">
@@ -58,7 +68,7 @@ templ MembersPage(d web.LayoutData, v MembersView) {
 							}
 						</p>
 					</div>
-					if v.CanManage && !m.System {
+					if v.CanManage && m.Removable {
 						<form method="post" action={ templ.SafeURL(d.Href("/orgs/" + v.OrgSlug + "/members/" + m.UserID + "/remove")) } class="ml-4 inline">
 							<button type="submit" aria-label={ "Remove " + m.Email } class="rounded p-1.5 text-muted-foreground/70 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40 dark:hover:text-red-400">
 								@icons.Icon("trash-2", "h-4 w-4")

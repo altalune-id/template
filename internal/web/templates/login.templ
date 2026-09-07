@@ -4,6 +4,7 @@ import "altalune.id/template/internal/web"
 
 type LoginView struct {
 	Error      string
+	ErrorCode string
 	Message    string
 	ReturnTo   string
 	LastEmail  string
@@ -18,7 +19,7 @@ templ LoginPage(d web.LayoutData, v LoginView) {
 			<div class="mt-4 p-3 rounded bg-emerald-50 text-emerald-800 text-sm border border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-200 dark:border-emerald-900/50">{ v.Message }</div>
 		}
 		if v.Error != "" {
-			@ErrorBanner(d, v.Error)
+			@ErrorBanner(d, v.Error, v.ErrorCode)
 		}
 		if d.Caps.ExternalIdentity && !v.AdminForce {
 			if v.LastEmail != "" {

@@ -16,6 +16,7 @@ import (
 	"altalune.id/template/internal/apperror"
 	"altalune.id/template/internal/org"
 	"altalune.id/template/internal/platform/capabilities"
+	"altalune.id/template/internal/platform/tenant"
 	"altalune.id/template/internal/testutil/fakes"
 )
 
@@ -119,6 +120,8 @@ func TestService_Members(t *testing.T) {
 	owner := uuid.New()
 	o, err := svc.Create(ctx, org.CreateRequest{Slug: "acme", Name: "Acme", OwnerID: owner})
 	require.NoError(t, err)
+	// NOTE: the actor comes from the tenant scope, the way every transport supplies it.
+	ctx = tenant.Into(ctx, tenant.Context{OrgID: o.ID, UserID: owner})
 
 	t.Run("add ok", func(t *testing.T) {
 		u := uuid.New()
@@ -181,7 +184,7 @@ func TestService_RemoveMember_SystemProtected(t *testing.T) {
 	m.System = true
 	require.NoError(t, store.SaveMembership(ctx, m))
 
-	err = svc.RemoveMember(ctx, o.ID, other)
+	err = svc.RemoveMember(tenant.Into(ctx, tenant.Context{OrgID: o.ID, UserID: owner}), o.ID, other)
 	assert.True(t, org.IsSystemProtectedError(err), "want SystemProtectedError, got %T: %v", err, err)
 }
 

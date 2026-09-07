@@ -8,6 +8,7 @@ import (
 type OrgsView struct {
 	Orgs  []OrgSummary
 	Error string
+	ErrorCode string
 }
 
 templ OrgsPage(d web.LayoutData, v OrgsView) {
@@ -25,7 +26,7 @@ templ OrgsPage(d web.LayoutData, v OrgsView) {
 			}
 		</header>
 		if v.Error != "" {
-			@ErrorBanner(d, v.Error)
+			@ErrorBanner(d, v.Error, v.ErrorCode)
 		}
 		if len(v.Orgs) == 0 {
 			<div class="mt-6 rounded-lg border border-dashed border-border bg-card p-8 text-center">

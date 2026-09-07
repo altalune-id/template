@@ -17,11 +17,13 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
+	"altalune.id/template/internal/apperror"
 	"altalune.id/template/internal/boot"
 	"altalune.id/template/internal/onboard"
 	"altalune.id/template/internal/org"
 	"altalune.id/template/internal/platform/config"
 	"altalune.id/template/internal/platform/session"
+	"altalune.id/template/internal/platform/tenant"
 	"altalune.id/template/internal/user"
 	"altalune.id/template/internal/web"
 )
@@ -320,4 +322,133 @@ func TestRoutes_InlineFormErrorCarriesTheRequestID(t *testing.T) {
 	rid := rec.Header().Get("X-Request-Id")
 	require.NotEmpty(t, rid, "the request id header must be set")
 	require.Contains(t, body, rid, "the id in the page must be the one in the header and the log")
+}
+
+// TestOrgSwitcher_PinnedOrgIsNotAlsoOfferedToSwitchTo covers the Members/Invites pages, where the
+// switcher pins to the org in the URL rather than the session's active org.
+func TestOrgSwitcher_PinnedOrgIsNotAlsoOfferedToSwitchTo(t *testing.T) {
+	srv, _ := newScopeProbeServer(t, config.ModeCloud)
+
+	owner, err := srv.Users.Create(context.Background(), user.CreateRequest{
+		Email: "probe-two-orgs@example.com", Name: "Probe", Source: user.SourceOIDC,
+	})
+	require.NoError(t, err)
+	active, err := srv.Orgs.Create(context.Background(), org.CreateRequest{
+		Slug: "org-active", Name: "Org Active", OwnerID: owner.ID,
+	})
+	require.NoError(t, err)
+	visited, err := srv.Orgs.Create(context.Background(), org.CreateRequest{
+		Slug: "org-visited", Name: "Org Visited", OwnerID: owner.ID,
+	})
+	require.NoError(t, err)
+
+	cookie := probeCookie(t, srv, session.Principal{UserID: owner.ID, ActiveOrgID: active.ID})
+	for _, path := range []string{"/orgs/" + visited.Slug, "/orgs/" + visited.Slug + "/invites"} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req.AddCookie(cookie)
+		rec := httptest.NewRecorder()
+		srv.Web.ServeHTTP(rec, req)
+		require.Equal(t, http.StatusOK, rec.Code, path)
+
+		panel := orgSwitcherPanel(t, rec.Body.String())
+		require.Equal(t, 1, strings.Count(panel, visited.Name),
+			"%s: the pinned org must appear once, as Current — not also under Switch\n%s", path, panel)
+		require.Contains(t, panel, active.Name,
+			"%s: the org the session is active in must stay reachable under Switch", path)
+	}
+}
+
+// orgSwitcherPanel returns the org switcher's dropdown body, excluding the pill label that always
+// names the current org, so a count inside it reflects the Current and Switch entries alone.
+func orgSwitcherPanel(t *testing.T, body string) string {
+	t.Helper()
+	i := strings.Index(body, "data-switcher")
+	require.GreaterOrEqual(t, i, 0, "no org switcher rendered")
+	rest := body[i:]
+	open := strings.Index(rest, "</summary>")
+	require.GreaterOrEqual(t, open, 0, "org switcher has no summary")
+	rest = rest[open+len("</summary>"):]
+	end := strings.Index(rest, "</details>")
+	require.GreaterOrEqual(t, end, 0, "org switcher never closed")
+	return rest[:end]
+}
+
+// TestMembersPage_RemoveButtonMatchesTheServiceGate keeps the rendered button in step with org.RemovalRefusal:
+// a button the post would refuse is a dead end, and a missing button hides a legitimate action.
+func TestMembersPage_RemoveButtonMatchesTheServiceGate(t *testing.T) {
+	srv, _ := newScopeProbeServer(t, config.ModeCloud)
+	ctx := context.Background()
+
+	viewer, err := srv.Users.Create(ctx, user.CreateRequest{
+		Email: "gate-viewer@example.com", Name: "Gate Viewer", Source: user.SourceOIDC,
+	})
+	require.NoError(t, err)
+	o, err := srv.Orgs.Create(ctx, org.CreateRequest{Slug: "gate-org", Name: "Gate Org", OwnerID: viewer.ID})
+	require.NoError(t, err)
+
+	scoped := tenant.WithOrg(ctx, o.ID)
+	coOwner, err := srv.Users.Create(ctx, user.CreateRequest{
+		Email: "gate-coowner@example.com", Name: "Gate CoOwner", Source: user.SourceOIDC,
+	})
+	require.NoError(t, err)
+	_, err = srv.Orgs.AddMember(scoped, o.ID, coOwner.ID, org.RoleOwner)
+	require.NoError(t, err)
+
+	plain, err := srv.Users.Create(ctx, user.CreateRequest{
+		Email: "gate-plain@example.com", Name: "Gate Plain", Source: user.SourceOIDC,
+	})
+	require.NoError(t, err)
+	_, err = srv.Orgs.AddMember(scoped, o.ID, plain.ID, org.RoleMember)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodGet, "/orgs/"+o.Slug, nil)
+	req.AddCookie(probeCookie(t, srv, session.Principal{UserID: viewer.ID, ActiveOrgID: o.ID}))
+	rec := httptest.NewRecorder()
+	srv.Web.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	body := rec.Body.String()
+
+	removeForm := func(u uuid.UUID) string {
+		return "/orgs/" + o.Slug + "/members/" + u.String() + "/remove"
+	}
+	require.Contains(t, body, removeForm(plain.ID), "a plain member must be removable")
+	require.NotContains(t, body, removeForm(viewer.ID), "the signed-in member must not offer to remove themselves")
+	require.Contains(t, body, removeForm(coOwner.ID), "an owner viewing the page may remove a co-owner")
+
+	// The rendered gate must agree with the service for every row on the page.
+	for _, u := range []uuid.UUID{viewer.ID, coOwner.ID, plain.ID} {
+		m, mErr := srv.Orgs.MembershipOf(scoped, o.ID, u)
+		require.NoError(t, mErr)
+		viewerM, vErr := srv.Orgs.MembershipOf(scoped, o.ID, viewer.ID)
+		require.NoError(t, vErr)
+		allowed := org.RemovalRefusal(o.ID, viewer.ID, u, viewerM.Role, m.Role, m.System) == nil
+		require.Equal(t, allowed, strings.Contains(body, removeForm(u)),
+			"button visibility for %s disagrees with org.RemovalRefusal", u)
+	}
+}
+
+// TestRoutes_InlineFormErrorCarriesTheErrorCode pairs the quotable code with the request id on a failed submit.
+func TestRoutes_InlineFormErrorCarriesTheErrorCode(t *testing.T) {
+	srv, _ := newScopeProbeServer(t, config.ModeCloud)
+
+	owner, err := srv.Users.Create(context.Background(), user.CreateRequest{
+		Email: "probe-code@example.com", Name: "Probe Code", Source: user.SourceOIDC,
+	})
+	require.NoError(t, err)
+	taken, err := srv.Orgs.Create(context.Background(), org.CreateRequest{
+		Slug: "code-taken", Name: "Taken", OwnerID: owner.ID,
+	})
+	require.NoError(t, err)
+
+	form := url.Values{"slug": {taken.Slug}, "name": {"Duplicate"}}
+	req := httptest.NewRequest(http.MethodPost, "/orgs", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(probeCookie(t, srv, session.Principal{UserID: owner.ID, ActiveOrgID: taken.ID}))
+	rec := httptest.NewRecorder()
+	srv.Web.ServeHTTP(rec, req)
+
+	body := rec.Body.String()
+	require.Contains(t, body, apperror.CodeOrgAlreadyExists,
+		"a duplicate slug must name its code (%s) so the user can quote it", apperror.CodeOrgAlreadyExists)
+	require.Contains(t, body, "Reference:", "the request id must stay alongside the code")
 }

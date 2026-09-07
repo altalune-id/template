@@ -2,6 +2,7 @@
 package handlers
 
 import (
+	"cmp"
 	"context"
 	"log"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 	"github.com/a-h/templ"
 	"github.com/google/uuid"
 
+	"altalune.id/template/internal/apperror"
 	"altalune.id/template/internal/i18n"
 	"altalune.id/template/internal/org"
 	"altalune.id/template/internal/platform/capabilities"
@@ -71,6 +73,12 @@ func (d Deps) Base(r *http.Request, title string) web.LayoutData {
 
 // Layout builds a LayoutData for a signed-in page and populates org/project switchers.
 func (d Deps) Layout(r *http.Request, title string, nav web.ActiveNav) web.LayoutData {
+	return d.layout(r, title, nav, uuid.Nil)
+}
+
+// layout builds a LayoutData, pinning the org switcher to pinnedOrg when that is set.
+// NOTE: the pinned org must be known before the list is split, or it ends up in both Current and Switch.
+func (d Deps) layout(r *http.Request, title string, nav web.ActiveNav, pinnedOrg uuid.UUID) web.LayoutData {
 	base := d.Base(r, title)
 	if base.Principal == nil {
 		return base
@@ -83,7 +91,7 @@ func (d Deps) Layout(r *http.Request, title string, nav web.ActiveNav) web.Layou
 		if err != nil {
 			d.LogErr("layout: list orgs", err)
 		}
-		base.ActiveOrg, base.OtherOrgs = splitOrgs(orgs, p.ActiveOrgID)
+		base.ActiveOrg, base.OtherOrgs = splitOrgs(orgs, cmp.Or(pinnedOrg, p.ActiveOrgID))
 	}
 	if base.ActiveOrg != nil && d.Projects != nil && p.ActiveOrgID != uuid.Nil {
 		tctx := tenant.Into(ctx, tenant.Context{OrgID: p.ActiveOrgID, UserID: p.UserID, ProjectID: p.ActiveProjectID})
@@ -101,21 +109,16 @@ func (d Deps) Layout(r *http.Request, title string, nav web.ActiveNav) web.Layou
 	return base
 }
 
-// LayoutForOrg tags a page as org-scoped and pins the pill to the requested slug.
+// LayoutForOrg tags a page as org-scoped and pins the switcher to the requested slug.
 func (d Deps) LayoutForOrg(r *http.Request, title, slug, orgKey string) web.LayoutData {
-	l := d.Layout(r, title, web.ActiveNav{Scope: web.NavScopeOrg, OrgKey: orgKey})
-	if slug == "" || d.Orgs == nil {
-		return l
+	nav := web.ActiveNav{Scope: web.NavScopeOrg, OrgKey: orgKey}
+	pinned := uuid.Nil
+	if slug != "" && d.Orgs != nil {
+		if o, err := d.Orgs.BySlug(r.Context(), slug); err == nil && o != nil {
+			pinned = o.ID
+		}
 	}
-	if l.ActiveOrg != nil && l.ActiveOrg.Slug == slug {
-		return l
-	}
-	o, err := d.Orgs.BySlug(r.Context(), slug)
-	if err != nil || o == nil {
-		return l
-	}
-	l.ActiveOrg = &web.ActiveOrg{ID: o.ID.String(), Slug: o.Slug, Name: o.Name}
-	return l
+	return d.layout(r, title, nav, pinned)
 }
 
 // LayoutForProject tags a page as project-scoped and pins both pills to the given project.
@@ -211,11 +214,23 @@ func RenderStatus(w http.ResponseWriter, r *http.Request, status int, c templ.Co
 }
 
 // ErrorPage renders the error.templ full page with the given status/title/message.
-func (d Deps) ErrorPage(w http.ResponseWriter, r *http.Request, status int, title, msg string) {
+func (d Deps) ErrorPage(w http.ResponseWriter, r *http.Request, status int, title, msg string, cause ...error) {
 	base := d.Base(r, title)
 	RenderStatus(w, r, status, templates.ErrorLayout(base, templates.ErrorView{
-		Status: status, Title: title, Message: msg, RequestID: reqid.FromContext(r.Context()),
+		Status: status, Title: title, Message: msg,
+		RequestID: reqid.FromContext(r.Context()),
+		Code:      ErrorRef(cause...),
 	}))
+}
+
+// ErrorRef returns the code carried by the first of errs that is an AppError, or "" when none is.
+func ErrorRef(errs ...error) string {
+	for _, err := range errs {
+		if ae, ok := apperror.AsAppError(err); ok {
+			return ae.Code()
+		}
+	}
+	return ""
 }
 
 // OrgScopeFor resolves the org named by slug and returns a context scoped to it, refusing callers who are not members.
@@ -224,12 +239,12 @@ func (d Deps) ErrorPage(w http.ResponseWriter, r *http.Request, status int, titl
 func (d Deps) OrgScopeFor(w http.ResponseWriter, r *http.Request, p session.Principal, slug string) (*org.Org, context.Context, bool) {
 	o, err := d.Orgs.BySlug(r.Context(), slug)
 	if err != nil {
-		d.ErrorPage(w, r, http.StatusNotFound, "Organization not found", "")
+		d.ErrorPage(w, r, http.StatusNotFound, "Organization not found", "", err)
 		return nil, nil, false
 	}
 	ctx := tenant.Into(r.Context(), tenant.Context{OrgID: o.ID, UserID: p.UserID})
 	if _, err := d.Orgs.MembershipOf(ctx, o.ID, p.UserID); err != nil {
-		d.ErrorPage(w, r, http.StatusNotFound, "Organization not found", "")
+		d.ErrorPage(w, r, http.StatusNotFound, "Organization not found", "", err)
 		return nil, nil, false
 	}
 	return o, ctx, true

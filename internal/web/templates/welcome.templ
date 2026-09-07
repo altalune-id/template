@@ -12,6 +12,7 @@ type WelcomeView struct {
 	PrivacyURL     string
 	ReturnTo       string
 	Error          string
+	ErrorCode string
 }
 
 templ WelcomePage(d web.LayoutData, v WelcomeView) {
@@ -25,7 +26,7 @@ templ WelcomePage(d web.LayoutData, v WelcomeView) {
 			</p>
 		</header>
 		if v.Error != "" {
-			@ErrorBanner(d, v.Error)
+			@ErrorBanner(d, v.Error, v.ErrorCode)
 		}
 		<form method="post" action={ templ.SafeURL(d.Href("/welcome")) } class="mt-6 space-y-5" novalidate>
 			<input type="hidden" name="return_to" value={ v.ReturnTo }/>
