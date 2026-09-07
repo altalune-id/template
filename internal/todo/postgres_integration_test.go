@@ -28,7 +28,7 @@ func newTodoStoreForTest(t *testing.T) (todo.Store, uuid.UUID, uuid.UUID, uuid.U
 	cfg := config.Defaults()
 	cfg.DB.Driver = "postgres"
 	cfg.DB.DSN = h.DSN
-	cfg.DB.Schema = "public"
+	cfg.DB.Schema = h.Schema
 	cfg.DB.AllowBypassRLS = true
 
 	require.NoError(t, schema.MigrateUp(t.Context(), sqlDB, cfg))
@@ -37,7 +37,7 @@ func newTodoStoreForTest(t *testing.T) (todo.Store, uuid.UUID, uuid.UUID, uuid.U
 	userID, orgID, projID := seedProjectTree(t, sqlDB, prefix)
 
 	pc := tenant.NewPgConn(sqlDB)
-	store := todo.NewStore(db.DBConfig{Driver: db.DriverPostgres, Schema: "public", TablePrefix: prefix}, db.Pool{W: sqlDB, R: sqlDB}, pc)
+	store := todo.NewStore(db.DBConfig{Driver: db.DriverPostgres, Schema: h.Schema, TablePrefix: prefix}, db.Pool{W: sqlDB, R: sqlDB}, pc)
 	return store, orgID, projID, userID
 }
 

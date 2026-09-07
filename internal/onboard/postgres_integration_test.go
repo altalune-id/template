@@ -26,7 +26,7 @@ func newOnboardStoreForTest(t *testing.T) (onboard.Store, uuid.UUID) { //nolint:
 	cfg := config.Defaults()
 	cfg.DB.Driver = "postgres"
 	cfg.DB.DSN = h.DSN
-	cfg.DB.Schema = "public"
+	cfg.DB.Schema = h.Schema
 	cfg.DB.AllowBypassRLS = true
 
 	require.NoError(t, schema.MigrateUp(t.Context(), sqlDB, cfg))
@@ -34,7 +34,7 @@ func newOnboardStoreForTest(t *testing.T) (onboard.Store, uuid.UUID) { //nolint:
 	prefix := cfg.DB.TablePrefix
 	userID := seedOnboardUser(t, sqlDB, prefix)
 
-	store := onboard.NewStore(db.DBConfig{Driver: db.DriverPostgres, Schema: "public", TablePrefix: prefix}, db.Pool{W: sqlDB, R: sqlDB})
+	store := onboard.NewStore(db.DBConfig{Driver: db.DriverPostgres, Schema: h.Schema, TablePrefix: prefix}, db.Pool{W: sqlDB, R: sqlDB})
 	return store, userID
 }
 

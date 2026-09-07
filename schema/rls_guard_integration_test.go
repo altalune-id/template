@@ -4,28 +4,17 @@ package schema
 
 import (
 	"context"
-	"database/sql"
 	"errors"
-	"os"
 	"slices"
 	"testing"
 
-	_ "github.com/jackc/pgx/v5/stdlib"
-
 	pcfg "altalune.id/template/internal/platform/config"
 	"altalune.id/template/internal/platform/db"
+	"altalune.id/template/internal/testutil/pgtest"
 )
 
 func TestRLSGuard_Integration(t *testing.T) {
-	dsn := os.Getenv("TEST_PG_DSN")
-	if dsn == "" {
-		t.Fatal("TEST_PG_DSN required for integration tests")
-	}
-	conn, err := sql.Open("pgx", dsn)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = conn.Close() })
+	conn := pgtest.New(t).OpenDB(t)
 
 	ctx := context.Background()
 	const table = "altempl_todos"
@@ -36,11 +25,6 @@ func TestRLSGuard_Integration(t *testing.T) {
 	).Scan(&bypassRLS); err != nil {
 		t.Fatalf("probe current_user: %v", err)
 	}
-
-	if _, err := conn.ExecContext(ctx, `DROP TABLE IF EXISTS altempl_todos`); err != nil {
-		t.Fatalf("pre-clean drop: %v", err)
-	}
-	t.Cleanup(func() { _, _ = conn.ExecContext(ctx, `DROP TABLE IF EXISTS altempl_todos`) })
 
 	if _, err := conn.ExecContext(ctx, `
 		CREATE TABLE altempl_todos (
@@ -106,5 +90,21 @@ func TestRLSGuard_Integration(t *testing.T) {
 	}
 	if !slices.Contains(audit.MissingPolicy, table) {
 		t.Errorf("MissingPolicy = %v; want to include %q", audit.MissingPolicy, table)
+	}
+}
+
+func TestAuditPolicies_AcceptsMigratedHelperScopedPolicies(t *testing.T) {
+	h := pgtest.New(t)
+	conn := h.OpenDB(t)
+
+	cfg := pcfg.Defaults()
+	cfg.DB.Driver = db.DriverPostgres
+	cfg.DB.Schema = h.Schema
+	if err := MigrateUp(t.Context(), conn, cfg); err != nil {
+		t.Fatalf("migrate up: %v", err)
+	}
+
+	if err := AuditPolicies(t.Context(), conn, TenantTableNames(cfg.DB.TablePrefix)); err != nil {
+		t.Fatalf("AuditPolicies rejected the policies migration 002 creates: %v", err)
 	}
 }

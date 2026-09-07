@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sort"
 	"strings"
 
@@ -80,7 +81,7 @@ func checkBypassRLS(ctx context.Context, conn *sql.DB, allowBypass bool) error {
 	return nil
 }
 
-// AuditPolicies asserts each table has RLS enabled, FORCE enabled, and a policy referencing app.current_org_id.
+// AuditPolicies asserts each table has RLS enabled, FORCE enabled, and a policy scoped by app.current_org_id, read either inline or through a helper function.
 func AuditPolicies(ctx context.Context, conn *sql.DB, tables []string) error {
 	if len(tables) == 0 {
 		return nil
@@ -145,6 +146,10 @@ func loadRLSFlags(ctx context.Context, conn *sql.DB, tables []string) (rls, forc
 }
 
 func loadPolicyFlags(ctx context.Context, conn *sql.DB, tables []string) (map[string]bool, error) {
+	markers, err := tenantScopeMarkers(ctx, conn)
+	if err != nil {
+		return nil, err
+	}
 	ok := make(map[string]bool, len(tables))
 	rows, err := conn.QueryContext(ctx, `
 		SELECT tablename, COALESCE(qual, '')
@@ -160,7 +165,7 @@ func loadPolicyFlags(ctx context.Context, conn *sql.DB, tables []string) (map[st
 		if scanErr := rows.Scan(&name, &qual); scanErr != nil {
 			return nil, fmt.Errorf("rls audit: scan pg_policies: %w", scanErr)
 		}
-		if strings.Contains(qual, currentOrgIDGUC) {
+		if slices.ContainsFunc(markers, func(m string) bool { return strings.Contains(qual, m) }) {
 			ok[name] = true
 		}
 	}
@@ -168,4 +173,31 @@ func loadPolicyFlags(ctx context.Context, conn *sql.DB, tables []string) (map[st
 		return nil, fmt.Errorf("rls audit: pg_policies rows: %w", rowsErr)
 	}
 	return ok, nil
+}
+
+// NOTE: migration 002 moved the GUC read into a NULL-safe helper, so a policy's qual names that function instead of the GUC.
+func tenantScopeMarkers(ctx context.Context, conn *sql.DB) ([]string, error) {
+	markers := []string{currentOrgIDGUC}
+	rows, err := conn.QueryContext(ctx, `
+		SELECT p.proname || '('
+		FROM pg_proc p
+		JOIN pg_namespace n ON n.oid = p.pronamespace
+		WHERE n.nspname = ANY (current_schemas(false))
+		  AND strpos(p.prosrc, $1) > 0
+	`, currentOrgIDGUC)
+	if err != nil {
+		return nil, fmt.Errorf("rls audit: pg_proc: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var marker string
+		if scanErr := rows.Scan(&marker); scanErr != nil {
+			return nil, fmt.Errorf("rls audit: scan pg_proc: %w", scanErr)
+		}
+		markers = append(markers, marker)
+	}
+	if rowsErr := rows.Err(); rowsErr != nil {
+		return nil, fmt.Errorf("rls audit: pg_proc rows: %w", rowsErr)
+	}
+	return markers, nil
 }

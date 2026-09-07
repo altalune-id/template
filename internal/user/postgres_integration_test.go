@@ -24,12 +24,12 @@ func newPostgresStoreForTest(t *testing.T) user.Store {
 	cfg := config.Defaults()
 	cfg.DB.Driver = "postgres"
 	cfg.DB.DSN = h.DSN
-	cfg.DB.Schema = "public"
+	cfg.DB.Schema = h.Schema
 	cfg.DB.AllowBypassRLS = true
 
 	require.NoError(t, schema.MigrateUp(t.Context(), sqlDB, cfg))
 
-	return user.NewStore(db.DBConfig{Driver: db.DriverPostgres, Schema: "public", TablePrefix: cfg.DB.TablePrefix}, db.Pool{W: sqlDB, R: sqlDB})
+	return user.NewStore(db.DBConfig{Driver: db.DriverPostgres, Schema: h.Schema, TablePrefix: cfg.DB.TablePrefix}, db.Pool{W: sqlDB, R: sqlDB})
 }
 
 func TestPostgres_User_SaveAndLookup(t *testing.T) {
