@@ -97,6 +97,8 @@ func newFixture(t *testing.T) *handlerFixture {
 		Caps:     caps,
 		Sessions: sessions,
 		Logger:   discardStdLogger(),
+		Orgs:     orgs,
+		Projects: projects,
 	}
 	return &handlerFixture{
 		Deps: deps, Cfg: cfg, Sessions: sessions,
@@ -177,7 +179,29 @@ func TestHome_GetHome_RedirectsUnauth(t *testing.T) {
 	assert.Equal(t, "/login", rec.Header().Get("Location"))
 }
 
-func TestHome_GetHome_RendersForAuthedUser(t *testing.T) {
+// TestHome_GetRoot_RedirectsToTheLastUsedOrg covers the new root: it names no org, so it forwards to one.
+func TestHome_GetRoot_RedirectsToTheLastUsedOrg(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	ctx := context.Background()
+	u, err := f.Users.Create(ctx, user.CreateRequest{Email: "root@b.co", Name: "A", Source: user.SourceLocal})
+	require.NoError(t, err)
+	o, err := f.Orgs.Create(ctx, org.CreateRequest{Slug: "acme", Name: "Acme", OwnerID: u.ID})
+	require.NoError(t, err)
+
+	h := handlers.NewHomeHandler(f.Deps, f.Orgs, f.Projects)
+	mux := http.NewServeMux()
+	h.Register(mux)
+
+	p := session.Principal{UserID: u.ID, ActiveOrgID: o.ID, IssuedAt: time.Now().UTC()}
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, f.authedRequest(t, http.MethodGet, "/", "", p))
+
+	assert.Equal(t, http.StatusSeeOther, rec.Code)
+	assert.Equal(t, "/orgs/acme", rec.Header().Get("Location"))
+}
+
+func TestHome_GetOverview_RendersForAuthedUser(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
 	ctx := context.Background()
@@ -192,7 +216,7 @@ func TestHome_GetHome_RendersForAuthedUser(t *testing.T) {
 
 	p := session.Principal{UserID: u.ID, ActiveOrgID: o.ID, IssuedAt: time.Now().UTC()}
 	rec := httptest.NewRecorder()
-	mux.ServeHTTP(rec, f.authedRequest(t, http.MethodGet, "/", "", p))
+	mux.ServeHTTP(rec, f.authedRequest(t, http.MethodGet, "/orgs/acme", "", p))
 
 	assert.Equal(t, http.StatusOK, rec.Code)
 	assert.Contains(t, rec.Body.String(), "Acme")
@@ -266,7 +290,7 @@ func TestOrgHandler_PostCreate_HappyPath(t *testing.T) {
 	body := "slug=acme&name=Acme"
 	mux.ServeHTTP(rec, f.authedRequest(t, http.MethodPost, "/orgs", body, session.Principal{UserID: uid}))
 	assert.Equal(t, http.StatusSeeOther, rec.Code)
-	assert.Equal(t, "/orgs/acme", rec.Header().Get("Location"))
+	assert.Equal(t, "/orgs/acme/projects", rec.Header().Get("Location"))
 }
 
 func TestOrgHandler_PostCreate_DuplicateSlug(t *testing.T) {
@@ -331,49 +355,51 @@ func TestProjectHandler_GetList_UnauthRedirect(t *testing.T) {
 	mux := http.NewServeMux()
 	h.Register(mux)
 	rec := httptest.NewRecorder()
-	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/projects", nil))
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/orgs/acme/projects", nil))
 	assert.Equal(t, http.StatusSeeOther, rec.Code)
 }
 
-func TestProjectHandler_GetNew_RequiresActiveOrg(t *testing.T) {
+// TestProjectHandler_GetNew_UnknownOrgIs404 replaces the old active-org precondition: the org now comes
+// from the path, so an org the caller does not belong to is indistinguishable from one that does not exist.
+func TestProjectHandler_GetNew_UnknownOrgIs404(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
 	h := handlers.NewProjectHandler(f.Deps, f.Projects)
 	mux := http.NewServeMux()
 	h.Register(mux)
 	rec := httptest.NewRecorder()
-	mux.ServeHTTP(rec, f.authedRequest(t, http.MethodGet, "/projects/new", "", session.Principal{UserID: uuid.New()}))
-	assert.Equal(t, http.StatusPreconditionRequired, rec.Code)
+	mux.ServeHTTP(rec, f.authedRequest(t, http.MethodGet, "/orgs/ghost/projects/new", "", session.Principal{UserID: uuid.New()}))
+	assert.Equal(t, http.StatusNotFound, rec.Code)
 }
 
 func TestProjectHandler_PostCreate_HappyPath(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
 	uid := uuid.New()
-	oid := uuid.New()
+	o := f.seedOrg(t, "acme", uid)
 	h := handlers.NewProjectHandler(f.Deps, f.Projects)
 	mux := http.NewServeMux()
 	h.Register(mux)
 	rec := httptest.NewRecorder()
-	mux.ServeHTTP(rec, f.authedRequest(t, http.MethodPost, "/projects", "slug=alpha&name=Alpha", session.Principal{UserID: uid, ActiveOrgID: oid}))
+	mux.ServeHTTP(rec, f.authedRequest(t, http.MethodPost, "/orgs/acme/projects", "slug=alpha&name=Alpha", session.Principal{UserID: uid, ActiveOrgID: o.ID}))
 	assert.Equal(t, http.StatusSeeOther, rec.Code)
-	assert.Equal(t, "/projects/alpha/overview", rec.Header().Get("Location"))
+	assert.Equal(t, "/orgs/acme/projects/alpha/overview", rec.Header().Get("Location"))
 }
 
 func TestProjectHandler_PostCreate_DuplicateSlug(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
 	uid := uuid.New()
-	oid := uuid.New()
+	o := f.seedOrg(t, "acme", uid)
 	ctx := context.Background()
-	_, err := f.Projects.Create(setTenant(ctx, oid, uid), oid, "alpha", "Alpha")
+	_, err := f.Projects.Create(setTenant(ctx, o.ID, uid), o.ID, "alpha", "Alpha")
 	require.NoError(t, err)
 
 	h := handlers.NewProjectHandler(f.Deps, f.Projects)
 	mux := http.NewServeMux()
 	h.Register(mux)
 	rec := httptest.NewRecorder()
-	mux.ServeHTTP(rec, f.authedRequest(t, http.MethodPost, "/projects", "slug=alpha&name=Alpha2", session.Principal{UserID: uid, ActiveOrgID: oid}))
+	mux.ServeHTTP(rec, f.authedRequest(t, http.MethodPost, "/orgs/acme/projects", "slug=alpha&name=Alpha2", session.Principal{UserID: uid, ActiveOrgID: o.ID}))
 	assert.Equal(t, http.StatusOK, rec.Code)
 	assert.Contains(t, rec.Body.String(), "already taken")
 }
@@ -385,7 +411,7 @@ func TestProjectHandler_PostRename_MissingProject(t *testing.T) {
 	mux := http.NewServeMux()
 	h.Register(mux)
 	rec := httptest.NewRecorder()
-	mux.ServeHTTP(rec, f.authedRequest(t, http.MethodPost, "/projects/ghost/rename", "name=New", session.Principal{UserID: uuid.New(), ActiveOrgID: uuid.New()}))
+	mux.ServeHTTP(rec, f.authedRequest(t, http.MethodPost, "/orgs/ghost/projects/ghost/rename", "name=New", session.Principal{UserID: uuid.New(), ActiveOrgID: uuid.New()}))
 	assert.Equal(t, http.StatusNotFound, rec.Code)
 }
 
@@ -396,7 +422,7 @@ func TestTodoHandler_UnauthRedirects(t *testing.T) {
 	mux := http.NewServeMux()
 	h.Register(mux)
 	rec := httptest.NewRecorder()
-	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/projects/alpha/todos", nil))
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/orgs/acme/projects/alpha/todos", nil))
 	assert.Equal(t, http.StatusSeeOther, rec.Code)
 }
 
@@ -407,7 +433,7 @@ func TestTodoHandler_GetTodos_MissingProject(t *testing.T) {
 	mux := http.NewServeMux()
 	h.Register(mux)
 	rec := httptest.NewRecorder()
-	mux.ServeHTTP(rec, f.authedRequest(t, http.MethodGet, "/projects/ghost/todos", "", session.Principal{UserID: uuid.New(), ActiveOrgID: uuid.New()}))
+	mux.ServeHTTP(rec, f.authedRequest(t, http.MethodGet, "/orgs/ghost/projects/ghost/todos", "", session.Principal{UserID: uuid.New(), ActiveOrgID: uuid.New()}))
 	assert.Equal(t, http.StatusNotFound, rec.Code)
 }
 
@@ -415,33 +441,33 @@ func TestTodoHandler_HappyPath(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
 	uid := uuid.New()
-	oid := uuid.New()
-	ctx := setTenant(context.Background(), oid, uid)
-	proj, err := f.Projects.Create(ctx, oid, "alpha", "Alpha")
+	o := f.seedOrg(t, "acme", uid)
+	ctx := setTenant(context.Background(), o.ID, uid)
+	proj, err := f.Projects.Create(ctx, o.ID, "alpha", "Alpha")
 	require.NoError(t, err)
 
 	h := handlers.NewTodoHandler(f.Deps, f.Projects, f.Todos)
 	mux := http.NewServeMux()
 	h.Register(mux)
 
-	p := session.Principal{UserID: uid, ActiveOrgID: oid, ActiveProjectID: proj.ID}
+	p := session.Principal{UserID: uid, ActiveOrgID: o.ID, ActiveProjectID: proj.ID}
 
 	rec := httptest.NewRecorder()
-	mux.ServeHTTP(rec, f.authedRequest(t, http.MethodPost, "/projects/alpha/todos", "title=milk", p))
+	mux.ServeHTTP(rec, f.authedRequest(t, http.MethodPost, "/orgs/acme/projects/alpha/todos", "title=milk", p))
 	assert.Equal(t, http.StatusOK, rec.Code)
 	assert.Contains(t, rec.Body.String(), "milk")
 
 	rec = httptest.NewRecorder()
-	mux.ServeHTTP(rec, f.authedRequest(t, http.MethodGet, "/projects/alpha/todos", "", p))
+	mux.ServeHTTP(rec, f.authedRequest(t, http.MethodGet, "/orgs/acme/projects/alpha/todos", "", p))
 	assert.Equal(t, http.StatusOK, rec.Code)
 	assert.Contains(t, rec.Body.String(), "milk")
 
 	rec = httptest.NewRecorder()
-	mux.ServeHTTP(rec, f.authedRequest(t, http.MethodGet, "/projects/alpha/overview", "", p))
+	mux.ServeHTTP(rec, f.authedRequest(t, http.MethodGet, "/orgs/acme/projects/alpha/overview", "", p))
 	assert.Equal(t, http.StatusOK, rec.Code)
 
 	rec = httptest.NewRecorder()
-	mux.ServeHTTP(rec, f.authedRequest(t, http.MethodPost, "/projects/alpha/todos/clear", "", p))
+	mux.ServeHTTP(rec, f.authedRequest(t, http.MethodPost, "/orgs/acme/projects/alpha/todos/clear", "", p))
 	assert.Equal(t, http.StatusOK, rec.Code)
 }
 
@@ -449,11 +475,11 @@ func TestTodoHandler_ToggleAndDelete(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
 	uid := uuid.New()
-	oid := uuid.New()
-	ctx := setTenant(context.Background(), oid, uid)
-	proj, err := f.Projects.Create(ctx, oid, "alpha", "Alpha")
+	o := f.seedOrg(t, "acme", uid)
+	ctx := setTenant(context.Background(), o.ID, uid)
+	proj, err := f.Projects.Create(ctx, o.ID, "alpha", "Alpha")
 	require.NoError(t, err)
-	tctx := setTenantProject(ctx, oid, proj.ID, uid)
+	tctx := setTenantProject(ctx, o.ID, proj.ID, uid)
 	td, err := f.Todos.Create(tctx, "milk")
 	require.NoError(t, err)
 
@@ -461,36 +487,45 @@ func TestTodoHandler_ToggleAndDelete(t *testing.T) {
 	mux := http.NewServeMux()
 	h.Register(mux)
 
-	p := session.Principal{UserID: uid, ActiveOrgID: oid, ActiveProjectID: proj.ID}
+	p := session.Principal{UserID: uid, ActiveOrgID: o.ID, ActiveProjectID: proj.ID}
+	base := "/orgs/acme/projects/alpha/todos/"
 
 	rec := httptest.NewRecorder()
-	mux.ServeHTTP(rec, f.authedRequest(t, http.MethodPost, "/todos/"+td.ID.String()+"/toggle", "", p))
+	mux.ServeHTTP(rec, f.authedRequest(t, http.MethodPost, base+td.ID.String()+"/toggle", "", p))
 	assert.Equal(t, http.StatusOK, rec.Code)
 
 	rec = httptest.NewRecorder()
-	mux.ServeHTTP(rec, f.authedRequest(t, http.MethodDelete, "/todos/"+td.ID.String(), "", p))
+	mux.ServeHTTP(rec, f.authedRequest(t, http.MethodDelete, base+td.ID.String(), "", p))
 	assert.Equal(t, http.StatusOK, rec.Code)
 }
 
 func TestTodoHandler_ToggleBadID(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
+	uid := uuid.New()
+	o := f.seedOrg(t, "acme", uid)
+	_, err := f.Projects.Create(setTenant(context.Background(), o.ID, uid), o.ID, "alpha", "Alpha")
+	require.NoError(t, err)
 	h := handlers.NewTodoHandler(f.Deps, f.Projects, f.Todos)
 	mux := http.NewServeMux()
 	h.Register(mux)
 	rec := httptest.NewRecorder()
-	mux.ServeHTTP(rec, f.authedRequest(t, http.MethodPost, "/todos/not-a-uuid/toggle", "", session.Principal{UserID: uuid.New(), ActiveOrgID: uuid.New()}))
+	mux.ServeHTTP(rec, f.authedRequest(t, http.MethodPost, "/orgs/acme/projects/alpha/todos/not-a-uuid/toggle", "", session.Principal{UserID: uid, ActiveOrgID: o.ID}))
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
 func TestTodoHandler_ToggleNotFound(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
+	uid := uuid.New()
+	o := f.seedOrg(t, "acme", uid)
+	_, err := f.Projects.Create(setTenant(context.Background(), o.ID, uid), o.ID, "alpha", "Alpha")
+	require.NoError(t, err)
 	h := handlers.NewTodoHandler(f.Deps, f.Projects, f.Todos)
 	mux := http.NewServeMux()
 	h.Register(mux)
 	rec := httptest.NewRecorder()
-	mux.ServeHTTP(rec, f.authedRequest(t, http.MethodPost, "/todos/"+uuid.New().String()+"/toggle", "", session.Principal{UserID: uuid.New(), ActiveOrgID: uuid.New()}))
+	mux.ServeHTTP(rec, f.authedRequest(t, http.MethodPost, "/orgs/acme/projects/alpha/todos/"+uuid.New().String()+"/toggle", "", session.Principal{UserID: uid, ActiveOrgID: o.ID}))
 	assert.Equal(t, http.StatusNotFound, rec.Code)
 }
 
@@ -1000,9 +1035,8 @@ func TestLayoutForOrg_PinsSlug(t *testing.T) {
 	o, err := f.Orgs.Create(ctx, org.CreateRequest{Slug: "acme", Name: "Acme", OwnerID: uid})
 	require.NoError(t, err)
 
-	f.Deps.Orgs = f.Orgs
 	f.Deps.Projects = f.Projects
-	r := f.authedRequest(t, http.MethodGet, "/orgs/acme", "", session.Principal{UserID: uid, ActiveOrgID: o.ID})
+	r := f.authedRequest(t, http.MethodGet, "/orgs/acme/members", "", session.Principal{UserID: uid, ActiveOrgID: o.ID})
 
 	l := f.Deps.LayoutForOrg(r, "T", "acme", "members")
 	require.NotNil(t, l.ActiveOrg)
@@ -1062,7 +1096,7 @@ func TestOrgHandler_GetShow_HappyPath(t *testing.T) {
 	mux := http.NewServeMux()
 	h.Register(mux)
 	rec := httptest.NewRecorder()
-	mux.ServeHTTP(rec, f.authedRequest(t, http.MethodGet, "/orgs/acme", "", session.Principal{UserID: uid}))
+	mux.ServeHTTP(rec, f.authedRequest(t, http.MethodGet, "/orgs/acme/members", "", session.Principal{UserID: uid}))
 	assert.Equal(t, http.StatusOK, rec.Code)
 }
 
@@ -1080,7 +1114,6 @@ func TestInviteHandler_PostSend_MissingOrg(t *testing.T) {
 func TestLayoutForOrg_UnknownSlug(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
-	f.Deps.Orgs = f.Orgs
 	r := f.authedRequest(t, http.MethodGet, "/orgs/ghost", "", session.Principal{UserID: uuid.New()})
 	l := f.Deps.LayoutForOrg(r, "T", "ghost", "members")
 	assert.Nil(t, l.ActiveOrg)
@@ -1088,6 +1121,14 @@ func TestLayoutForOrg_UnknownSlug(t *testing.T) {
 
 type atomicBoolWrapper struct {
 	b atomic.Bool
+}
+
+// seedOrg creates an org and its owner membership, so path-scoped handlers can resolve it.
+func (f *handlerFixture) seedOrg(t *testing.T, slug string, owner uuid.UUID) *org.Org {
+	t.Helper()
+	o, err := f.Orgs.Create(context.Background(), org.CreateRequest{Slug: slug, Name: strings.ToUpper(slug), OwnerID: owner})
+	require.NoError(t, err)
+	return o
 }
 
 func setTenant(ctx context.Context, orgID, userID uuid.UUID) context.Context {

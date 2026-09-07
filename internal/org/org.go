@@ -123,7 +123,16 @@ func validateSlug(s string) error {
 	if !slugRe.MatchString(s) {
 		return &InvalidSlugError{Slug: s, Reason: "must be lowercase alphanumeric with dashes"}
 	}
+	if reservedSlug(s) {
+		return &InvalidSlugError{Slug: s, Reason: "reserved word"}
+	}
 	return nil
+}
+
+// NOTE: ServeMux prefers a literal pattern over the wildcard beside it, so a row slugged like a
+// literal segment under /orgs/ would be unreachable.
+func reservedSlug(s string) bool {
+	return s == "new"
 }
 
 func validateName(n string) error {

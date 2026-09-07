@@ -3,6 +3,7 @@ package templates
 import "altalune.id/template/internal/web"
 
 type ProjectNewView struct {
+	OrgSlug   string
 	Slug  string
 	Name  string
 	Error string
@@ -25,7 +26,7 @@ templ ProjectNewPage(d web.LayoutData, v ProjectNewView) {
 		if v.Error != "" {
 			@ErrorBanner(d, v.Error, v.ErrorCode)
 		}
-		<form method="post" action={ templ.SafeURL(d.Href("/projects")) } class="mt-6 space-y-5" novalidate>
+		<form method="post" action={ templ.SafeURL(d.Href("/orgs/" + v.OrgSlug + "/projects")) } class="mt-6 space-y-5" novalidate>
 			<div>
 				<label for="project-name" class="block text-sm font-medium text-foreground/90">{ d.Tr("common.name") }</label>
 				<input id="project-name" name="name" type="text" required autofocus value={ v.Name } placeholder={ d.Tr("project_new.name_placeholder") } class="mt-1.5 block w-full rounded-md border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/70 shadow-sm focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1"/>
@@ -37,7 +38,7 @@ templ ProjectNewPage(d web.LayoutData, v ProjectNewView) {
 			</div>
 			<div class="flex items-center gap-3 pt-2">
 				<button type="submit" class="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-sm hover:bg-primary/90">{ d.Tr("nav.create_project") }</button>
-				<a href={ templ.SafeURL(d.Href("/projects")) } class="text-sm text-muted-foreground hover:text-foreground">{ d.Tr("common.cancel") }</a>
+				<a href={ templ.SafeURL(d.OrgPath("/projects")) } class="text-sm text-muted-foreground hover:text-foreground">{ d.Tr("common.cancel") }</a>
 			</div>
 		</form>
 	</section>

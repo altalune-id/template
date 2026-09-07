@@ -3,7 +3,6 @@ package handlers
 
 import (
 	"cmp"
-	"context"
 	"log"
 	"net/http"
 	"net/url"
@@ -73,12 +72,13 @@ func (d Deps) Base(r *http.Request, title string) web.LayoutData {
 
 // Layout builds a LayoutData for a signed-in page and populates org/project switchers.
 func (d Deps) Layout(r *http.Request, title string, nav web.ActiveNav) web.LayoutData {
-	return d.layout(r, title, nav, uuid.Nil)
+	return d.layout(r, title, nav, uuid.Nil, uuid.Nil)
 }
 
-// layout builds a LayoutData, pinning the org switcher to pinnedOrg when that is set.
-// NOTE: the pinned org must be known before the list is split, or it ends up in both Current and Switch.
-func (d Deps) layout(r *http.Request, title string, nav web.ActiveNav, pinnedOrg uuid.UUID) web.LayoutData {
+// layout builds a LayoutData for a signed-in page. Both switchers are keyed on pinnedOrg — the org named
+// by the path — falling back to the session's last-used org only on pages that name none.
+// NOTE: the pinned org must be known before the list is split, or it lands in both Current and Switch.
+func (d Deps) layout(r *http.Request, title string, nav web.ActiveNav, pinnedOrg, pinnedProject uuid.UUID) web.LayoutData {
 	base := d.Base(r, title)
 	if base.Principal == nil {
 		return base
@@ -86,48 +86,71 @@ func (d Deps) layout(r *http.Request, title string, nav web.ActiveNav, pinnedOrg
 	base.ActiveNav = nav
 	ctx := r.Context()
 	p := *base.Principal
-	if d.Orgs != nil {
-		orgs, err := d.Orgs.List(ctx, p.UserID)
-		if err != nil {
-			d.LogErr("layout: list orgs", err)
-		}
-		base.ActiveOrg, base.OtherOrgs = splitOrgs(orgs, cmp.Or(pinnedOrg, p.ActiveOrgID))
+	if d.Orgs == nil {
+		return base
 	}
-	if base.ActiveOrg != nil && d.Projects != nil && p.ActiveOrgID != uuid.Nil {
-		tctx := tenant.Into(ctx, tenant.Context{OrgID: p.ActiveOrgID, UserID: p.UserID, ProjectID: p.ActiveProjectID})
-		projects, err := d.Projects.List(tctx, p.ActiveOrgID)
-		if err != nil {
-			d.LogErr("layout: list projects", err)
-		}
-		base.ActiveProject, base.OtherProjects = splitProjects(projects, p.ActiveProjectID)
+
+	orgs, err := d.Orgs.List(ctx, p.UserID)
+	if err != nil {
+		d.LogErr("layout: list orgs", err)
 	}
-	if base.ActiveOrg != nil && d.Orgs != nil {
-		if m, err := d.Orgs.MembershipOf(ctx, uuidFromString(base.ActiveOrg.ID), p.UserID); err == nil && m != nil {
-			base.ActiveOrg.Role = capitaliseRole(string(m.Role))
-		}
+	base.ActiveOrg, base.OtherOrgs = splitOrgs(orgs, cmp.Or(pinnedOrg, p.ActiveOrgID))
+	if base.ActiveOrg == nil {
+		return base
 	}
+
+	orgID := uuidFromString(base.ActiveOrg.ID)
+	if m, mErr := d.Orgs.MembershipOf(ctx, orgID, p.UserID); mErr == nil && m != nil {
+		base.ActiveOrg.Role = capitaliseRole(string(m.Role))
+	}
+	if d.Projects == nil {
+		return base
+	}
+	// SECURITY: the project switcher lists the pinned org's projects, so a stale session cannot leak another org's names.
+	tctx := tenant.Into(ctx, tenant.Context{OrgID: orgID, UserID: p.UserID, ProjectID: pinnedProject})
+	projects, pErr := d.Projects.List(tctx, orgID)
+	if pErr != nil {
+		d.LogErr("layout: list projects", pErr)
+	}
+	base.ActiveProject, base.OtherProjects = splitProjects(projects, cmp.Or(pinnedProject, p.ActiveProjectID))
 	return base
 }
 
-// LayoutForOrg tags a page as org-scoped and pins the switcher to the requested slug.
+// LayoutForOrg tags a page as org-scoped and pins both switchers to the org named by the path.
 func (d Deps) LayoutForOrg(r *http.Request, title, slug, orgKey string) web.LayoutData {
-	nav := web.ActiveNav{Scope: web.NavScopeOrg, OrgKey: orgKey}
-	pinned := uuid.Nil
-	if slug != "" && d.Orgs != nil {
-		if o, err := d.Orgs.BySlug(r.Context(), slug); err == nil && o != nil {
-			pinned = o.ID
-		}
-	}
-	return d.layout(r, title, nav, pinned)
+	return d.layout(r, title, web.ActiveNav{Scope: web.NavScopeOrg, OrgKey: orgKey}, d.orgIDForSlug(r, slug), uuid.Nil)
 }
 
-// LayoutForProject tags a page as project-scoped and pins both pills to the given project.
-func (d Deps) LayoutForProject(r *http.Request, title, projectSlug, projectName, projectID, projectKey string) web.LayoutData {
-	l := d.Layout(r, title, web.ActiveNav{Scope: web.NavScopeProject, ProjectKey: projectKey})
-	if l.ActiveProject == nil || l.ActiveProject.Slug != projectSlug {
-		l.ActiveProject = &web.ActiveProject{ID: projectID, Slug: projectSlug, Name: projectName}
+func (d Deps) orgIDForSlug(r *http.Request, slug string) uuid.UUID {
+	if slug == "" || d.Orgs == nil {
+		return uuid.Nil
+	}
+	o, err := d.Orgs.BySlug(r.Context(), slug)
+	if err != nil || o == nil {
+		return uuid.Nil
+	}
+	return o.ID
+}
+
+// LayoutForProject tags a page as project-scoped and pins both switchers to the org and project the path names.
+func (d Deps) LayoutForProject(r *http.Request, title, orgSlug string, proj *project.Project, projectKey string) web.LayoutData {
+	nav := web.ActiveNav{Scope: web.NavScopeProject, ProjectKey: projectKey}
+	l := d.layout(r, title, nav, d.orgIDForSlug(r, orgSlug), proj.ID)
+	if l.ActiveProject == nil || l.ActiveProject.Slug != proj.Slug {
+		l.ActiveProject = &web.ActiveProject{ID: proj.ID.String(), Slug: proj.Slug, Name: proj.Name}
 	}
 	return l
+}
+
+// ProjectScopeFor resolves the project named by slug inside orgID and returns a request scoped to both.
+// SECURITY: r must already carry the org scope from OrgScopeFor, whose membership check gates this lookup.
+func (d Deps) ProjectScopeFor(w http.ResponseWriter, r *http.Request, orgID uuid.UUID, slug string) (*project.Project, *http.Request, bool) {
+	proj, err := d.Projects.BySlug(r.Context(), orgID, slug)
+	if err != nil {
+		d.ErrorPage(w, r, http.StatusNotFound, "Project not found", "No project with that slug in this organization.", err)
+		return nil, nil, false
+	}
+	return proj, r.WithContext(tenant.WithProject(r.Context(), proj.ID)), true
 }
 
 func splitOrgs(items []*org.Org, activeID uuid.UUID) (active *web.ActiveOrg, others []web.ActiveOrg) { //nolint:nonamedreturns // two return values differ in role
@@ -236,7 +259,7 @@ func ErrorRef(errs ...error) string {
 // OrgScopeFor resolves the org named by slug and returns a context scoped to it, refusing callers who are not members.
 // SECURITY: the slug is attacker-supplied and the handler — not RLS — picks the org, so membership is verified here.
 // A non-member gets the same 404 as a bad slug so org slugs cannot be enumerated.
-func (d Deps) OrgScopeFor(w http.ResponseWriter, r *http.Request, p session.Principal, slug string) (*org.Org, context.Context, bool) {
+func (d Deps) OrgScopeFor(w http.ResponseWriter, r *http.Request, p session.Principal, slug string) (*org.Org, *http.Request, bool) {
 	o, err := d.Orgs.BySlug(r.Context(), slug)
 	if err != nil {
 		d.ErrorPage(w, r, http.StatusNotFound, "Organization not found", "", err)
@@ -247,21 +270,7 @@ func (d Deps) OrgScopeFor(w http.ResponseWriter, r *http.Request, p session.Prin
 		d.ErrorPage(w, r, http.StatusNotFound, "Organization not found", "", err)
 		return nil, nil, false
 	}
-	return o, ctx, true
-}
-
-// ActiveOrgCtx returns r's context scoped to the principal's active org, rendering a precondition page when there is none.
-// SECURITY: tenant.From rejects a zero OrgID, so every handler that reaches a tenant-scoped store must obtain its context here.
-func (d Deps) ActiveOrgCtx(w http.ResponseWriter, r *http.Request, p session.Principal) (context.Context, bool) {
-	if p.ActiveOrgID == uuid.Nil {
-		d.ErrorPage(w, r, http.StatusPreconditionRequired, "No active organization", "Pick or create an organization first.")
-		return nil, false
-	}
-	return tenant.Into(r.Context(), tenant.Context{
-		OrgID:     p.ActiveOrgID,
-		ProjectID: p.ActiveProjectID,
-		UserID:    p.UserID,
-	}), true
+	return o, r.WithContext(ctx), true
 }
 
 // LoadSession reads the sid cookie, verifies its HMAC, and loads the Principal from the store.

@@ -171,7 +171,7 @@ func (h *SignupHandler) PostSignup(w http.ResponseWriter, r *http.Request) {
 	if err := h.UpdateSession(r, sid, p); err != nil {
 		h.LogErr("signup: update session", err)
 	}
-	http.Redirect(w, r, web.Path(h.Cfg.HTTP.BasePath, "/projects/"+proj.Slug+"/overview"), http.StatusSeeOther) //nolint:gosec // G710: slug is validated by project.Create's slug pattern
+	http.Redirect(w, r, web.Path(h.Cfg.HTTP.BasePath, projectPath(o.Slug, proj.Slug, "/overview")), http.StatusSeeOther) //nolint:gosec // G710: slug is validated by project.Create's slug pattern
 }
 
 func (h *SignupHandler) hasMembership(r *http.Request, userID uuid.UUID) bool {

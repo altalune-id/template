@@ -146,6 +146,19 @@ func (d LayoutData) Static(sub string) string { return Path(d.BasePath, "static/
 // Href joins BasePath with a subpath. Templates use this so mounts under /app work.
 func (d LayoutData) Href(sub string) string { return Path(d.BasePath, sub) }
 
+// OrgPath returns sub under the active org, so the nested URL shape lives in one place.
+func (d LayoutData) OrgPath(sub string) string {
+	if d.ActiveOrg == nil {
+		return d.Href("/orgs")
+	}
+	return d.Href("/orgs/" + d.ActiveOrg.Slug + sub)
+}
+
+// ProjectPath returns sub under one of the active org's projects.
+func (d LayoutData) ProjectPath(projectSlug, sub string) string {
+	return d.OrgPath("/projects/" + projectSlug + sub)
+}
+
 // OIDCButtonLabel returns cfg.OIDC.ButtonLabel if set, else fallback.
 func (d LayoutData) OIDCButtonLabel(fallback string) string {
 	if s := strings.TrimSpace(d.Caps.OIDCButtonLabel); s != "" {
