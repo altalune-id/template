@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -273,9 +274,11 @@ func TestWithRetry_ContextCancelDuringBackoff(t *testing.T) {
 
 func TestWithRetry_StopsBeforeUnaffordableBackoff(t *testing.T) {
 	cs := newCountingServer(t, http.StatusServiceUnavailable)
+	// NOTE: BaseDelay exceeds the whole timeout, so the first backoff is unaffordable on every run.
+	// A delay merely close to the budget would leave a residual the next round-trip may or may not fit in.
 	c := New(WithAllowPrivateHosts(true),
 		WithTimeout(300*time.Millisecond),
-		WithRetry(RetryPolicy{MaxAttempts: 6, BaseDelay: 200 * time.Millisecond, MaxDelay: time.Second}))
+		WithRetry(RetryPolicy{MaxAttempts: 6, BaseDelay: 500 * time.Millisecond, MaxDelay: time.Second}))
 
 	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, cs.URL, nil)
 	require.NoError(t, err)
@@ -284,7 +287,7 @@ func TestWithRetry_StopsBeforeUnaffordableBackoff(t *testing.T) {
 	defer resp.Body.Close()
 
 	require.Equal(t, http.StatusServiceUnavailable, resp.StatusCode, "the caller must see the real status")
-	require.Less(t, cs.hits.Load(), int64(6), "the ladder must stop short of its configured attempts")
+	require.Equal(t, int64(1), cs.hits.Load(), "a backoff the budget cannot fund must not be spent")
 }
 
 func TestWithRetry_SpendsFullLadderWhenBudgetAllows(t *testing.T) {
@@ -809,4 +812,24 @@ func TestRestyRetry_TransportErrorStillRetries(t *testing.T) {
 	_, err := rc.R().SetContext(t.Context()).Get(dead)
 	require.Error(t, err)
 	require.Positive(t, attempts.Load(), "a refused connection is still worth retrying")
+}
+
+// TestRetryPolicy_WaitForSpansItsJitterWindow asserts the jitter deterministically, on the computation
+// rather than on wall-clock round-trips: an eight-sample spread of real delays clusters often enough to
+// flake, while two thousand samples of waitFor cover the window every time.
+func TestRetryPolicy_WaitForSpansItsJitterWindow(t *testing.T) {
+	t.Parallel()
+	const base = 120 * time.Millisecond
+	p := RetryPolicy{MaxAttempts: 2, BaseDelay: base, MaxDelay: 5 * time.Second}.withDefaults()
+
+	lowest, highest := time.Duration(math.MaxInt64), time.Duration(0)
+	for range 2000 {
+		d := p.waitFor(0, 0)
+		lowest, highest = min(lowest, d), max(highest, d)
+	}
+
+	require.GreaterOrEqual(t, lowest, base, "BaseDelay is a floor: got %v", lowest)
+	require.LessOrEqual(t, highest, 2*base, "the first step doubles at most: got %v", highest)
+	require.Greater(t, highest-lowest, base*9/10,
+		"delays spanned only %v of a %v window, so clients would retry in near-lockstep", highest-lowest, base)
 }
