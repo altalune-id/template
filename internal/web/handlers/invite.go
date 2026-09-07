@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"net/http"
 	"net/url"
 	"strings"
@@ -47,7 +48,7 @@ func (h *InviteHandler) GetList(w http.ResponseWriter, r *http.Request) {
 		h.ErrorPage(w, r, http.StatusInternalServerError, "List failed", "Could not load invites.")
 		return
 	}
-	canManage, _ := h.isManager(r, o.ID, p.UserID)
+	canManage, _ := h.isManager(ctx, o.ID, p.UserID)
 	Render(w, r, templates.InvitesLayout(h.LayoutForOrg(r, "Invites", slug, "invites"), templates.InvitesView{
 		OrgSlug: slug, Invites: inviteRows(items), CanManage: canManage, Disabled: !h.Caps.InvitesEnabled,
 	}))
@@ -66,7 +67,8 @@ func (h *InviteHandler) PostSend(w http.ResponseWriter, r *http.Request) {
 		h.ErrorPage(w, r, http.StatusNotFound, "Org not found", "")
 		return
 	}
-	canManage, _ := h.isManager(r, o.ID, p.UserID)
+	ctx := tenant.Into(r.Context(), tenant.Context{OrgID: o.ID, UserID: p.UserID})
+	canManage, _ := h.isManager(ctx, o.ID, p.UserID)
 	if !canManage {
 		h.ErrorPage(w, r, http.StatusForbidden, "Not allowed", "Only owners and admins can invite.")
 		return
@@ -82,7 +84,6 @@ func (h *InviteHandler) PostSend(w http.ResponseWriter, r *http.Request) {
 		h.ErrorPage(w, r, http.StatusBadRequest, "Bad role", "Role must be admin or member.")
 		return
 	}
-	ctx := tenant.Into(r.Context(), tenant.Context{OrgID: o.ID, UserID: p.UserID})
 	if _, err := h.Invites.Send(ctx, invite.SendRequest{Email: email, Role: role}); err != nil {
 		h.LogErr("web invite: send", err)
 		if invite.IsInvitesDisabledError(err) {
@@ -108,7 +109,8 @@ func (h *InviteHandler) PostRevoke(w http.ResponseWriter, r *http.Request) {
 		h.ErrorPage(w, r, http.StatusNotFound, "Org not found", "")
 		return
 	}
-	canManage, _ := h.isManager(r, o.ID, p.UserID)
+	ctx := tenant.Into(r.Context(), tenant.Context{OrgID: o.ID, UserID: p.UserID})
+	canManage, _ := h.isManager(ctx, o.ID, p.UserID)
 	if !canManage {
 		h.ErrorPage(w, r, http.StatusForbidden, "Not allowed", "Only owners and admins can revoke invites.")
 		return
@@ -118,7 +120,6 @@ func (h *InviteHandler) PostRevoke(w http.ResponseWriter, r *http.Request) {
 		h.ErrorPage(w, r, http.StatusBadRequest, "Bad id", "Malformed invite id.")
 		return
 	}
-	ctx := tenant.Into(r.Context(), tenant.Context{OrgID: o.ID, UserID: p.UserID})
 	if err := h.Invites.Revoke(ctx, id); err != nil {
 		h.LogErr("web invite: revoke", err)
 		h.ErrorPage(w, r, http.StatusInternalServerError, "Revoke failed", err.Error())
@@ -190,8 +191,9 @@ func (h *InviteHandler) GetAccept(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, ResolveReturnTo(h.Cfg.HTTP.BasePath, dest), http.StatusSeeOther) //nolint:gosec // G710: destination sanitized via ResolveReturnTo → SanitizeReturnTo
 }
 
-func (h *InviteHandler) isManager(r *http.Request, orgID, userID uuid.UUID) (bool, error) {
-	m, err := h.Orgs.MembershipOf(r.Context(), orgID, userID)
+// SECURITY: ctx must already carry the tenant scope; MembershipOf is RLS-filtered by org.
+func (h *InviteHandler) isManager(ctx context.Context, orgID, userID uuid.UUID) (bool, error) {
+	m, err := h.Orgs.MembershipOf(ctx, orgID, userID)
 	if err != nil {
 		return false, err
 	}

@@ -20,6 +20,7 @@ import (
 	"altalune.id/template/internal/project"
 	"altalune.id/template/internal/web"
 	"altalune.id/template/internal/web/templates"
+	"altalune.id/template/reqid"
 	"altalune.id/template/version"
 )
 
@@ -211,7 +212,7 @@ func RenderStatus(w http.ResponseWriter, r *http.Request, status int, c templ.Co
 func (d Deps) ErrorPage(w http.ResponseWriter, r *http.Request, status int, title, msg string) {
 	base := d.Base(r, title)
 	RenderStatus(w, r, status, templates.ErrorLayout(base, templates.ErrorView{
-		Status: status, Title: title, Message: msg,
+		Status: status, Title: title, Message: msg, RequestID: reqid.FromContext(r.Context()),
 	}))
 }
 

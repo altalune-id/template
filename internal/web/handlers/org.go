@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"net/http"
 	"strings"
 
@@ -124,13 +125,14 @@ func (h *OrgHandler) GetShow(w http.ResponseWriter, r *http.Request) {
 		h.ErrorPage(w, r, http.StatusNotFound, "Org not found", "")
 		return
 	}
-	profiles, err := h.Orgs.ListMemberProfiles(r.Context(), o.ID)
+	ctx := tenant.Into(r.Context(), tenant.Context{OrgID: o.ID, UserID: p.UserID})
+	profiles, err := h.Orgs.ListMemberProfiles(ctx, o.ID)
 	if err != nil {
 		h.LogErr("web org: members", err)
 		h.ErrorPage(w, r, http.StatusInternalServerError, "Members failed", "Could not load members.")
 		return
 	}
-	canManage, _ := h.isManager(r, o.ID, p.UserID)
+	canManage, _ := h.isManager(ctx, o.ID, p.UserID)
 	Render(w, r, templates.MembersLayout(h.LayoutForOrg(r, o.Name, slug, "members"), templates.MembersView{
 		OrgSlug:   slug,
 		Members:   memberProfileRows(profiles),
@@ -150,7 +152,8 @@ func (h *OrgHandler) PostRemoveMember(w http.ResponseWriter, r *http.Request) {
 		h.ErrorPage(w, r, http.StatusNotFound, "Org not found", "")
 		return
 	}
-	canManage, mErr := h.isManager(r, o.ID, p.UserID)
+	ctx := tenant.Into(r.Context(), tenant.Context{OrgID: o.ID, UserID: p.UserID})
+	canManage, mErr := h.isManager(ctx, o.ID, p.UserID)
 	if mErr != nil || !canManage {
 		h.ErrorPage(w, r, http.StatusForbidden, "Not allowed", "You must be an admin or owner to manage members.")
 		return
@@ -172,8 +175,9 @@ func (h *OrgHandler) PostRemoveMember(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, ResolveReturnTo(h.Cfg.HTTP.BasePath, "/orgs/"+slug), http.StatusSeeOther) //nolint:gosec // G710: destination sanitized via ResolveReturnTo → SanitizeReturnTo
 }
 
-func (h *OrgHandler) isManager(r *http.Request, orgID, userID uuid.UUID) (bool, error) {
-	m, err := h.Orgs.MembershipOf(r.Context(), orgID, userID)
+// SECURITY: ctx must already carry the tenant scope; MembershipOf is RLS-filtered by org.
+func (h *OrgHandler) isManager(ctx context.Context, orgID, userID uuid.UUID) (bool, error) {
+	m, err := h.Orgs.MembershipOf(ctx, orgID, userID)
 	if err != nil {
 		return false, err
 	}

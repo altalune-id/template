@@ -99,6 +99,7 @@ onboarding.accept: "利用規約およびプライバシーポリシーに同意
 onboarding.submit: "続行"
 error.label: "エラー"
 error.return_home: "ホームに戻る"
+error.request_id: "参照番号:"
 onboard.title: "初期セットアップ"
 onboard.subtitle: "このインスタンスへの最初のセッションです。管理者を確保し、組織名を付けて、最初のプロジェクトを開いてください。"
 onboard.oidc_button: "Altalune で続行"
