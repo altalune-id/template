@@ -463,17 +463,25 @@ func TestWithRetry_OnRetryReportsEveryWaitAndTheStop(t *testing.T) {
 }
 
 func TestWithRetry_OnRetryMarksBudgetStop(t *testing.T) {
-	cs := newCountingServer(t, http.StatusServiceUnavailable)
+	// NOTE: the server sleep dominates the budget arithmetic, so the affordability check trips on
+	// elapsed work rather than on a narrow margin that a loaded CI runner can overshoot.
+	var hits atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		time.Sleep(200 * time.Millisecond)
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(srv.Close)
 	var (
 		mu     sync.Mutex
 		events []RetryAttempt
 	)
 	c := New(WithAllowPrivateHosts(true),
-		WithTimeout(300*time.Millisecond),
+		WithTimeout(5*time.Second),
 		WithRetry(RetryPolicy{
 			MaxAttempts: 6,
-			BaseDelay:   200 * time.Millisecond,
-			MaxDelay:    time.Second,
+			BaseDelay:   50 * time.Millisecond,
+			MaxDelay:    400 * time.Millisecond,
 			OnRetry: func(a RetryAttempt) {
 				mu.Lock()
 				events = append(events, a)
@@ -481,10 +489,12 @@ func TestWithRetry_OnRetryMarksBudgetStop(t *testing.T) {
 			},
 		}))
 
-	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, cs.URL, nil)
+	ctx, cancel := context.WithTimeout(t.Context(), 900*time.Millisecond)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, srv.URL, nil)
 	require.NoError(t, err)
 	resp, err := c.Do(req)
-	require.NoError(t, err)
+	require.NoError(t, err, "the budget check must yield the upstream response, not a context error")
 	defer resp.Body.Close()
 
 	mu.Lock()

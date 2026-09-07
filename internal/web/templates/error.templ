@@ -6,9 +6,10 @@ import (
 )
 
 type ErrorView struct {
-	Status  int
-	Title   string
-	Message string
+	Status    int
+	Title     string
+	Message   string
+	RequestID string
 }
 
 templ ErrorPage(d web.LayoutData, v ErrorView) {
@@ -25,6 +26,12 @@ templ ErrorPage(d web.LayoutData, v ErrorView) {
 			<p class="mt-2 text-muted-foreground">{ v.Message }</p>
 		}
 		<a href={ templ.SafeURL(d.Href("/")) } class="mt-6 inline-block text-primary hover:underline">{ d.Tr("error.return_home") }</a>
+		if v.RequestID != "" {
+			<p class="mt-6 text-xs text-muted-foreground">
+				{ d.Tr("error.request_id") }
+				<code class="select-all font-mono">{ v.RequestID }</code>
+			</p>
+		}
 	</section>
 }
 
