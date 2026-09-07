@@ -213,3 +213,15 @@ func TestInvalidNameError(t *testing.T) {
 		})
 	}
 }
+
+// TestValidateSlug_RejectsRouteShadowingSlugs guards the router: /orgs/{org}/projects/new is a literal
+// pattern, so a project slugged "new" would never reach its own page.
+func TestValidateSlug_RejectsRouteShadowingSlugs(t *testing.T) {
+	t.Parallel()
+	if _, err := New(uuid.New(), "new", "New"); !IsInvalidSlugError(err) {
+		t.Fatalf("slug %q must be refused, got %T: %v", "new", err, err)
+	}
+	if _, err := New(uuid.New(), "newsroom", "Newsroom"); err != nil {
+		t.Fatalf("only the exact reserved word is refused, got %v", err)
+	}
+}

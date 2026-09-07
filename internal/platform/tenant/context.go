@@ -34,6 +34,13 @@ func From(ctx context.Context) (Context, error) {
 	return tc, nil
 }
 
+// WithProject returns ctx scoped to projectID, keeping the org and user already carried on it.
+func WithProject(ctx context.Context, projectID uuid.UUID) context.Context {
+	tc, _ := ctx.Value(ctxKey{}).(Context)
+	tc.ProjectID = projectID
+	return Into(ctx, tc)
+}
+
 // WithOrg returns ctx scoped to orgID, keeping any project and user already carried on it.
 func WithOrg(ctx context.Context, orgID uuid.UUID) context.Context {
 	tc, _ := ctx.Value(ctxKey{}).(Context)

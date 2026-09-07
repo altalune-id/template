@@ -35,18 +35,18 @@ func (h *InviteHandler) GetList(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, ResolveReturnTo(h.Cfg.HTTP.BasePath, "/login"), http.StatusSeeOther)
 		return
 	}
-	slug := r.PathValue("slug")
-	o, ctx, ok := h.OrgScopeFor(w, r, p, slug)
+	slug := r.PathValue("org")
+	o, r, ok := h.OrgScopeFor(w, r, p, slug)
 	if !ok {
 		return
 	}
-	items, err := h.Invites.ListPending(ctx)
+	items, err := h.Invites.ListPending(r.Context())
 	if err != nil {
 		h.LogErr("web invite: list", err)
 		h.ErrorPage(w, r, http.StatusInternalServerError, "List failed", "Could not load invites.", err)
 		return
 	}
-	canManage, _ := h.isManager(ctx, o.ID, p.UserID)
+	canManage, _ := h.isManager(r.Context(), o.ID, p.UserID)
 	Render(w, r, templates.InvitesLayout(h.LayoutForOrg(r, "Invites", slug, "invites"), templates.InvitesView{
 		OrgSlug: slug, Invites: inviteRows(items), CanManage: canManage, Disabled: !h.Caps.InvitesEnabled,
 	}))
@@ -59,12 +59,12 @@ func (h *InviteHandler) PostSend(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, ResolveReturnTo(h.Cfg.HTTP.BasePath, "/login"), http.StatusSeeOther)
 		return
 	}
-	slug := r.PathValue("slug")
-	o, ctx, ok := h.OrgScopeFor(w, r, p, slug)
+	slug := r.PathValue("org")
+	o, r, ok := h.OrgScopeFor(w, r, p, slug)
 	if !ok {
 		return
 	}
-	canManage, _ := h.isManager(ctx, o.ID, p.UserID)
+	canManage, _ := h.isManager(r.Context(), o.ID, p.UserID)
 	if !canManage {
 		h.ErrorPage(w, r, http.StatusForbidden, "Not allowed", "Only owners and admins can invite.")
 		return
@@ -80,7 +80,7 @@ func (h *InviteHandler) PostSend(w http.ResponseWriter, r *http.Request) {
 		h.ErrorPage(w, r, http.StatusBadRequest, "Bad role", "Role must be admin or member.")
 		return
 	}
-	if _, err := h.Invites.Send(ctx, invite.SendRequest{Email: email, Role: role}); err != nil {
+	if _, err := h.Invites.Send(r.Context(), invite.SendRequest{Email: email, Role: role}); err != nil {
 		h.LogErr("web invite: send", err)
 		if invite.IsInvitesDisabledError(err) {
 			h.ErrorPage(w, r, http.StatusConflict, "Invites disabled", err.Error(), err)
@@ -99,12 +99,12 @@ func (h *InviteHandler) PostRevoke(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, ResolveReturnTo(h.Cfg.HTTP.BasePath, "/login"), http.StatusSeeOther)
 		return
 	}
-	slug := r.PathValue("slug")
-	o, ctx, ok := h.OrgScopeFor(w, r, p, slug)
+	slug := r.PathValue("org")
+	o, r, ok := h.OrgScopeFor(w, r, p, slug)
 	if !ok {
 		return
 	}
-	canManage, _ := h.isManager(ctx, o.ID, p.UserID)
+	canManage, _ := h.isManager(r.Context(), o.ID, p.UserID)
 	if !canManage {
 		h.ErrorPage(w, r, http.StatusForbidden, "Not allowed", "Only owners and admins can revoke invites.")
 		return
@@ -114,7 +114,7 @@ func (h *InviteHandler) PostRevoke(w http.ResponseWriter, r *http.Request) {
 		h.ErrorPage(w, r, http.StatusBadRequest, "Bad id", "Malformed invite id.")
 		return
 	}
-	if err := h.Invites.Revoke(ctx, id); err != nil {
+	if err := h.Invites.Revoke(r.Context(), id); err != nil {
 		h.LogErr("web invite: revoke", err)
 		if invite.IsNotFoundError(err) {
 			h.ErrorPage(w, r, http.StatusNotFound, "Invite not found", "That invite no longer exists.", err)
@@ -215,8 +215,8 @@ func inviteRows(items []*invite.Invite) []templates.InviteRow {
 
 // Register wires all invite routes onto the mux.
 func (h *InviteHandler) Register(mux *http.ServeMux) {
-	mux.HandleFunc("GET /orgs/{slug}/invites", h.GetList)
-	mux.HandleFunc("POST /orgs/{slug}/invites", h.PostSend)
-	mux.HandleFunc("POST /orgs/{slug}/invites/{id}/revoke", h.PostRevoke)
+	mux.HandleFunc("GET /orgs/{org}/invites", h.GetList)
+	mux.HandleFunc("POST /orgs/{org}/invites", h.PostSend)
+	mux.HandleFunc("POST /orgs/{org}/invites/{id}/revoke", h.PostRevoke)
 	mux.HandleFunc("GET /invites/accept", h.GetAccept)
 }

@@ -453,13 +453,13 @@ func localeOptionClass(active bool) string {
 
 templ orgMenu(d web.LayoutData, slug string) {
 	<nav class="flex flex-col gap-0.5">
-		<a href={ templ.SafeURL(d.Href("/")) } class={ orgItemClass(d.ActiveNav.OrgKey == "overview") }>
+		<a href={ templ.SafeURL(d.Href("/orgs/" + slug)) } class={ orgItemClass(d.ActiveNav.OrgKey == "overview") }>
 			@icons.Icon("layout-dashboard", "h-4 w-4 shrink-0") <span>{ d.Tr("nav.overview") }</span>
 		</a>
-		<a href={ templ.SafeURL(d.Href("/projects")) } class={ orgItemClass(d.ActiveNav.OrgKey == "projects" || d.ActiveNav.Scope == web.NavScopeProject) }>
+		<a href={ templ.SafeURL(d.OrgPath("/projects")) } class={ orgItemClass(d.ActiveNav.OrgKey == "projects" || d.ActiveNav.Scope == web.NavScopeProject) }>
 			@icons.Icon("folder", "h-4 w-4 shrink-0") <span>{ d.Tr("nav.projects") }</span>
 		</a>
-		<a href={ templ.SafeURL(d.Href("/orgs/" + slug)) } class={ orgItemClass(d.ActiveNav.OrgKey == "members") }>
+		<a href={ templ.SafeURL(d.Href("/orgs/" + slug + "/members")) } class={ orgItemClass(d.ActiveNav.OrgKey == "members") }>
 			@icons.Icon("users", "h-4 w-4 shrink-0") <span>{ d.Tr("nav.members") }</span>
 		</a>
 		<a href={ templ.SafeURL(d.Href("/orgs/" + slug + "/invites")) } class={ orgItemClass(d.ActiveNav.OrgKey == "invites") }>
@@ -475,17 +475,17 @@ templ projectSidebar(d web.LayoutData) {
 			@projectMenu(d, d.ActiveProject.Slug)
 		} else {
 			<p class="mt-1 mb-2 px-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground/70">{ d.Tr("common.project") }</p>
-			<a href={ templ.SafeURL(d.Href("/projects/new")) } class={ orgItemClass(false) }>@icons.Icon("plus", "h-4 w-4 text-muted-foreground") <span>{ d.Tr("nav.create_project") }</span></a>
+			<a href={ templ.SafeURL(d.OrgPath("/projects/new")) } class={ orgItemClass(false) }>@icons.Icon("plus", "h-4 w-4 text-muted-foreground") <span>{ d.Tr("nav.create_project") }</span></a>
 		}
 	</div>
 }
 
 templ projectMenu(d web.LayoutData, slug string) {
 	<nav class="flex flex-col gap-0.5">
-		<a href={ templ.SafeURL(d.Href("/projects/" + slug + "/overview")) } class={ orgItemClass(d.ActiveNav.ProjectKey == "overview") }>
+		<a href={ templ.SafeURL(d.ProjectPath(slug, "/overview")) } class={ orgItemClass(d.ActiveNav.ProjectKey == "overview") }>
 			@icons.Icon("layout-dashboard", "h-4 w-4 shrink-0") <span>{ d.Tr("nav.overview") }</span>
 		</a>
-		<a href={ templ.SafeURL(d.Href("/projects/" + slug + "/todos")) } class={ orgItemClass(d.ActiveNav.ProjectKey == "todos") }>
+		<a href={ templ.SafeURL(d.ProjectPath(slug, "/todos")) } class={ orgItemClass(d.ActiveNav.ProjectKey == "todos") }>
 			@icons.Icon("list-checks", "h-4 w-4 shrink-0") <span>{ d.Tr("nav.todos") }</span>
 		</a>
 	</nav>
@@ -518,7 +518,7 @@ templ orgSwitcherPill(d web.LayoutData) {
 				<div class="my-1 border-t border-subtle"></div>
 				<p class="px-3 py-1 text-xs uppercase tracking-wide text-muted-foreground/70">Switch</p>
 				for _, o := range d.OtherOrgs {
-					<a href={ templ.SafeURL(d.Href("/orgs/" + o.Slug)) } class="block rounded px-3 py-2 text-sm text-foreground/90 hover:bg-muted">{ o.Name }</a>
+					<a href={ templ.SafeURL(d.Href("/orgs/" + o.Slug + "/projects")) } class="block rounded px-3 py-2 text-sm text-foreground/90 hover:bg-muted">{ o.Name }</a>
 				}
 			}
 			if d.Caps.OrgCreation {
@@ -555,11 +555,11 @@ templ projectSwitcherPill(d web.LayoutData) {
 				<div class="my-1 border-t border-subtle"></div>
 				<p class="px-3 py-1 text-xs uppercase tracking-wide text-muted-foreground/70">Switch</p>
 				for _, p := range d.OtherProjects {
-					<a href={ templ.SafeURL(d.Href("/projects/" + p.Slug + "/overview")) } class="block rounded px-3 py-2 text-sm text-foreground/90 hover:bg-muted">{ p.Name }</a>
+					<a href={ templ.SafeURL(d.ProjectPath(p.Slug, "/overview")) } class="block rounded px-3 py-2 text-sm text-foreground/90 hover:bg-muted">{ p.Name }</a>
 				}
 			}
 			<div class="my-1 border-t border-subtle"></div>
-			<a href={ templ.SafeURL(d.Href("/projects/new")) } class="flex items-center gap-2 rounded px-3 py-2 text-sm text-foreground/90 hover:bg-muted">
+			<a href={ templ.SafeURL(d.OrgPath("/projects/new")) } class="flex items-center gap-2 rounded px-3 py-2 text-sm text-foreground/90 hover:bg-muted">
 				@icons.Icon("plus", "h-4 w-4 text-muted-foreground") <span>{ d.Tr("nav.new_project") }</span>
 			</a>
 		</div>

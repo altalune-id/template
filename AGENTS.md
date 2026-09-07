@@ -21,6 +21,8 @@ forks — signature changes cost every fork of churn, so land tests first.
   `internal/platform/tokens/`, `worker/`.
 - [`docs/CLI_CONTRACT.md`](docs/CLI_CONTRACT.md) — stable command tree,
   exit codes, output envelopes.
+- [`docs/MULTITENANCY_CONTEXT.md`](docs/MULTITENANCY_CONTEXT.md) — how a request
+  gets its tenant scope. Read before adding or moving any tenant-scoped route.
 - [`GLOSSARY.md`](GLOSSARY.md) — canonical terminology. Check a term here
   before inventing a synonym.
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — TDD, commits, signing.

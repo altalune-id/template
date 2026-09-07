@@ -78,7 +78,7 @@ func (h *OrgHandler) PostCreate(w http.ResponseWriter, r *http.Request) {
 	if err := h.UpdateSession(r, sid, updated); err != nil {
 		h.LogErr("web org: update session", err)
 	}
-	http.Redirect(w, r, web.Path(h.Cfg.HTTP.BasePath, "/orgs/"+created.Slug), http.StatusSeeOther)
+	http.Redirect(w, r, web.Path(h.Cfg.HTTP.BasePath, "/orgs/"+created.Slug+"/projects"), http.StatusSeeOther)
 }
 
 // PostRename handles POST /orgs/{slug}/rename.
@@ -87,23 +87,23 @@ func (h *OrgHandler) PostRename(w http.ResponseWriter, r *http.Request) {
 	if !authed {
 		return
 	}
-	slug := r.PathValue("slug")
+	slug := r.PathValue("org")
 	if err := r.ParseForm(); err != nil {
 		h.ErrorPage(w, r, http.StatusBadRequest, "Bad request", "Could not parse form body.")
 		return
 	}
 	name := strings.TrimSpace(r.PostForm.Get("name"))
-	o, ctx, ok := h.OrgScopeFor(w, r, p, slug)
+	o, r, ok := h.OrgScopeFor(w, r, p, slug)
 	if !ok {
 		return
 	}
 	// SECURITY: the slug comes from the URL, so membership in that org must be checked here — RLS no longer narrows this to the active org.
-	canManage, mErr := h.isManager(ctx, o.ID, p.UserID)
+	canManage, mErr := h.isManager(r.Context(), o.ID, p.UserID)
 	if mErr != nil || !canManage {
 		h.ErrorPage(w, r, http.StatusForbidden, "Not allowed", "You must be an admin or owner to rename this organization.")
 		return
 	}
-	if _, err := h.Orgs.Rename(ctx, o.ID, name); err != nil {
+	if _, err := h.Orgs.Rename(r.Context(), o.ID, name); err != nil {
 		h.LogErr("web org: rename", err)
 		if org.IsSystemProtectedError(err) {
 			h.ErrorPage(w, r, http.StatusConflict, "Rename not allowed", "This organization is system-protected.", err)
@@ -112,7 +112,7 @@ func (h *OrgHandler) PostRename(w http.ResponseWriter, r *http.Request) {
 		h.ErrorPage(w, r, http.StatusBadRequest, "Rename failed", err.Error())
 		return
 	}
-	http.Redirect(w, r, ResolveReturnTo(h.Cfg.HTTP.BasePath, "/orgs/"+slug), http.StatusSeeOther) //nolint:gosec // G710: destination sanitized via ResolveReturnTo → SanitizeReturnTo
+	http.Redirect(w, r, ResolveReturnTo(h.Cfg.HTTP.BasePath, "/orgs/"+slug+"/members"), http.StatusSeeOther) //nolint:gosec // G710: destination sanitized via ResolveReturnTo → SanitizeReturnTo
 }
 
 // GetShow renders /orgs/{slug} — the members view.
@@ -121,18 +121,18 @@ func (h *OrgHandler) GetShow(w http.ResponseWriter, r *http.Request) {
 	if !authed {
 		return
 	}
-	slug := r.PathValue("slug")
-	o, ctx, ok := h.OrgScopeFor(w, r, p, slug)
+	slug := r.PathValue("org")
+	o, r, ok := h.OrgScopeFor(w, r, p, slug)
 	if !ok {
 		return
 	}
-	profiles, err := h.Orgs.ListMemberProfiles(ctx, o.ID)
+	profiles, err := h.Orgs.ListMemberProfiles(r.Context(), o.ID)
 	if err != nil {
 		h.LogErr("web org: members", err)
 		h.ErrorPage(w, r, http.StatusInternalServerError, "Members failed", "Could not load members.", err)
 		return
 	}
-	canManage, _ := h.isManager(ctx, o.ID, p.UserID)
+	canManage, _ := h.isManager(r.Context(), o.ID, p.UserID)
 	Render(w, r, templates.MembersLayout(h.LayoutForOrg(r, o.Name, slug, "members"), templates.MembersView{
 		OrgSlug:   slug,
 		Members:   memberProfileRows(profiles, o.ID, p.UserID),
@@ -146,12 +146,12 @@ func (h *OrgHandler) PostRemoveMember(w http.ResponseWriter, r *http.Request) {
 	if !authed {
 		return
 	}
-	slug := r.PathValue("slug")
-	o, ctx, ok := h.OrgScopeFor(w, r, p, slug)
+	slug := r.PathValue("org")
+	o, r, ok := h.OrgScopeFor(w, r, p, slug)
 	if !ok {
 		return
 	}
-	canManage, mErr := h.isManager(ctx, o.ID, p.UserID)
+	canManage, mErr := h.isManager(r.Context(), o.ID, p.UserID)
 	if mErr != nil || !canManage {
 		h.ErrorPage(w, r, http.StatusForbidden, "Not allowed", "You must be an admin or owner to manage members.")
 		return
@@ -161,7 +161,7 @@ func (h *OrgHandler) PostRemoveMember(w http.ResponseWriter, r *http.Request) {
 		h.ErrorPage(w, r, http.StatusBadRequest, "Bad id", "Malformed user id.")
 		return
 	}
-	if err := h.Orgs.RemoveMember(ctx, o.ID, userID); err != nil {
+	if err := h.Orgs.RemoveMember(r.Context(), o.ID, userID); err != nil {
 		h.LogErr("web org: remove member", err)
 		if org.IsSystemProtectedError(err) {
 			h.ErrorPage(w, r, http.StatusConflict, "Remove not allowed", "This membership is system-protected.", err)
@@ -183,7 +183,7 @@ func (h *OrgHandler) PostRemoveMember(w http.ResponseWriter, r *http.Request) {
 		h.ErrorPage(w, r, http.StatusInternalServerError, "Remove failed", "Could not remove that member.")
 		return
 	}
-	http.Redirect(w, r, ResolveReturnTo(h.Cfg.HTTP.BasePath, "/orgs/"+slug), http.StatusSeeOther) //nolint:gosec // G710: destination sanitized via ResolveReturnTo → SanitizeReturnTo
+	http.Redirect(w, r, ResolveReturnTo(h.Cfg.HTTP.BasePath, "/orgs/"+slug+"/members"), http.StatusSeeOther) //nolint:gosec // G710: destination sanitized via ResolveReturnTo → SanitizeReturnTo
 }
 
 // SECURITY: ctx must already carry the tenant scope; MembershipOf is RLS-filtered by org.
@@ -255,7 +255,7 @@ func (h *OrgHandler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /orgs", h.GetList)
 	mux.HandleFunc("GET /orgs/new", h.GetNew)
 	mux.HandleFunc("POST /orgs", h.PostCreate)
-	mux.HandleFunc("GET /orgs/{slug}", h.GetShow)
-	mux.HandleFunc("POST /orgs/{slug}/rename", h.PostRename)
-	mux.HandleFunc("POST /orgs/{slug}/members/{user}/remove", h.PostRemoveMember)
+	mux.HandleFunc("GET /orgs/{org}/members", h.GetShow)
+	mux.HandleFunc("POST /orgs/{org}/rename", h.PostRename)
+	mux.HandleFunc("POST /orgs/{org}/members/{user}/remove", h.PostRemoveMember)
 }

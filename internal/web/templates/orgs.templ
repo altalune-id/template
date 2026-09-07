@@ -48,7 +48,7 @@ templ OrgsPage(d web.LayoutData, v OrgsView) {
 							</p>
 							<p class="truncate text-xs text-muted-foreground">{ o.Slug }</p>
 						</div>
-						<a href={ templ.SafeURL(d.Href("/orgs/" + o.Slug)) } class="ml-4 text-sm font-medium text-muted-foreground hover:text-foreground">{ d.Tr("common.open") }</a>
+						<a href={ templ.SafeURL(d.Href("/orgs/" + o.Slug + "/projects")) } class="ml-4 text-sm font-medium text-muted-foreground hover:text-foreground">{ d.Tr("common.open") }</a>
 					</li>
 				}
 			</ul>

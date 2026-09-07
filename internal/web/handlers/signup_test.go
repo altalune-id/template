@@ -122,7 +122,7 @@ func TestSignupHandler_PostSignup_HappyPath(t *testing.T) {
 	body := "org_name=Acme&org_slug=acme&project_name=Main&project_slug=main"
 	mux.ServeHTTP(rec, f.authedRequest(t, http.MethodPost, "/signup/complete", body, session.Principal{UserID: u.ID, Email: u.Email, Name: u.Name}))
 	assert.Equal(t, http.StatusSeeOther, rec.Code)
-	assert.Equal(t, "/projects/main/overview", rec.Header().Get("Location"))
+	assert.Equal(t, "/orgs/acme/projects/main/overview", rec.Header().Get("Location"))
 
 	o, err := f.Orgs.BySlug(ctx, "acme")
 	require.NoError(t, err)

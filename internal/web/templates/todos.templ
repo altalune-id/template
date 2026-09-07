@@ -6,6 +6,7 @@ import (
 )
 
 type TodosView struct {
+	OrgSlug string
 	ProjectID   string
 	ProjectSlug string
 	ProjectName string
@@ -35,8 +36,8 @@ templ TodosPage(d web.LayoutData, v TodosView) {
 			</div>
 			<form
 				method="post"
-				action={ templ.SafeURL(d.Href("/projects/" + v.ProjectSlug + "/todos/clear")) }
-				hx-post={ d.Href("/projects/" + v.ProjectSlug + "/todos/clear") }
+				action={ templ.SafeURL(d.ProjectPath(v.ProjectSlug, "/todos/clear")) }
+				hx-post={ d.ProjectPath(v.ProjectSlug, "/todos/clear") }
 				hx-target="#todo-list"
 				hx-swap="outerHTML"
 				class="inline"
@@ -52,8 +53,8 @@ templ TodosPage(d web.LayoutData, v TodosView) {
 		}
 		<form
 			method="post"
-			action={ templ.SafeURL(d.Href("/projects/" + v.ProjectSlug + "/todos")) }
-			hx-post={ d.Href("/projects/" + v.ProjectSlug + "/todos") }
+			action={ templ.SafeURL(d.ProjectPath(v.ProjectSlug, "/todos")) }
+			hx-post={ d.ProjectPath(v.ProjectSlug, "/todos") }
 			hx-target="#todo-list"
 			hx-swap="outerHTML"
 			hx-on::after-request="if(event.detail.successful) this.reset()"

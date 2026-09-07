@@ -37,6 +37,13 @@ type probeRoute struct {
 // probeRoutes is every path the web stack registers, with a body for the mutating ones.
 // NOTE: asserted complete against the handler sources in TestRoutes_ListCoversEveryRegisteredRoute.
 func probeRoutes() []probeRoute {
+	const (
+		org   = "probe-org"
+		proj  = "probe-project"
+		base  = "/orgs/" + org
+		pbase = base + "/projects/" + proj
+	)
+	id := uuid.NewString()
 	return []probeRoute{
 		{http.MethodGet, "/", nil},
 		{http.MethodGet, "/login", nil},
@@ -47,12 +54,13 @@ func probeRoutes() []probeRoute {
 		{http.MethodGet, "/privacy", nil},
 		{http.MethodGet, "/orgs", nil},
 		{http.MethodGet, "/orgs/new", nil},
-		{http.MethodGet, "/orgs/probe-org", nil},
-		{http.MethodGet, "/orgs/probe-org/invites", nil},
-		{http.MethodGet, "/projects", nil},
-		{http.MethodGet, "/projects/new", nil},
-		{http.MethodGet, "/projects/probe-project/overview", nil},
-		{http.MethodGet, "/projects/probe-project/todos", nil},
+		{http.MethodGet, base, nil},
+		{http.MethodGet, base + "/members", nil},
+		{http.MethodGet, base + "/invites", nil},
+		{http.MethodGet, base + "/projects", nil},
+		{http.MethodGet, base + "/projects/new", nil},
+		{http.MethodGet, pbase + "/overview", nil},
+		{http.MethodGet, pbase + "/todos", nil},
 		{http.MethodGet, "/signup/complete", nil},
 		{http.MethodGet, "/onboard", nil},
 		{http.MethodGet, "/onboard/oidc", nil},
@@ -60,17 +68,17 @@ func probeRoutes() []probeRoute {
 		{http.MethodGet, "/invites/accept", nil},
 
 		{http.MethodPost, "/orgs", url.Values{"slug": {"probe-new-org"}, "name": {"Probe New Org"}}},
-		{http.MethodPost, "/orgs/probe-org/rename", url.Values{"name": {"Renamed"}}},
-		{http.MethodPost, "/orgs/probe-org/invites", url.Values{"email": {"probe@example.com"}, "role": {"member"}}},
-		{http.MethodPost, "/orgs/probe-org/invites/" + uuid.NewString() + "/revoke", url.Values{}},
-		{http.MethodPost, "/orgs/probe-org/members/" + uuid.NewString() + "/remove", url.Values{}},
-		{http.MethodPost, "/projects", url.Values{"slug": {"probe-new-project"}, "name": {"Probe New Project"}}},
-		{http.MethodPost, "/projects/probe-project/rename", url.Values{"name": {"Renamed"}}},
-		{http.MethodPost, "/projects/probe-project/todos", url.Values{"title": {"probe"}}},
-		{http.MethodPost, "/projects/probe-project/todos/clear", url.Values{}},
-		{http.MethodPost, "/todos/" + uuid.NewString() + "/toggle", url.Values{}},
-		{http.MethodPost, "/todos/" + uuid.NewString() + "/delete", url.Values{}},
-		{http.MethodDelete, "/todos/" + uuid.NewString(), nil},
+		{http.MethodPost, base + "/rename", url.Values{"name": {"Renamed"}}},
+		{http.MethodPost, base + "/invites", url.Values{"email": {"probe@example.com"}, "role": {"member"}}},
+		{http.MethodPost, base + "/invites/" + id + "/revoke", url.Values{}},
+		{http.MethodPost, base + "/members/" + id + "/remove", url.Values{}},
+		{http.MethodPost, base + "/projects", url.Values{"slug": {"probe-new-project"}, "name": {"Probe New Project"}}},
+		{http.MethodPost, pbase + "/rename", url.Values{"name": {"Renamed"}}},
+		{http.MethodPost, pbase + "/todos", url.Values{"title": {"probe"}}},
+		{http.MethodPost, pbase + "/todos/clear", url.Values{}},
+		{http.MethodPost, pbase + "/todos/" + id + "/toggle", url.Values{}},
+		{http.MethodPost, pbase + "/todos/" + id + "/delete", url.Values{}},
+		{http.MethodDelete, pbase + "/todos/" + id, nil},
 		{http.MethodPost, "/onboarding", url.Values{"name": {"Probe"}}},
 		{http.MethodPost, "/welcome", url.Values{"name": {"Probe"}}},
 		{http.MethodPost, "/signup/complete", url.Values{
@@ -206,9 +214,9 @@ var (
 // templatize rewrites a concrete probe path back into the mux pattern it exercises.
 func templatize(path string) string {
 	path = reUUID.ReplaceAllString(path, "{id}")
-	path = strings.Replace(path, "/orgs/probe-org", "/orgs/{slug}", 1)
-	path = strings.Replace(path, "/projects/probe-project", "/projects/{slug}", 1)
-	if strings.HasPrefix(path, "/orgs/{slug}/members/{id}/") {
+	path = strings.Replace(path, "/orgs/probe-org", "/orgs/{org}", 1)
+	path = strings.Replace(path, "/projects/probe-project", "/projects/{project}", 1)
+	if strings.HasPrefix(path, "/orgs/{org}/members/{id}/") {
 		path = strings.Replace(path, "/members/{id}/", "/members/{user}/", 1)
 	}
 	if path == "/" {
@@ -285,7 +293,7 @@ func TestRoutes_NonMemberCannotReachAnotherOrg(t *testing.T) {
 	require.NoError(t, err)
 
 	cookie := probeCookie(t, srv, session.Principal{UserID: outsider.ID, ActiveOrgID: ownOrg.ID})
-	for _, path := range []string{"/orgs/" + o.Slug, "/orgs/" + o.Slug + "/invites"} {
+	for _, path := range []string{"/orgs/" + o.Slug + "/members", "/orgs/" + o.Slug + "/invites"} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
 		req.AddCookie(cookie)
 		rec := httptest.NewRecorder()
@@ -343,7 +351,7 @@ func TestOrgSwitcher_PinnedOrgIsNotAlsoOfferedToSwitchTo(t *testing.T) {
 	require.NoError(t, err)
 
 	cookie := probeCookie(t, srv, session.Principal{UserID: owner.ID, ActiveOrgID: active.ID})
-	for _, path := range []string{"/orgs/" + visited.Slug, "/orgs/" + visited.Slug + "/invites"} {
+	for _, path := range []string{"/orgs/" + visited.Slug + "/members", "/orgs/" + visited.Slug + "/invites"} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
 		req.AddCookie(cookie)
 		rec := httptest.NewRecorder()
@@ -401,7 +409,7 @@ func TestMembersPage_RemoveButtonMatchesTheServiceGate(t *testing.T) {
 	_, err = srv.Orgs.AddMember(scoped, o.ID, plain.ID, org.RoleMember)
 	require.NoError(t, err)
 
-	req := httptest.NewRequest(http.MethodGet, "/orgs/"+o.Slug, nil)
+	req := httptest.NewRequest(http.MethodGet, "/orgs/"+o.Slug+"/members", nil)
 	req.AddCookie(probeCookie(t, srv, session.Principal{UserID: viewer.ID, ActiveOrgID: o.ID}))
 	rec := httptest.NewRecorder()
 	srv.Web.ServeHTTP(rec, req)
