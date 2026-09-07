@@ -14,7 +14,7 @@ func TestNew_OK(t *testing.T) {
 		t.Fatalf("unexpected err: %v", err)
 	}
 	if u.Email != "alice@example.com" {
-		t.Errorf("email not normalised: %q", u.Email)
+		t.Errorf("email not normalized: %q", u.Email)
 	}
 	if u.Name != "Alice" {
 		t.Errorf("name not trimmed: %q", u.Name)

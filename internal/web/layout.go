@@ -86,6 +86,8 @@ type LayoutData struct {
 	SupportedLocs []i18n.Locale
 	Themes        []Theme
 	ColorModes    []ColorMode
+	// RequestID is echoed on every user-visible error so a report can be matched to a log line.
+	RequestID string
 }
 
 // LocaleOption is one row in the locale-selector dropdown.

@@ -54,7 +54,7 @@ func TestNew(t *testing.T) {
 				t.Errorf("OrgID not carried")
 			}
 			if inv.Email != "alice@example.com" {
-				t.Errorf("email not normalised: %q", inv.Email)
+				t.Errorf("email not normalized: %q", inv.Email)
 			}
 			if inv.TokenHash == "" || inv.TokenHash == p.Token {
 				t.Errorf("token not hashed: %q", inv.TokenHash)

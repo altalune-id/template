@@ -92,7 +92,7 @@ type TenantConfig struct {
 	TenantScopedTables      []string           `yaml:"tenantScopedTables"      mapstructure:"tenantScopedTables"       awareness:"bootstrap"`
 }
 
-// SingletonOrgConfig seeds the first organisation created during onboarding. Applies to both modes.
+// SingletonOrgConfig seeds the first organization created during onboarding. Applies to both modes.
 type SingletonOrgConfig struct {
 	Slug string `yaml:"slug" mapstructure:"slug" awareness:"bootstrap"`
 	Name string `yaml:"name" mapstructure:"name" awareness:"bootstrap"`

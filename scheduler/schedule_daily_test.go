@@ -79,7 +79,7 @@ func TestDailyAt_Next(t *testing.T) {
 func TestDailyAt_DSTSpringForward(t *testing.T) {
 	ny, err := time.LoadLocation("America/New_York")
 	require.NoError(t, err)
-	// 2026-03-08 02:30 EST does not exist; time.Date normalises it into EDT.
+	// 2026-03-08 02:30 EST does not exist; time.Date normalizes it into EDT.
 	s := scheduler.MustDailyAt(2, 30, ny)
 	got := s.Next(time.Date(2026, 3, 8, 0, 0, 0, 0, ny))
 	require.True(t, got.After(time.Date(2026, 3, 8, 0, 0, 0, 0, ny)))

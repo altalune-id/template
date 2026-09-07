@@ -107,7 +107,7 @@ schedule — an interval has no wall-clock anchor to shift.
 **Job cadences are deliberately not configurable.** A cadence is a package
 constant in the owning module's `scheduler.go` (e.g. `sweepCron` in
 `internal/todo/scheduler.go`), because changing one changes the domain's
-behaviour and belongs in review, not in a deploy-time env var. Only the
+behavior and belongs in review, not in a deploy-time env var. Only the
 timezone is an operator knob.
 
 ## Database

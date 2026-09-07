@@ -3,6 +3,7 @@
 package org_test
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -43,16 +44,25 @@ func newPostgresStoreForTest(t *testing.T) (store org.Store, tc tenant.Context, 
 	)
 	require.NoError(t, err)
 
-	tc = tenant.Context{OrgID: uuid.Nil, UserID: ownerID}
+	// NOTE: OrgID is left for each test to fill in with the org it operates on — the store derives its
+	// RLS scope from the context, so a placeholder here would only prove that the superuser bypasses RLS.
+	tc = tenant.Context{UserID: ownerID}
 	return store, tc, prefix
+}
+
+// scopedTo returns a context naming orgID, the way org.Create and the handlers do in production.
+func scopedTo(t *testing.T, tc tenant.Context, orgID uuid.UUID) context.Context {
+	t.Helper()
+	tc.OrgID = orgID
+	return tenant.Into(t.Context(), tc)
 }
 
 func TestPostgres_SaveAndLookup(t *testing.T) {
 	store, tc, _ := newPostgresStoreForTest(t)
-	ctx := tenant.Into(t.Context(), tc)
 
 	o, err := org.NewOrg("acme", "Acme", tc.UserID)
 	require.NoError(t, err)
+	ctx := scopedTo(t, tc, o.ID)
 	require.NoError(t, store.Save(ctx, o))
 
 	got, err := store.BySlug(ctx, "acme")
@@ -68,7 +78,7 @@ func TestPostgres_SaveAndLookup(t *testing.T) {
 
 func TestPostgres_NotFound(t *testing.T) {
 	store, tc, _ := newPostgresStoreForTest(t)
-	ctx := tenant.Into(t.Context(), tc)
+	ctx := scopedTo(t, tc, uuid.New())
 
 	_, err := store.ByID(ctx, uuid.New())
 	assert.True(t, org.IsNotFoundError(err), "ByID: want NotFoundError, got %T: %v", err, err)
@@ -79,10 +89,10 @@ func TestPostgres_NotFound(t *testing.T) {
 
 func TestPostgres_SaveIsUpsert(t *testing.T) {
 	store, tc, _ := newPostgresStoreForTest(t)
-	ctx := tenant.Into(t.Context(), tc)
 
 	o, err := org.NewOrg("acme", "Acme", tc.UserID)
 	require.NoError(t, err)
+	ctx := scopedTo(t, tc, o.ID)
 	require.NoError(t, store.Save(ctx, o))
 
 	o.Name = "Acme Corp"
@@ -95,10 +105,10 @@ func TestPostgres_SaveIsUpsert(t *testing.T) {
 
 func TestPostgres_MembershipRoundTrip(t *testing.T) {
 	store, tc, _ := newPostgresStoreForTest(t)
-	ctx := tenant.Into(t.Context(), tc)
 
 	o, err := org.NewOrg("acme", "Acme", tc.UserID)
 	require.NoError(t, err)
+	ctx := scopedTo(t, tc, o.ID)
 	require.NoError(t, store.Save(ctx, o))
 
 	m, err := org.NewMembership(o.ID, tc.UserID, org.RoleOwner)

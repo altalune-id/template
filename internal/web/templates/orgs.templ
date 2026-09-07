@@ -14,7 +14,7 @@ templ OrgsPage(d web.LayoutData, v OrgsView) {
 	<section>
 		<header class="flex items-baseline justify-between border-b border-border pb-4">
 			<div>
-				<h1 class="text-2xl font-semibold text-foreground">Organisations</h1>
+				<h1 class="text-2xl font-semibold text-foreground">Organizations</h1>
 				<p class="mt-1 text-sm text-muted-foreground">Every workspace you belong to.</p>
 			</div>
 			if d.Caps.OrgCreation {
@@ -25,11 +25,11 @@ templ OrgsPage(d web.LayoutData, v OrgsView) {
 			}
 		</header>
 		if v.Error != "" {
-			<div class="mt-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-200">{ v.Error }</div>
+			@ErrorBanner(d, v.Error)
 		}
 		if len(v.Orgs) == 0 {
 			<div class="mt-6 rounded-lg border border-dashed border-border bg-card p-8 text-center">
-				<p class="text-sm text-muted-foreground">You do not belong to any organisation yet.</p>
+				<p class="text-sm text-muted-foreground">You do not belong to any organization yet.</p>
 				if d.Caps.OrgCreation {
 					<a href={ templ.SafeURL(d.Href("/orgs/new")) } class="mt-4 inline-block rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-sm hover:bg-primary/90">Create one</a>
 				}

@@ -2,7 +2,7 @@
 
 ## Workflow
 
-1. Write a failing test that names the behaviour.
+1. Write a failing test that names the behavior.
 2. Make it pass with the minimum code.
 3. Run `make check` (fmt + vet + test).
 4. Refactor with all tests green.

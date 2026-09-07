@@ -6,7 +6,6 @@ import (
 
 	"github.com/google/uuid"
 
-	"altalune.id/template/internal/platform/tenant"
 	"altalune.id/template/internal/project"
 	"altalune.id/template/internal/web"
 	"altalune.id/template/internal/web/templates"
@@ -28,7 +27,10 @@ func (h *ProjectHandler) GetList(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, ResolveReturnTo(h.Cfg.HTTP.BasePath, "/login"), http.StatusSeeOther)
 		return
 	}
-	ctx := tenant.Into(r.Context(), tenant.Context{OrgID: p.ActiveOrgID, UserID: p.UserID})
+	ctx, ok := h.ActiveOrgCtx(w, r, p)
+	if !ok {
+		return
+	}
 	items, err := h.Projects.List(ctx, p.ActiveOrgID)
 	if err != nil {
 		h.LogErr("web project: list", err)
@@ -46,7 +48,7 @@ func (h *ProjectHandler) GetNew(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if p.ActiveOrgID == uuid.Nil {
-		h.ErrorPage(w, r, http.StatusPreconditionRequired, "No active organisation", "Pick or create an organisation first.")
+		h.ErrorPage(w, r, http.StatusPreconditionRequired, "No active organization", "Pick or create an organization first.")
 		return
 	}
 	Render(w, r, templates.ProjectNewLayout(h.Layout(r, "Create project", web.ActiveNav{Scope: web.NavScopeOrg, OrgKey: "projects"}), templates.ProjectNewView{}))
@@ -59,8 +61,8 @@ func (h *ProjectHandler) PostCreate(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, ResolveReturnTo(h.Cfg.HTTP.BasePath, "/login"), http.StatusSeeOther)
 		return
 	}
-	if p.ActiveOrgID == uuid.Nil {
-		h.ErrorPage(w, r, http.StatusPreconditionRequired, "No active organisation", "Pick or create an organisation first.")
+	ctx, ok := h.ActiveOrgCtx(w, r, p)
+	if !ok {
 		return
 	}
 	if err := r.ParseForm(); err != nil {
@@ -69,7 +71,6 @@ func (h *ProjectHandler) PostCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	slug := strings.TrimSpace(r.PostForm.Get("slug"))
 	name := strings.TrimSpace(r.PostForm.Get("name"))
-	ctx := tenant.Into(r.Context(), tenant.Context{OrgID: p.ActiveOrgID, UserID: p.UserID})
 	created, err := h.Projects.Create(ctx, p.ActiveOrgID, slug, name)
 	if err != nil {
 		h.LogErr("web project: create", err)
@@ -104,7 +105,10 @@ func (h *ProjectHandler) PostRename(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := strings.TrimSpace(r.PostForm.Get("name"))
-	ctx := tenant.Into(r.Context(), tenant.Context{OrgID: p.ActiveOrgID, UserID: p.UserID})
+	ctx, ok := h.ActiveOrgCtx(w, r, p)
+	if !ok {
+		return
+	}
 	proj, err := h.Projects.BySlug(ctx, p.ActiveOrgID, slug)
 	if err != nil {
 		h.ErrorPage(w, r, http.StatusNotFound, "Project not found", "")

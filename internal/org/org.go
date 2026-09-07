@@ -1,4 +1,4 @@
-// Package org models organisations and their memberships.
+// Package org models organizations and their memberships.
 package org
 
 import (

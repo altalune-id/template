@@ -6,14 +6,20 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"io"
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
 
+	apperrorv1 "altalune.id/template/gen/go/apperror/v1"
+	"altalune.id/template/internal/apperror"
 	"altalune.id/template/internal/org"
+	"altalune.id/template/internal/platform/capabilities"
 	"altalune.id/template/internal/platform/config"
 	"altalune.id/template/internal/platform/db"
 	"altalune.id/template/internal/platform/tenant"
@@ -188,4 +194,61 @@ func TestPostgres_DefinerWrappers_ListInsideCallerTransaction(t *testing.T) {
 		require.Equal(t, f.orgID, got.ID)
 		return nil
 	}))
+}
+
+func newDefinerService(t *testing.T, f *definerFixture) *org.Service {
+	t.Helper()
+	unexpected := func(_ context.Context, msg string, cause error, _ ...any) *apperror.AppError {
+		return apperror.New("altempl.unexpected", msg, codes.Internal,
+			&apperrorv1.ErrorDetail{Code: "altempl.unexpected"}).WithCause(cause)
+	}
+	return org.NewService(f.store, capabilities.Capabilities{OrgCreation: true},
+		slog.New(slog.NewTextHandler(io.Discard, nil)), unexpected)
+}
+
+func (f *definerFixture) assertOrgAndOwnerCommitted(t *testing.T, o *org.Org, ownerID uuid.UUID) {
+	t.Helper()
+	scoped := tenant.Into(context.Background(), tenant.Context{OrgID: o.ID, UserID: ownerID})
+	got, err := f.store.ByID(scoped, o.ID)
+	require.NoError(t, err, "the org row must be committed and readable under its own scope")
+	require.Equal(t, o.Slug, got.Slug)
+	m, err := f.store.MembershipOf(scoped, o.ID, ownerID)
+	require.NoError(t, err, "the owner membership must be committed under the new org's scope")
+	require.Equal(t, org.RoleOwner, m.Role)
+}
+
+// TestPostgres_OrgCreate_WithBareContext is the signup case: a user with no membership yet has no scope to offer.
+func TestPostgres_OrgCreate_WithBareContext(t *testing.T) {
+	f := newDefinerFixture(t)
+	svc := newDefinerService(t, f)
+
+	o, err := svc.Create(context.Background(), org.CreateRequest{
+		Slug: "bare-" + f.slug, Name: "Bare Ctx Org", OwnerID: f.userID,
+	})
+	require.NoError(t, err, "org.Create must scope itself — a bare ctx is what /signup/complete passes")
+	f.assertOrgAndOwnerCommitted(t, o, f.userID)
+}
+
+// TestPostgres_OrgCreate_UnderAnotherOrgsScope is the second-org case: the caller's active org is the wrong scope for the new row.
+func TestPostgres_OrgCreate_UnderAnotherOrgsScope(t *testing.T) {
+	f := newDefinerFixture(t)
+	svc := newDefinerService(t, f)
+
+	other := tenant.Into(context.Background(), tenant.Context{OrgID: f.orgID, UserID: f.userID})
+	o, err := svc.Create(other, org.CreateRequest{
+		Slug: "second-" + f.slug, Name: "Second Org", OwnerID: f.userID,
+	})
+	require.NoError(t, err, "org.Create must replace the caller's scope with the new org's own")
+	require.NotEqual(t, f.orgID, o.ID)
+	f.assertOrgAndOwnerCommitted(t, o, f.userID)
+}
+
+// TestPostgres_OrgCreate_ScopeNamingNoOrgIsRejected proves a zero-org scope fails loudly instead of writing under the nil uuid.
+func TestPostgres_OrgCreate_ScopeNamingNoOrgIsRejected(t *testing.T) {
+	f := newDefinerFixture(t)
+
+	nilScoped := tenant.Into(context.Background(), tenant.Context{UserID: f.userID})
+	_, err := f.store.ByID(nilScoped, f.orgID)
+	require.Error(t, err)
+	require.True(t, tenant.IsUnscopedError(err), "want *UnscopedError, got %T: %v", err, err)
 }

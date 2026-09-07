@@ -30,18 +30,16 @@ func NewInviteHandler(d Deps, orgs *org.Service, invites *invite.Service) *Invit
 
 // GetList renders /orgs/{slug}/invites.
 func (h *InviteHandler) GetList(w http.ResponseWriter, r *http.Request) {
-	p, _, ok := h.LoadSession(r)
-	if !ok {
+	p, _, authed := h.LoadSession(r)
+	if !authed {
 		http.Redirect(w, r, ResolveReturnTo(h.Cfg.HTTP.BasePath, "/login"), http.StatusSeeOther)
 		return
 	}
 	slug := r.PathValue("slug")
-	o, err := h.Orgs.BySlug(r.Context(), slug)
-	if err != nil {
-		h.ErrorPage(w, r, http.StatusNotFound, "Org not found", "")
+	o, ctx, ok := h.OrgScopeFor(w, r, p, slug)
+	if !ok {
 		return
 	}
-	ctx := tenant.Into(r.Context(), tenant.Context{OrgID: o.ID, UserID: p.UserID})
 	items, err := h.Invites.ListPending(ctx)
 	if err != nil {
 		h.LogErr("web invite: list", err)
@@ -56,18 +54,16 @@ func (h *InviteHandler) GetList(w http.ResponseWriter, r *http.Request) {
 
 // PostSend handles POST /orgs/{slug}/invites.
 func (h *InviteHandler) PostSend(w http.ResponseWriter, r *http.Request) {
-	p, _, ok := h.LoadSession(r)
-	if !ok {
+	p, _, authed := h.LoadSession(r)
+	if !authed {
 		http.Redirect(w, r, ResolveReturnTo(h.Cfg.HTTP.BasePath, "/login"), http.StatusSeeOther)
 		return
 	}
 	slug := r.PathValue("slug")
-	o, err := h.Orgs.BySlug(r.Context(), slug)
-	if err != nil {
-		h.ErrorPage(w, r, http.StatusNotFound, "Org not found", "")
+	o, ctx, ok := h.OrgScopeFor(w, r, p, slug)
+	if !ok {
 		return
 	}
-	ctx := tenant.Into(r.Context(), tenant.Context{OrgID: o.ID, UserID: p.UserID})
 	canManage, _ := h.isManager(ctx, o.ID, p.UserID)
 	if !canManage {
 		h.ErrorPage(w, r, http.StatusForbidden, "Not allowed", "Only owners and admins can invite.")
@@ -98,18 +94,16 @@ func (h *InviteHandler) PostSend(w http.ResponseWriter, r *http.Request) {
 
 // PostRevoke handles POST /orgs/{slug}/invites/{id}/revoke.
 func (h *InviteHandler) PostRevoke(w http.ResponseWriter, r *http.Request) {
-	p, _, ok := h.LoadSession(r)
-	if !ok {
+	p, _, authed := h.LoadSession(r)
+	if !authed {
 		http.Redirect(w, r, ResolveReturnTo(h.Cfg.HTTP.BasePath, "/login"), http.StatusSeeOther)
 		return
 	}
 	slug := r.PathValue("slug")
-	o, err := h.Orgs.BySlug(r.Context(), slug)
-	if err != nil {
-		h.ErrorPage(w, r, http.StatusNotFound, "Org not found", "")
+	o, ctx, ok := h.OrgScopeFor(w, r, p, slug)
+	if !ok {
 		return
 	}
-	ctx := tenant.Into(r.Context(), tenant.Context{OrgID: o.ID, UserID: p.UserID})
 	canManage, _ := h.isManager(ctx, o.ID, p.UserID)
 	if !canManage {
 		h.ErrorPage(w, r, http.StatusForbidden, "Not allowed", "Only owners and admins can revoke invites.")
@@ -122,7 +116,12 @@ func (h *InviteHandler) PostRevoke(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := h.Invites.Revoke(ctx, id); err != nil {
 		h.LogErr("web invite: revoke", err)
-		h.ErrorPage(w, r, http.StatusInternalServerError, "Revoke failed", err.Error())
+		if invite.IsNotFoundError(err) {
+			h.ErrorPage(w, r, http.StatusNotFound, "Invite not found", "That invite no longer exists.")
+			return
+		}
+		// SECURITY: err.Error() names internal ids, so it stays in the log and never reaches the page.
+		h.ErrorPage(w, r, http.StatusInternalServerError, "Revoke failed", "Could not revoke that invite.")
 		return
 	}
 	http.Redirect(w, r, ResolveReturnTo(h.Cfg.HTTP.BasePath, "/orgs/"+slug+"/invites"), http.StatusSeeOther) //nolint:gosec // G710: destination sanitized via ResolveReturnTo → SanitizeReturnTo

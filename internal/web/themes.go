@@ -1,6 +1,6 @@
 package web
 
-// Theme is a named colour theme registered on the page.
+// Theme is a named color theme registered on the page.
 type Theme struct {
 	Key         string
 	DisplayName string

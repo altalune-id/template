@@ -258,7 +258,7 @@ func TestResend_Send_NoRetryWhenMaxAttemptsIsOne(t *testing.T) {
 	}
 }
 
-func TestResend_Send_CancelledContextPreemptsCall(t *testing.T) {
+func TestResend_Send_CanceledContextPreemptsCall(t *testing.T) {
 	rs := newResendServer(t, `{}`, http.StatusOK)
 	r := newResendAt(t, rs, ResendConfig{APIKey: "re_secret"})
 

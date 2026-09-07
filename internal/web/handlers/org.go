@@ -9,7 +9,6 @@ import (
 
 	"altalune.id/template/internal/org"
 	"altalune.id/template/internal/platform/session"
-	"altalune.id/template/internal/platform/tenant"
 	"altalune.id/template/internal/web"
 	"altalune.id/template/internal/web/templates"
 )
@@ -25,18 +24,17 @@ func NewOrgHandler(d Deps, orgs *org.Service) *OrgHandler {
 
 // GetList renders /orgs.
 func (h *OrgHandler) GetList(w http.ResponseWriter, r *http.Request) {
-	p, ok := h.requireAuth(w, r)
-	if !ok {
+	p, authed := h.requireAuth(w, r)
+	if !authed {
 		return
 	}
-	ctx := tenant.Into(r.Context(), tenant.Context{OrgID: p.ActiveOrgID, UserID: p.UserID})
-	items, err := h.Orgs.List(ctx, p.UserID)
+	items, err := h.Orgs.List(r.Context(), p.UserID)
 	if err != nil {
 		h.LogErr("web org: list", err)
 		h.ErrorPage(w, r, http.StatusInternalServerError, "List failed", "Could not load orgs.")
 		return
 	}
-	Render(w, r, templates.OrgsLayout(h.Layout(r, "Organisations", web.ActiveNav{Scope: web.NavScopeOrg}), templates.OrgsView{Orgs: orgSummaries(items)}))
+	Render(w, r, templates.OrgsLayout(h.Layout(r, "Organizations", web.ActiveNav{Scope: web.NavScopeOrg}), templates.OrgsView{Orgs: orgSummaries(items)}))
 }
 
 // GetNew renders /orgs/new.
@@ -45,10 +43,10 @@ func (h *OrgHandler) GetNew(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !h.Caps.OrgCreation {
-		h.ErrorPage(w, r, http.StatusForbidden, "Not allowed", "Organisation creation is disabled in this deployment.")
+		h.ErrorPage(w, r, http.StatusForbidden, "Not allowed", "Organization creation is disabled in this deployment.")
 		return
 	}
-	Render(w, r, templates.OrgNewLayout(h.Layout(r, "Create organisation", web.ActiveNav{Scope: web.NavScopeOrg}), templates.OrgNewView{}))
+	Render(w, r, templates.OrgNewLayout(h.Layout(r, "Create organization", web.ActiveNav{Scope: web.NavScopeOrg}), templates.OrgNewView{}))
 }
 
 // PostCreate handles POST /orgs (org creation is capability-gated).
@@ -59,7 +57,7 @@ func (h *OrgHandler) PostCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !h.Caps.OrgCreation {
-		h.ErrorPage(w, r, http.StatusForbidden, "Not allowed", "Organisation creation is disabled in this deployment.")
+		h.ErrorPage(w, r, http.StatusForbidden, "Not allowed", "Organization creation is disabled in this deployment.")
 		return
 	}
 	if err := r.ParseForm(); err != nil {
@@ -68,8 +66,7 @@ func (h *OrgHandler) PostCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	slug := strings.TrimSpace(r.PostForm.Get("slug"))
 	name := strings.TrimSpace(r.PostForm.Get("name"))
-	ctx := tenant.Into(r.Context(), tenant.Context{OrgID: p.ActiveOrgID, UserID: p.UserID})
-	created, err := h.Orgs.Create(ctx, org.CreateRequest{Slug: slug, Name: name, OwnerID: p.UserID})
+	created, err := h.Orgs.Create(r.Context(), org.CreateRequest{Slug: slug, Name: name, OwnerID: p.UserID})
 	if err != nil {
 		h.LogErr("web org: create", err)
 		h.renderNewErr(w, r, slug, name, err)
@@ -86,8 +83,8 @@ func (h *OrgHandler) PostCreate(w http.ResponseWriter, r *http.Request) {
 
 // PostRename handles POST /orgs/{slug}/rename.
 func (h *OrgHandler) PostRename(w http.ResponseWriter, r *http.Request) {
-	_, ok := h.requireAuth(w, r)
-	if !ok {
+	p, authed := h.requireAuth(w, r)
+	if !authed {
 		return
 	}
 	slug := r.PathValue("slug")
@@ -96,15 +93,20 @@ func (h *OrgHandler) PostRename(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := strings.TrimSpace(r.PostForm.Get("name"))
-	o, err := h.Orgs.BySlug(r.Context(), slug)
-	if err != nil {
-		h.ErrorPage(w, r, http.StatusNotFound, "Org not found", "")
+	o, ctx, ok := h.OrgScopeFor(w, r, p, slug)
+	if !ok {
 		return
 	}
-	if _, err := h.Orgs.Rename(r.Context(), o.ID, name); err != nil {
+	// SECURITY: the slug comes from the URL, so membership in that org must be checked here — RLS no longer narrows this to the active org.
+	canManage, mErr := h.isManager(ctx, o.ID, p.UserID)
+	if mErr != nil || !canManage {
+		h.ErrorPage(w, r, http.StatusForbidden, "Not allowed", "You must be an admin or owner to rename this organization.")
+		return
+	}
+	if _, err := h.Orgs.Rename(ctx, o.ID, name); err != nil {
 		h.LogErr("web org: rename", err)
 		if org.IsSystemProtectedError(err) {
-			h.ErrorPage(w, r, http.StatusConflict, "Rename not allowed", "This organisation is system-protected.")
+			h.ErrorPage(w, r, http.StatusConflict, "Rename not allowed", "This organization is system-protected.")
 			return
 		}
 		h.ErrorPage(w, r, http.StatusBadRequest, "Rename failed", err.Error())
@@ -115,17 +117,15 @@ func (h *OrgHandler) PostRename(w http.ResponseWriter, r *http.Request) {
 
 // GetShow renders /orgs/{slug} — the members view.
 func (h *OrgHandler) GetShow(w http.ResponseWriter, r *http.Request) {
-	p, ok := h.requireAuth(w, r)
-	if !ok {
+	p, authed := h.requireAuth(w, r)
+	if !authed {
 		return
 	}
 	slug := r.PathValue("slug")
-	o, err := h.Orgs.BySlug(r.Context(), slug)
-	if err != nil {
-		h.ErrorPage(w, r, http.StatusNotFound, "Org not found", "")
+	o, ctx, ok := h.OrgScopeFor(w, r, p, slug)
+	if !ok {
 		return
 	}
-	ctx := tenant.Into(r.Context(), tenant.Context{OrgID: o.ID, UserID: p.UserID})
 	profiles, err := h.Orgs.ListMemberProfiles(ctx, o.ID)
 	if err != nil {
 		h.LogErr("web org: members", err)
@@ -142,17 +142,15 @@ func (h *OrgHandler) GetShow(w http.ResponseWriter, r *http.Request) {
 
 // PostRemoveMember handles POST /orgs/{slug}/members/{user}/remove.
 func (h *OrgHandler) PostRemoveMember(w http.ResponseWriter, r *http.Request) {
-	p, ok := h.requireAuth(w, r)
-	if !ok {
+	p, authed := h.requireAuth(w, r)
+	if !authed {
 		return
 	}
 	slug := r.PathValue("slug")
-	o, err := h.Orgs.BySlug(r.Context(), slug)
-	if err != nil {
-		h.ErrorPage(w, r, http.StatusNotFound, "Org not found", "")
+	o, ctx, ok := h.OrgScopeFor(w, r, p, slug)
+	if !ok {
 		return
 	}
-	ctx := tenant.Into(r.Context(), tenant.Context{OrgID: o.ID, UserID: p.UserID})
 	canManage, mErr := h.isManager(ctx, o.ID, p.UserID)
 	if mErr != nil || !canManage {
 		h.ErrorPage(w, r, http.StatusForbidden, "Not allowed", "You must be an admin or owner to manage members.")
@@ -163,13 +161,18 @@ func (h *OrgHandler) PostRemoveMember(w http.ResponseWriter, r *http.Request) {
 		h.ErrorPage(w, r, http.StatusBadRequest, "Bad id", "Malformed user id.")
 		return
 	}
-	if err := h.Orgs.RemoveMember(r.Context(), o.ID, userID); err != nil {
+	if err := h.Orgs.RemoveMember(ctx, o.ID, userID); err != nil {
 		h.LogErr("web org: remove member", err)
 		if org.IsSystemProtectedError(err) {
 			h.ErrorPage(w, r, http.StatusConflict, "Remove not allowed", "This membership is system-protected.")
 			return
 		}
-		h.ErrorPage(w, r, http.StatusInternalServerError, "Remove failed", err.Error())
+		if org.IsMembershipMissingError(err) || org.IsNotFoundError(err) {
+			h.ErrorPage(w, r, http.StatusNotFound, "Member not found", "That person is not a member of this organization.")
+			return
+		}
+		// SECURITY: err.Error() names internal ids, so it stays in the log and never reaches the page.
+		h.ErrorPage(w, r, http.StatusInternalServerError, "Remove failed", "Could not remove that member.")
 		return
 	}
 	http.Redirect(w, r, ResolveReturnTo(h.Cfg.HTTP.BasePath, "/orgs/"+slug), http.StatusSeeOther) //nolint:gosec // G710: destination sanitized via ResolveReturnTo → SanitizeReturnTo
@@ -199,10 +202,10 @@ func (h *OrgHandler) renderNewErr(w http.ResponseWriter, r *http.Request, slug, 
 	case org.IsAlreadyExistsError(err):
 		msg = "Slug is already taken."
 	case org.IsCreationDisabledError(err):
-		msg = "Organisation creation is disabled."
+		msg = "Organization creation is disabled."
 	}
 	Render(w, r, templates.OrgNewLayout(
-		h.Layout(r, "Create organisation", web.ActiveNav{Scope: web.NavScopeOrg}),
+		h.Layout(r, "Create organization", web.ActiveNav{Scope: web.NavScopeOrg}),
 		templates.OrgNewView{Slug: slug, Name: name, Error: msg},
 	))
 }

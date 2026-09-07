@@ -15,7 +15,7 @@ import (
 //nolint:gochecknoglobals // OTel tracer is a package-level fixture, not runtime state.
 var tracer trace.Tracer = otel.Tracer("altalune.id/template/internal/onboard")
 
-// Option customises a Service at construction time.
+// Option customizes a Service at construction time.
 type Option func(*Service)
 
 // WithClock overrides the service's time source, useful in tests.

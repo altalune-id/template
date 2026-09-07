@@ -122,7 +122,7 @@ func TestBootServer_APIHealthzServes(t *testing.T) {
 	}
 }
 
-func TestBootServer_SupervisorRunReturnsWhenCtxCancelled(t *testing.T) {
+func TestBootServer_SupervisorRunReturnsWhenCtxCanceled(t *testing.T) {
 	cfg := newSmokeCfg(t)
 	srv, err := boot.BootServer(context.Background(), cfg)
 	if err != nil {
