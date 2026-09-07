@@ -94,6 +94,7 @@ func buildWebHandler(
 				Store:  kernel.Sessions,
 				Secret: []byte(cfg.HTTP.StateSecret),
 			}),
+			webmw.Tenant,
 			i18npkg.Middleware(i18npkg.MiddlewareOpts{
 				Bundle:     bundle,
 				Default:    defaultLoc,
