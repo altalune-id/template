@@ -12,6 +12,9 @@ templ Layout(d web.LayoutData) {
 			<meta charset="utf-8"/>
 			<meta name="viewport" content="width=device-width, initial-scale=1"/>
 			<title>{ d.Title }</title>
+			<link rel="icon" href={ d.Static("favicon.ico") } sizes="any"/>
+			<link rel="icon" type="image/png" sizes="32x32" href={ d.Static("favicon-32x32.png") }/>
+			<link rel="apple-touch-icon" href={ d.Static("apple-touch-icon.png") }/>
 			@themeInitScript()
 			if d.UIMode == web.UIModeVendored {
 				<link rel="stylesheet" href={ d.Static("basecoat.css") }/>
@@ -105,7 +108,7 @@ templ topNav(d web.LayoutData) {
 				</label>
 			}
 			<a href={ templ.SafeURL(d.Href("/")) } class="flex items-center gap-2">
-				<span class="inline-flex h-7 w-7 items-center justify-center rounded-md bg-primary text-xs font-semibold text-primary-foreground">a</span>
+				<img src={ d.Static("apple-touch-icon.png") } alt="" width="28" height="28" class="h-7 w-7 rounded-md"/>
 				<span class="hidden text-sm font-semibold tracking-tight text-foreground sm:inline">altempl</span>
 			</a>
 			if d.ActiveProject != nil {

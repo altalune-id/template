@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 
 	"altalune.id/template/internal/apperror"
+	"altalune.id/template/internal/platform/tenant"
 )
 
 const (
@@ -144,7 +145,7 @@ func (w *OnboardWorkflow) onboardSelfhosted(ctx context.Context, userID uuid.UUI
 		return OnboardResult{}, w.unexpected(ctx, "user.Onboard: singleton org lookup", err, slog.String("slug", slug))
 	}
 
-	if _, mErr := w.orgs.MembershipOf(ctx, o.ID, userID); mErr == nil {
+	if _, mErr := w.orgs.MembershipOf(scopedTo(ctx, o.ID), o.ID, userID); mErr == nil {
 		projectID, err := w.pickProject(ctx, o.ID)
 		if err != nil {
 			return OnboardResult{}, err
@@ -162,11 +163,11 @@ func (w *OnboardWorkflow) onboardSelfhosted(ctx context.Context, userID uuid.UUI
 
 	now := w.now()
 	inv.AcceptedAt = &now
-	if err := w.invites.Save(ctx, inv); err != nil {
+	if err := w.invites.Save(scopedTo(ctx, inv.OrgID), inv); err != nil {
 		return OnboardResult{}, w.unexpected(ctx, "user.Onboard: accept invite", err)
 	}
 	m := &MembershipRef{OrgID: o.ID, UserID: userID, Role: inv.Role}
-	if err := w.orgs.SaveMembership(ctx, m); err != nil {
+	if err := w.orgs.SaveMembership(scopedTo(ctx, m.OrgID), m); err != nil {
 		return OnboardResult{}, w.unexpected(ctx, "user.Onboard: save membership", err)
 	}
 	projectID, err := w.pickProject(ctx, o.ID)
@@ -197,11 +198,11 @@ func (w *OnboardWorkflow) onboardCloud(ctx context.Context, userID uuid.UUID, us
 	}
 	now := w.now()
 	inv.AcceptedAt = &now
-	if err := w.invites.Save(ctx, inv); err != nil {
+	if err := w.invites.Save(scopedTo(ctx, inv.OrgID), inv); err != nil {
 		return OnboardResult{}, w.unexpected(ctx, "user.Onboard: accept invite", err)
 	}
 	m := &MembershipRef{OrgID: inv.OrgID, UserID: userID, Role: inv.Role}
-	if err := w.orgs.SaveMembership(ctx, m); err != nil {
+	if err := w.orgs.SaveMembership(scopedTo(ctx, m.OrgID), m); err != nil {
 		return OnboardResult{}, w.unexpected(ctx, "user.Onboard: save membership", err)
 	}
 	projectID, err := w.pickProject(ctx, inv.OrgID)
@@ -230,8 +231,9 @@ func (w *OnboardWorkflow) findAnyPendingInvite(ctx context.Context, userEmail st
 	return nil, nil
 }
 
+// SECURITY: the caller is mid-login and holds no tenant scope yet, so bind to the org being joined.
 func (w *OnboardWorkflow) pickProject(ctx context.Context, orgID uuid.UUID) (uuid.UUID, error) {
-	list, err := w.projects.ListByOrg(ctx, orgID)
+	list, err := w.projects.ListByOrg(scopedTo(ctx, orgID), orgID)
 	if err != nil {
 		return uuid.Nil, w.unexpected(ctx, "user.Onboard: list projects", err)
 	}
@@ -241,8 +243,9 @@ func (w *OnboardWorkflow) pickProject(ctx context.Context, orgID uuid.UUID) (uui
 	return list[0].ID, nil
 }
 
+// SECURITY: as pickProject — no tenant scope exists until the org is chosen.
 func (w *OnboardWorkflow) findPendingInvite(ctx context.Context, orgID uuid.UUID, userEmail string) (*InviteRef, error) {
-	list, err := w.invites.ListByOrg(ctx, orgID)
+	list, err := w.invites.ListByOrg(scopedTo(ctx, orgID), orgID)
 	if err != nil {
 		return nil, w.unexpected(ctx, "user.Onboard: list invites", err)
 	}
@@ -283,4 +286,11 @@ func SlugFromEmail(email, fallback string) string {
 		return fallback
 	}
 	return s
+}
+
+// scopedTo binds ctx to orgID, keeping any user or project already carried on it.
+func scopedTo(ctx context.Context, orgID uuid.UUID) context.Context {
+	tc, _ := tenant.From(ctx)
+	tc.OrgID = orgID
+	return tenant.Into(ctx, tc)
 }
