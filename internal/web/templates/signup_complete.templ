@@ -31,7 +31,7 @@ templ SignupCompletePage(d web.LayoutData, v SignupCompleteView) {
 			</p>
 		</header>
 		if v.Error != "" {
-			<div class="mt-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-200">{ v.Error }</div>
+			@ErrorBanner(d, v.Error)
 		}
 		<form method="post" action={ templ.SafeURL(d.Href("/signup/complete")) } class="mt-6 space-y-6" novalidate>
 			if v.AskDisplayName {

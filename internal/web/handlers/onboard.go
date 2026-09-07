@@ -209,7 +209,7 @@ func (h *OnboardHandler) PostLocal(w http.ResponseWriter, r *http.Request) {
 	o, err := h.Orgs.BootstrapSingleton(r.Context(), orgSlug, orgName, u.ID)
 	if err != nil {
 		h.LogErr("web onboard: bootstrap org", err)
-		view.Error = "Could not create organisation."
+		view.Error = "Could not create organization."
 		h.render(w, r, view)
 		return
 	}

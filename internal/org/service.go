@@ -119,6 +119,8 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*Org, error) {
 	if err != nil {
 		return nil, err
 	}
+	// SECURITY: orgs and memberships are scoped by the org's own id, so the new row's scope is the only one RLS accepts — never the caller's active org.
+	ctx = tenant.Into(ctx, tenant.Context{OrgID: o.ID, UserID: req.OwnerID})
 	if err := s.store.Save(ctx, o); err != nil {
 		if IsAlreadyExistsError(err) {
 			return nil, err
@@ -153,6 +155,9 @@ func (s *Service) Rename(ctx context.Context, id uuid.UUID, name string) (*Org, 
 	ctx, span := tracer.Start(ctx, "org.Rename")
 	defer span.End()
 
+	// SECURITY: the scope must name the org being renamed, not whichever org the caller is active in.
+	// Membership in id is the caller's authorization and is checked before this call.
+	ctx = tenant.WithOrg(ctx, id)
 	o, err := s.store.ByID(ctx, id)
 	if err != nil {
 		if IsNotFoundError(err) {
@@ -202,6 +207,9 @@ func (s *Service) RemoveMember(ctx context.Context, orgID, userID uuid.UUID) err
 	ctx, span := tracer.Start(ctx, "org.RemoveMember")
 	defer span.End()
 
+	// SECURITY: the scope must name orgID, not whichever org the caller is active in.
+	// Membership in orgID is the caller's authorization and is checked before this call.
+	ctx = tenant.WithOrg(ctx, orgID)
 	m, err := s.store.MembershipOf(ctx, orgID, userID)
 	if err != nil {
 		if IsMembershipMissingError(err) || IsNotFoundError(err) {

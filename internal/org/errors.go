@@ -33,7 +33,7 @@ func (e *NotFoundError) Error() string {
 func (e *NotFoundError) ToAppError() *apperror.AppError {
 	return apperror.New(
 		apperror.CodeOrgNotFound,
-		"Organisation not found",
+		"Organization not found",
 		codes.NotFound,
 		&apperrorv1.ErrorDetail{Code: apperror.CodeOrgNotFound},
 	)
@@ -58,7 +58,7 @@ func (e *AlreadyExistsError) Error() string {
 func (e *AlreadyExistsError) ToAppError() *apperror.AppError {
 	return apperror.New(
 		apperror.CodeOrgAlreadyExists,
-		"Organisation slug already taken",
+		"Organization slug already taken",
 		codes.AlreadyExists,
 		&apperrorv1.ErrorDetail{Code: apperror.CodeOrgAlreadyExists},
 	)
@@ -87,7 +87,7 @@ func (e *InvalidSlugError) Error() string {
 func (e *InvalidSlugError) ToAppError() *apperror.AppError {
 	return apperror.New(
 		apperror.CodeOrgInvalidSlug,
-		"Invalid organisation slug",
+		"Invalid organization slug",
 		codes.InvalidArgument,
 		&apperrorv1.ErrorDetail{Code: apperror.CodeOrgInvalidSlug},
 	)
@@ -115,7 +115,7 @@ func (e *InvalidNameError) Error() string {
 func (e *InvalidNameError) ToAppError() *apperror.AppError {
 	return apperror.New(
 		apperror.CodeOrgInvalidName,
-		"Invalid organisation name",
+		"Invalid organization name",
 		codes.InvalidArgument,
 		&apperrorv1.ErrorDetail{Code: apperror.CodeOrgInvalidName},
 	)
@@ -251,7 +251,7 @@ func (*CreationDisabledError) Error() string { return "org: creation disabled" }
 func (*CreationDisabledError) ToAppError() *apperror.AppError {
 	return apperror.New(
 		apperror.CodeOrgCreationDisabled,
-		"Organisation creation is disabled",
+		"Organization creation is disabled",
 		codes.FailedPrecondition,
 		&apperrorv1.ErrorDetail{Code: apperror.CodeOrgCreationDisabled},
 	)

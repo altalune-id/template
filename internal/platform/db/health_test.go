@@ -109,7 +109,7 @@ func TestHealthMonitor_RunProbesOnceBeforeTheFirstTick(t *testing.T) {
 	require.Eventually(t, m.Ready, 2*time.Second, 5*time.Millisecond,
 		"Run must probe immediately, not wait a full interval")
 	cancel()
-	require.NoError(t, <-done, "a cancelled context is a clean shutdown, not a worker failure")
+	require.NoError(t, <-done, "a canceled context is a clean shutdown, not a worker failure")
 }
 
 func TestHealthMonitor_RunSwallowsProbeFailures(t *testing.T) {

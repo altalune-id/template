@@ -24,7 +24,7 @@ func newInitCmd(bootServer ServerBootFn) *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:     "init",
-		Short:   "Initialise altempl on first run — create the first admin, org, and project.",
+		Short:   "Initialize altempl on first run — create the first admin, org, and project.",
 		GroupID: "runtime",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {

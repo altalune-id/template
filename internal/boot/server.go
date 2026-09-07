@@ -77,7 +77,10 @@ func BootServer(ctx context.Context, cfg *config.Config, opts ...Option) (*Serve
 		opt(o)
 	}
 
-	log := logger.New(cfg.Log)
+	log := o.logger
+	if log == nil {
+		log = logger.New(cfg.Log)
+	}
 
 	tp, mp, shutdownOTel, err := telemetry.Setup(ctx, cfg.Telemetry, log)
 	if err != nil {
@@ -262,7 +265,7 @@ func BootServer(ctx context.Context, cfg *config.Config, opts ...Option) (*Serve
 	}, nil
 }
 
-// Run starts every registered worker and blocks until ctx is cancelled or a worker fails.
+// Run starts every registered worker and blocks until ctx is canceled or a worker fails.
 func (s *Server) Run(ctx context.Context) error {
 	return s.Supervisor.Run(ctx)
 }

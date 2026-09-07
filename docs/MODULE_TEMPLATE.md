@@ -31,7 +31,7 @@ Optional, only when the module has periodic work:
 | File                | Purpose                                                                                       |
 | ------------------- | --------------------------------------------------------------------------------------------- |
 | `scheduler.go`      | Optional. `Scheduler` adapter implementing `scheduler.Provider` — one `Job` per periodic task |
-| `scheduler_test.go` | Job metadata + `Run` behaviour, using the module's fake `Store`                               |
+| `scheduler_test.go` | Job metadata + `Run` behavior, using the module's fake `Store`                                |
 
 Stateful workflows may live in their own file (see Section 3).
 

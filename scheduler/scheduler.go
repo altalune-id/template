@@ -186,7 +186,7 @@ func (r *Runner) Jobs() []Job {
 // Name implements worker.Worker.
 func (r *Runner) Name() string { return "scheduler" }
 
-// Run starts one goroutine per Job, blocks until ctx is cancelled, then drains within ShutdownGrace.
+// Run starts one goroutine per Job, blocks until ctx is canceled, then drains within ShutdownGrace.
 func (r *Runner) Run(ctx context.Context) error {
 	if !r.started.CompareAndSwap(false, true) {
 		return errors.New("scheduler: Run already called on this Runner")

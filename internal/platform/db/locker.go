@@ -72,7 +72,7 @@ func (l *PgLocker) TryLock(ctx context.Context, name string) (release func(), ac
 	return func() { l.release(ctx, conn, name, key) }, true, nil
 }
 
-// NOTE: unlocks on a detached ctx — the job ctx is already cancelled in the timeout case this exists for.
+// NOTE: unlocks on a detached ctx — the job ctx is already canceled in the timeout case this exists for.
 func (l *PgLocker) release(jobCtx context.Context, conn *sql.Conn, name string, key int64) {
 	unlockCtx, cancel := context.WithTimeout(context.WithoutCancel(jobCtx), unlockBudget)
 	defer cancel()

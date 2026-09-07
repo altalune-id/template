@@ -24,7 +24,7 @@ templ ProjectsPage(d web.LayoutData, v ProjectsView) {
 			</a>
 		</header>
 		if v.Error != "" {
-			<div class="mt-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-200">{ v.Error }</div>
+			@ErrorBanner(d, v.Error)
 		}
 		if len(v.Projects) == 0 {
 			<div class="mt-6 rounded-lg border border-dashed border-border bg-card p-8 text-center">

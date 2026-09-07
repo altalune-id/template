@@ -36,10 +36,10 @@ func (h *TodoHandler) requireTenant(w http.ResponseWriter, r *http.Request) (ses
 		h.ErrorPage(w, r, http.StatusBadRequest, "Bad request", "Missing project slug.")
 		return session.Principal{}, "", nil, false
 	}
-	ctx := tenant.Into(r.Context(), tenant.Context{
-		OrgID:  p.ActiveOrgID,
-		UserID: p.UserID,
-	})
+	ctx, ok := h.ActiveOrgCtx(w, r, p)
+	if !ok {
+		return session.Principal{}, "", nil, false
+	}
 	proj, err := h.Projects.BySlug(ctx, p.ActiveOrgID, slug)
 	if err != nil {
 		h.ErrorPage(w, r, http.StatusNotFound, "Project not found", "No project with that slug in the active org.")
@@ -154,10 +154,10 @@ func (h *TodoHandler) requireTodoTenant(w http.ResponseWriter, r *http.Request) 
 		h.ErrorPage(w, r, http.StatusBadRequest, "Bad id", "Malformed todo id.")
 		return session.Principal{}, nil, false
 	}
-	ctx := tenant.Into(r.Context(), tenant.Context{
-		OrgID:  p.ActiveOrgID,
-		UserID: p.UserID,
-	})
+	ctx, ok := h.ActiveOrgCtx(w, r, p)
+	if !ok {
+		return session.Principal{}, nil, false
+	}
 	t, err := h.Todos.ByID(ctx, id)
 	if err != nil {
 		if todo.IsNotFoundError(err) {

@@ -2,6 +2,7 @@
 package handlers
 
 import (
+	"context"
 	"log"
 	"net/http"
 	"net/url"
@@ -64,6 +65,7 @@ func (d Deps) Base(r *http.Request, title string) web.LayoutData {
 		SupportedLocs: supported,
 		Themes:        web.Themes(),
 		ColorModes:    web.ColorModes(),
+		RequestID:     reqid.FromContext(r.Context()),
 	}
 }
 
@@ -214,6 +216,37 @@ func (d Deps) ErrorPage(w http.ResponseWriter, r *http.Request, status int, titl
 	RenderStatus(w, r, status, templates.ErrorLayout(base, templates.ErrorView{
 		Status: status, Title: title, Message: msg, RequestID: reqid.FromContext(r.Context()),
 	}))
+}
+
+// OrgScopeFor resolves the org named by slug and returns a context scoped to it, refusing callers who are not members.
+// SECURITY: the slug is attacker-supplied and the handler — not RLS — picks the org, so membership is verified here.
+// A non-member gets the same 404 as a bad slug so org slugs cannot be enumerated.
+func (d Deps) OrgScopeFor(w http.ResponseWriter, r *http.Request, p session.Principal, slug string) (*org.Org, context.Context, bool) {
+	o, err := d.Orgs.BySlug(r.Context(), slug)
+	if err != nil {
+		d.ErrorPage(w, r, http.StatusNotFound, "Organization not found", "")
+		return nil, nil, false
+	}
+	ctx := tenant.Into(r.Context(), tenant.Context{OrgID: o.ID, UserID: p.UserID})
+	if _, err := d.Orgs.MembershipOf(ctx, o.ID, p.UserID); err != nil {
+		d.ErrorPage(w, r, http.StatusNotFound, "Organization not found", "")
+		return nil, nil, false
+	}
+	return o, ctx, true
+}
+
+// ActiveOrgCtx returns r's context scoped to the principal's active org, rendering a precondition page when there is none.
+// SECURITY: tenant.From rejects a zero OrgID, so every handler that reaches a tenant-scoped store must obtain its context here.
+func (d Deps) ActiveOrgCtx(w http.ResponseWriter, r *http.Request, p session.Principal) (context.Context, bool) {
+	if p.ActiveOrgID == uuid.Nil {
+		d.ErrorPage(w, r, http.StatusPreconditionRequired, "No active organization", "Pick or create an organization first.")
+		return nil, false
+	}
+	return tenant.Into(r.Context(), tenant.Context{
+		OrgID:     p.ActiveOrgID,
+		ProjectID: p.ActiveProjectID,
+		UserID:    p.UserID,
+	}), true
 }
 
 // LoadSession reads the sid cookie, verifies its HMAC, and loads the Principal from the store.

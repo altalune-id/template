@@ -24,6 +24,27 @@ func (*MissingError) ToAppError() *apperror.AppError {
 	)
 }
 
+// UnscopedError signals that ctx carries a tenant Context whose OrgID is the zero uuid.
+type UnscopedError struct{}
+
+func (*UnscopedError) Error() string { return "tenant: context names no org" }
+
+// ToAppError maps UnscopedError to the canonical Unauthenticated envelope.
+func (*UnscopedError) ToAppError() *apperror.AppError {
+	return apperror.New(
+		apperror.CodeTenantMissing,
+		"Tenant context names no org",
+		codes.Unauthenticated,
+		&apperrorv1.ErrorDetail{Code: apperror.CodeTenantMissing},
+	)
+}
+
+// IsUnscopedError reports whether err's tree contains an *UnscopedError.
+func IsUnscopedError(err error) bool {
+	_, ok := errors.AsType[*UnscopedError](err)
+	return ok
+}
+
 // IsMissingError reports whether err's tree contains a *MissingError.
 func IsMissingError(err error) bool {
 	_, ok := errors.AsType[*MissingError](err)

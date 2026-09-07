@@ -21,11 +21,22 @@ func Into(ctx context.Context, tc Context) context.Context {
 	return context.WithValue(ctx, ctxKey{}, tc)
 }
 
-// From returns the tenant Context carried by ctx or a *MissingError when absent.
+// From returns the tenant Context carried by ctx, or an error when it is absent or names no org.
+// SECURITY: a zero OrgID sets app.current_org_id to the nil uuid, which reads as a real scope matching no rows.
 func From(ctx context.Context) (Context, error) {
 	tc, ok := ctx.Value(ctxKey{}).(Context)
 	if !ok {
 		return Context{}, &MissingError{}
 	}
+	if tc.OrgID == uuid.Nil {
+		return Context{}, &UnscopedError{}
+	}
 	return tc, nil
+}
+
+// WithOrg returns ctx scoped to orgID, keeping any project and user already carried on it.
+func WithOrg(ctx context.Context, orgID uuid.UUID) context.Context {
+	tc, _ := ctx.Value(ctxKey{}).(Context)
+	tc.OrgID = orgID
+	return Into(ctx, tc)
 }

@@ -143,7 +143,7 @@ sup.Register(worker.HTTP("http", cfg.HTTP.Addr, webHnd, log))
 
 Every worker:
 
-1. Returns `nil` on graceful shutdown (ctx cancelled).
+1. Returns `nil` on graceful shutdown (ctx canceled).
 2. Returns a non-nil error on unrecoverable failure (Supervisor cascades cancel).
 3. Never blocks ctx cancellation for more than the graceful window (10s).
 4. In a periodic loop, logs per-tick failures instead of returning them — a

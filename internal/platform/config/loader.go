@@ -12,7 +12,7 @@ import (
 	"github.com/spf13/viper"
 )
 
-// Option customises Load's behaviour.
+// Option customizes Load's behavior.
 type Option func(*loadOptions)
 
 type loadOptions struct {

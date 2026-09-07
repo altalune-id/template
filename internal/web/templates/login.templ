@@ -18,7 +18,7 @@ templ LoginPage(d web.LayoutData, v LoginView) {
 			<div class="mt-4 p-3 rounded bg-emerald-50 text-emerald-800 text-sm border border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-200 dark:border-emerald-900/50">{ v.Message }</div>
 		}
 		if v.Error != "" {
-			<div class="mt-4 p-3 rounded bg-red-100 text-red-800 text-sm dark:bg-red-950/50 dark:text-red-200">{ v.Error }</div>
+			@ErrorBanner(d, v.Error)
 		}
 		if d.Caps.ExternalIdentity && !v.AdminForce {
 			if v.LastEmail != "" {
