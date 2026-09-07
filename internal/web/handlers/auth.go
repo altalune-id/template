@@ -209,7 +209,7 @@ func (h *AuthHandler) OIDCComplete(ctx context.Context, w http.ResponseWriter, r
 			return nil
 		}
 		h.LogErr("web auth: oidc onboard", err)
-		h.ErrorPage(w, r, http.StatusForbidden, "Not permitted", err.Error())
+		h.ErrorPage(w, r, http.StatusForbidden, "Not permitted", err.Error(), err)
 		return nil
 	}
 	principal.IDToken = ident.IDToken
@@ -217,7 +217,7 @@ func (h *AuthHandler) OIDCComplete(ctx context.Context, w http.ResponseWriter, r
 	principal = h.resolveActiveTenant(ctx, principal)
 	if err := h.WriteSession(w, r, principal); err != nil {
 		h.LogErr("web auth: oidc write session", err)
-		h.ErrorPage(w, r, http.StatusInternalServerError, "Sign-in failed", "Could not persist session.")
+		h.ErrorPage(w, r, http.StatusInternalServerError, "Sign-in failed", "Could not persist session.", err)
 		return nil //nolint:nilerr // response already written via ErrorPage; returning err would double-write via authl.writeErr
 	}
 	if h.Required != nil && h.Required.Load() {

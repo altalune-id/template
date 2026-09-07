@@ -131,6 +131,7 @@ func (h *SignupHandler) PostSignup(w http.ResponseWriter, r *http.Request) {
 		}
 		h.LogErr("signup: create org", err)
 		view.Error = "Could not create the organization."
+		view.ErrorCode = ErrorRef(err)
 		h.render(w, r, view)
 		return
 	}
@@ -145,6 +146,7 @@ func (h *SignupHandler) PostSignup(w http.ResponseWriter, r *http.Request) {
 		}
 		h.LogErr("signup: create project", err)
 		view.Error = "Could not create the first project."
+		view.ErrorCode = ErrorRef(err)
 		h.render(w, r, view)
 		return
 	}

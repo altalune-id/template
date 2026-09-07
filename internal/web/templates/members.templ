@@ -22,6 +22,7 @@ type MembersView struct {
 	Members   []MemberRow
 	CanManage bool
 	Error     string
+	ErrorCode string
 }
 
 templ MembersPage(d web.LayoutData, v MembersView) {
@@ -39,7 +40,7 @@ templ MembersPage(d web.LayoutData, v MembersView) {
 			}
 		</header>
 		if v.Error != "" {
-			@ErrorBanner(d, v.Error)
+			@ErrorBanner(d, v.Error, v.ErrorCode)
 		}
 		<ul class="mt-6 divide-y divide-border/50 overflow-hidden rounded-lg border border-border bg-card shadow-sm">
 			if len(v.Members) == 0 {

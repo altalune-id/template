@@ -239,13 +239,14 @@ func (e *SystemProtectedError) ToAppError() *apperror.AppError {
 
 // RemovalRefusal reports why actor may not remove the target membership, or nil when removal is allowed.
 // SECURITY: the service gate and the members view both consult this, so a hidden button and a refused post cannot drift apart.
-func RemovalRefusal(orgID, actor, target uuid.UUID, role Role, system bool) error {
+// Refusing self-removal is also what keeps an org from losing its last owner: only an owner can remove an owner.
+func RemovalRefusal(orgID, actor, target uuid.UUID, actorRole, targetRole Role, system bool) error {
 	switch {
 	case system:
 		return &SystemProtectedError{Op: "remove_member", OrgID: orgID.String(), UserID: target.String(), Resource: "membership"}
 	case actor == target:
 		return &SelfRemovalError{OrgID: orgID.String(), UserID: target.String()}
-	case role == RoleOwner:
+	case targetRole == RoleOwner && actorRole != RoleOwner:
 		return &OwnerRemovalError{OrgID: orgID.String(), UserID: target.String()}
 	}
 	return nil
@@ -280,7 +281,7 @@ func IsSelfRemovalError(err error) bool {
 	return ok
 }
 
-// OwnerRemovalError signals that a caller tried to remove a membership carrying the owner role.
+// OwnerRemovalError signals that a non-owner tried to remove a membership carrying the owner role.
 type OwnerRemovalError struct {
 	OrgID  string
 	UserID string
@@ -288,16 +289,16 @@ type OwnerRemovalError struct {
 
 func (e *OwnerRemovalError) Error() string {
 	if e == nil {
-		return "org: cannot remove an owner"
+		return "org: only an owner can remove an owner"
 	}
-	return fmt.Sprintf("org: cannot remove an owner: org=%s user=%s", e.OrgID, e.UserID)
+	return fmt.Sprintf("org: only an owner can remove an owner: org=%s user=%s", e.OrgID, e.UserID)
 }
 
 // ToAppError maps OwnerRemovalError to a FailedPrecondition envelope.
 func (e *OwnerRemovalError) ToAppError() *apperror.AppError {
 	return apperror.New(
 		apperror.CodeOrgOwnerRemoval,
-		"An owner cannot be removed",
+		"Only an owner can remove another owner",
 		codes.FailedPrecondition,
 		&apperrorv1.ErrorDetail{Code: apperror.CodeOrgOwnerRemoval},
 	)

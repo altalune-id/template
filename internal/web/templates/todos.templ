@@ -11,6 +11,7 @@ type TodosView struct {
 	ProjectName string
 	Items       []TodoRow
 	Error       string
+	ErrorCode string
 }
 
 // TodoList is the HTMX-swappable list section — POST to /todos targets #todo-list.
@@ -47,7 +48,7 @@ templ TodosPage(d web.LayoutData, v TodosView) {
 			</form>
 		</header>
 		if v.Error != "" {
-			@ErrorBanner(d, v.Error)
+			@ErrorBanner(d, v.Error, v.ErrorCode)
 		}
 		<form
 			method="post"

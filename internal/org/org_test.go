@@ -139,15 +139,15 @@ func TestErrors_ToAppError(t *testing.T) {
 		err     error
 		wantCod string
 	}{
-		{"NotFound", &org.NotFoundError{ID: "x"}, "org.not_found"},
-		{"AlreadyExists", &org.AlreadyExistsError{Slug: "acme"}, "org.already_exists"},
-		{"InvalidSlug", &org.InvalidSlugError{Slug: "X"}, "org.invalid_slug"},
-		{"InvalidName", &org.InvalidNameError{}, "org.invalid_name"},
-		{"InvalidRole", &org.InvalidRoleError{Role: "x"}, "altempl.validation"},
-		{"MembershipExists", &org.MembershipExistsError{}, "org.membership_exists"},
-		{"MembershipMissing", &org.MembershipMissingError{}, "org.membership_missing"},
-		{"CreationDisabled", &org.CreationDisabledError{}, "org.creation_disabled"},
-		{"SystemProtected", &org.SystemProtectedError{Op: "rename", Resource: "org"}, "org.system_protected"},
+		{"NotFound", &org.NotFoundError{ID: "x"}, apperror.CodeOrgNotFound},
+		{"AlreadyExists", &org.AlreadyExistsError{Slug: "acme"}, apperror.CodeOrgAlreadyExists},
+		{"InvalidSlug", &org.InvalidSlugError{Slug: "X"}, apperror.CodeOrgInvalidSlug},
+		{"InvalidName", &org.InvalidNameError{}, apperror.CodeOrgInvalidName},
+		{"InvalidRole", &org.InvalidRoleError{Role: "x"}, apperror.CodeValidation},
+		{"MembershipExists", &org.MembershipExistsError{}, apperror.CodeOrgMembershipExists},
+		{"MembershipMissing", &org.MembershipMissingError{}, apperror.CodeOrgMembershipMissing},
+		{"CreationDisabled", &org.CreationDisabledError{}, apperror.CodeOrgCreationDisabled},
+		{"SystemProtected", &org.SystemProtectedError{Op: "rename", Resource: "org"}, apperror.CodeOrgSystemProtected},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

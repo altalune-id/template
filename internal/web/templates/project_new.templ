@@ -6,6 +6,7 @@ type ProjectNewView struct {
 	Slug  string
 	Name  string
 	Error string
+	ErrorCode string
 }
 
 templ ProjectNewPage(d web.LayoutData, v ProjectNewView) {
@@ -22,7 +23,7 @@ templ ProjectNewPage(d web.LayoutData, v ProjectNewView) {
 			</p>
 		</header>
 		if v.Error != "" {
-			@ErrorBanner(d, v.Error)
+			@ErrorBanner(d, v.Error, v.ErrorCode)
 		}
 		<form method="post" action={ templ.SafeURL(d.Href("/projects")) } class="mt-6 space-y-5" novalidate>
 			<div>

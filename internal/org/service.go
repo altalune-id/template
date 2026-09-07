@@ -222,7 +222,11 @@ func (s *Service) RemoveMember(ctx context.Context, orgID, userID uuid.UUID) err
 	if tErr != nil {
 		return tErr
 	}
-	if refusal := RemovalRefusal(orgID, tc.UserID, userID, m.Role, m.System); refusal != nil {
+	actor, aErr := s.store.MembershipOf(ctx, orgID, tc.UserID)
+	if aErr != nil {
+		return aErr
+	}
+	if refusal := RemovalRefusal(orgID, tc.UserID, userID, actor.Role, m.Role, m.System); refusal != nil {
 		return refusal
 	}
 	if err := s.store.RemoveMember(ctx, orgID, userID); err != nil {

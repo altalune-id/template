@@ -75,7 +75,7 @@ func (h *TodoHandler) GetOverview(w http.ResponseWriter, r *http.Request) {
 	items, err := h.Todos.List(r.Context(), todo.ListOpts{})
 	if err != nil {
 		h.LogErr("web overview: list", err)
-		h.ErrorPage(w, r, http.StatusInternalServerError, "Load failed", "Could not load project overview.")
+		h.ErrorPage(w, r, http.StatusInternalServerError, "Load failed", "Could not load project overview.", err)
 		return
 	}
 	var open, done int
@@ -114,7 +114,7 @@ func (h *TodoHandler) GetTodos(w http.ResponseWriter, r *http.Request) {
 	items, err := h.Todos.List(r.Context(), todo.ListOpts{})
 	if err != nil {
 		h.LogErr("web todo: list", err)
-		h.ErrorPage(w, r, http.StatusInternalServerError, "List failed", "Could not load todos.")
+		h.ErrorPage(w, r, http.StatusInternalServerError, "List failed", "Could not load todos.", err)
 		return
 	}
 	Render(w, r, templates.TodosLayout(h.LayoutForProject(r, "Todos · "+proj.Name, proj.Slug, proj.Name, proj.ID.String(), "todos"), templates.TodosView{
@@ -165,7 +165,7 @@ func (h *TodoHandler) requireTodoTenant(w http.ResponseWriter, r *http.Request) 
 			return session.Principal{}, nil, false
 		}
 		h.LogErr("web todo: byID", err)
-		h.ErrorPage(w, r, http.StatusInternalServerError, "Lookup failed", "Could not load that todo.")
+		h.ErrorPage(w, r, http.StatusInternalServerError, "Lookup failed", "Could not load that todo.", err)
 		return session.Principal{}, nil, false
 	}
 	return p, t, true
@@ -185,7 +185,8 @@ func (h *TodoHandler) PostToggle(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		h.LogErr("web todo: toggle", err)
-		h.ErrorPage(w, r, http.StatusInternalServerError, "Toggle failed", err.Error())
+		// SECURITY: err.Error() names internal ids, so the page shows the code and request id instead.
+		h.ErrorPage(w, r, http.StatusInternalServerError, "Toggle failed", "Could not update that todo.", err)
 		return
 	}
 	Render(w, r, templates.TodoRowFragment(h.Base(r, ""), templates.TodoRow{
@@ -224,7 +225,7 @@ func (h *TodoHandler) writeListFragment(w http.ResponseWriter, r *http.Request) 
 	items, err := h.Todos.List(r.Context(), todo.ListOpts{})
 	if err != nil {
 		h.LogErr("web todo: list", err)
-		h.ErrorPage(w, r, http.StatusInternalServerError, "List failed", "Could not load todos.")
+		h.ErrorPage(w, r, http.StatusInternalServerError, "List failed", "Could not load todos.", err)
 		return
 	}
 	Render(w, r, templates.TodoList(h.Base(r, ""), renderRows(items)))

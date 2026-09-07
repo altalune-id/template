@@ -9,6 +9,7 @@ type ProjectsView struct {
 	OrgSlug  string
 	Projects []ProjectSummary
 	Error    string
+	ErrorCode string
 }
 
 templ ProjectsPage(d web.LayoutData, v ProjectsView) {
@@ -24,7 +25,7 @@ templ ProjectsPage(d web.LayoutData, v ProjectsView) {
 			</a>
 		</header>
 		if v.Error != "" {
-			@ErrorBanner(d, v.Error)
+			@ErrorBanner(d, v.Error, v.ErrorCode)
 		}
 		if len(v.Projects) == 0 {
 			<div class="mt-6 rounded-lg border border-dashed border-border bg-card p-8 text-center">

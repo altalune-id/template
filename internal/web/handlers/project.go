@@ -34,7 +34,7 @@ func (h *ProjectHandler) GetList(w http.ResponseWriter, r *http.Request) {
 	items, err := h.Projects.List(ctx, p.ActiveOrgID)
 	if err != nil {
 		h.LogErr("web project: list", err)
-		h.ErrorPage(w, r, http.StatusInternalServerError, "List failed", "Could not load projects.")
+		h.ErrorPage(w, r, http.StatusInternalServerError, "List failed", "Could not load projects.", err)
 		return
 	}
 	Render(w, r, templates.ProjectsLayout(h.Layout(r, "Projects", web.ActiveNav{Scope: web.NavScopeOrg, OrgKey: "projects"}), templates.ProjectsView{Projects: projectSummaries(items)}))
@@ -80,7 +80,7 @@ func (h *ProjectHandler) PostCreate(w http.ResponseWriter, r *http.Request) {
 		}
 		Render(w, r, templates.ProjectNewLayout(
 			h.Layout(r, "Create project", web.ActiveNav{Scope: web.NavScopeOrg, OrgKey: "projects"}),
-			templates.ProjectNewView{Slug: slug, Name: name, Error: msg},
+			templates.ProjectNewView{Slug: slug, Name: name, Error: msg, ErrorCode: ErrorRef(err)},
 		))
 		return
 	}
@@ -117,7 +117,7 @@ func (h *ProjectHandler) PostRename(w http.ResponseWriter, r *http.Request) {
 	if _, err := h.Projects.Rename(ctx, proj.ID, name); err != nil {
 		h.LogErr("web project: rename", err)
 		if project.IsSystemProtectedError(err) {
-			h.ErrorPage(w, r, http.StatusConflict, "Rename not allowed", "This project is system-protected.")
+			h.ErrorPage(w, r, http.StatusConflict, "Rename not allowed", "This project is system-protected.", err)
 			return
 		}
 		h.ErrorPage(w, r, http.StatusBadRequest, "Rename failed", err.Error())

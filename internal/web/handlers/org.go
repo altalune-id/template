@@ -31,7 +31,7 @@ func (h *OrgHandler) GetList(w http.ResponseWriter, r *http.Request) {
 	items, err := h.Orgs.List(r.Context(), p.UserID)
 	if err != nil {
 		h.LogErr("web org: list", err)
-		h.ErrorPage(w, r, http.StatusInternalServerError, "List failed", "Could not load orgs.")
+		h.ErrorPage(w, r, http.StatusInternalServerError, "List failed", "Could not load orgs.", err)
 		return
 	}
 	Render(w, r, templates.OrgsLayout(h.Layout(r, "Organizations", web.ActiveNav{Scope: web.NavScopeOrg}), templates.OrgsView{Orgs: orgSummaries(items)}))
@@ -106,7 +106,7 @@ func (h *OrgHandler) PostRename(w http.ResponseWriter, r *http.Request) {
 	if _, err := h.Orgs.Rename(ctx, o.ID, name); err != nil {
 		h.LogErr("web org: rename", err)
 		if org.IsSystemProtectedError(err) {
-			h.ErrorPage(w, r, http.StatusConflict, "Rename not allowed", "This organization is system-protected.")
+			h.ErrorPage(w, r, http.StatusConflict, "Rename not allowed", "This organization is system-protected.", err)
 			return
 		}
 		h.ErrorPage(w, r, http.StatusBadRequest, "Rename failed", err.Error())
@@ -129,7 +129,7 @@ func (h *OrgHandler) GetShow(w http.ResponseWriter, r *http.Request) {
 	profiles, err := h.Orgs.ListMemberProfiles(ctx, o.ID)
 	if err != nil {
 		h.LogErr("web org: members", err)
-		h.ErrorPage(w, r, http.StatusInternalServerError, "Members failed", "Could not load members.")
+		h.ErrorPage(w, r, http.StatusInternalServerError, "Members failed", "Could not load members.", err)
 		return
 	}
 	canManage, _ := h.isManager(ctx, o.ID, p.UserID)
@@ -164,7 +164,7 @@ func (h *OrgHandler) PostRemoveMember(w http.ResponseWriter, r *http.Request) {
 	if err := h.Orgs.RemoveMember(ctx, o.ID, userID); err != nil {
 		h.LogErr("web org: remove member", err)
 		if org.IsSystemProtectedError(err) {
-			h.ErrorPage(w, r, http.StatusConflict, "Remove not allowed", "This membership is system-protected.")
+			h.ErrorPage(w, r, http.StatusConflict, "Remove not allowed", "This membership is system-protected.", err)
 			return
 		}
 		if org.IsMembershipMissingError(err) || org.IsNotFoundError(err) {
@@ -214,7 +214,7 @@ func (h *OrgHandler) renderNewErr(w http.ResponseWriter, r *http.Request, slug, 
 	}
 	Render(w, r, templates.OrgNewLayout(
 		h.Layout(r, "Create organization", web.ActiveNav{Scope: web.NavScopeOrg}),
-		templates.OrgNewView{Slug: slug, Name: name, Error: msg},
+		templates.OrgNewView{Slug: slug, Name: name, Error: msg, ErrorCode: ErrorRef(err)},
 	))
 }
 
@@ -227,6 +227,14 @@ func orgSummaries(items []*org.Org) []templates.OrgSummary {
 }
 
 func memberProfileRows(items []*org.MemberProfile, orgID, viewer uuid.UUID) []templates.MemberRow {
+	// NOTE: the viewer is always a member of the org OrgScopeFor resolved, so their role is in this same list.
+	var viewerRole org.Role
+	for _, m := range items {
+		if m.UserID == viewer {
+			viewerRole = m.Role
+			break
+		}
+	}
 	out := make([]templates.MemberRow, 0, len(items))
 	for _, m := range items {
 		out = append(out, templates.MemberRow{
@@ -236,7 +244,7 @@ func memberProfileRows(items []*org.MemberProfile, orgID, viewer uuid.UUID) []te
 			Role:      string(m.Role),
 			System:    m.System,
 			IsSelf:    m.UserID == viewer,
-			Removable: org.RemovalRefusal(orgID, viewer, m.UserID, m.Role, m.System) == nil,
+			Removable: org.RemovalRefusal(orgID, viewer, m.UserID, viewerRole, m.Role, m.System) == nil,
 		})
 	}
 	return out

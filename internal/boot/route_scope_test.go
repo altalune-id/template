@@ -17,6 +17,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
+	"altalune.id/template/internal/apperror"
 	"altalune.id/template/internal/boot"
 	"altalune.id/template/internal/onboard"
 	"altalune.id/template/internal/org"
@@ -412,14 +413,42 @@ func TestMembersPage_RemoveButtonMatchesTheServiceGate(t *testing.T) {
 	}
 	require.Contains(t, body, removeForm(plain.ID), "a plain member must be removable")
 	require.NotContains(t, body, removeForm(viewer.ID), "the signed-in member must not offer to remove themselves")
-	require.NotContains(t, body, removeForm(coOwner.ID), "an owner must not offer a remove button")
+	require.Contains(t, body, removeForm(coOwner.ID), "an owner viewing the page may remove a co-owner")
 
 	// The rendered gate must agree with the service for every row on the page.
 	for _, u := range []uuid.UUID{viewer.ID, coOwner.ID, plain.ID} {
 		m, mErr := srv.Orgs.MembershipOf(scoped, o.ID, u)
 		require.NoError(t, mErr)
-		allowed := org.RemovalRefusal(o.ID, viewer.ID, u, m.Role, m.System) == nil
+		viewerM, vErr := srv.Orgs.MembershipOf(scoped, o.ID, viewer.ID)
+		require.NoError(t, vErr)
+		allowed := org.RemovalRefusal(o.ID, viewer.ID, u, viewerM.Role, m.Role, m.System) == nil
 		require.Equal(t, allowed, strings.Contains(body, removeForm(u)),
 			"button visibility for %s disagrees with org.RemovalRefusal", u)
 	}
+}
+
+// TestRoutes_InlineFormErrorCarriesTheErrorCode pairs the quotable code with the request id on a failed submit.
+func TestRoutes_InlineFormErrorCarriesTheErrorCode(t *testing.T) {
+	srv, _ := newScopeProbeServer(t, config.ModeCloud)
+
+	owner, err := srv.Users.Create(context.Background(), user.CreateRequest{
+		Email: "probe-code@example.com", Name: "Probe Code", Source: user.SourceOIDC,
+	})
+	require.NoError(t, err)
+	taken, err := srv.Orgs.Create(context.Background(), org.CreateRequest{
+		Slug: "code-taken", Name: "Taken", OwnerID: owner.ID,
+	})
+	require.NoError(t, err)
+
+	form := url.Values{"slug": {taken.Slug}, "name": {"Duplicate"}}
+	req := httptest.NewRequest(http.MethodPost, "/orgs", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(probeCookie(t, srv, session.Principal{UserID: owner.ID, ActiveOrgID: taken.ID}))
+	rec := httptest.NewRecorder()
+	srv.Web.ServeHTTP(rec, req)
+
+	body := rec.Body.String()
+	require.Contains(t, body, apperror.CodeOrgAlreadyExists,
+		"a duplicate slug must name its code (%s) so the user can quote it", apperror.CodeOrgAlreadyExists)
+	require.Contains(t, body, "Reference:", "the request id must stay alongside the code")
 }

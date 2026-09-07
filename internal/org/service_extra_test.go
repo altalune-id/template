@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"altalune.id/template/internal/org"
+	"altalune.id/template/internal/platform/tenant"
 )
 
 func TestBootstrapSingleton_CreatesWhenMissing(t *testing.T) {
@@ -123,7 +124,9 @@ func TestRemoveMember_ProtectedSystem(t *testing.T) {
 	o, err := svc.BootstrapSingleton(context.Background(), "sys", "System", owner)
 	require.NoError(t, err)
 
-	err = svc.RemoveMember(context.Background(), o.ID, owner)
+	// NOTE: the actor comes from the tenant scope, the way every transport supplies it.
+	ctx := tenant.Into(context.Background(), tenant.Context{OrgID: o.ID, UserID: owner})
+	err = svc.RemoveMember(ctx, o.ID, owner)
 	require.Error(t, err)
 	assert.True(t, org.IsSystemProtectedError(err))
 }
@@ -139,7 +142,8 @@ func TestRemoveMember_HappyPath(t *testing.T) {
 	_, err = svc.AddMember(context.Background(), o.ID, newbie, org.RoleMember)
 	require.NoError(t, err)
 
-	require.NoError(t, svc.RemoveMember(context.Background(), o.ID, newbie))
+	ctx := tenant.Into(context.Background(), tenant.Context{OrgID: o.ID, UserID: owner})
+	require.NoError(t, svc.RemoveMember(ctx, o.ID, newbie))
 
 	_, err = svc.MembershipOf(context.Background(), o.ID, newbie)
 	assert.True(t, org.IsMembershipMissingError(err))
@@ -148,7 +152,8 @@ func TestRemoveMember_HappyPath(t *testing.T) {
 func TestRemoveMember_NotFound(t *testing.T) {
 	t.Parallel()
 	svc, _ := newTestService(t, true)
-	err := svc.RemoveMember(context.Background(), uuid.New(), uuid.New())
+	ctx := tenant.Into(context.Background(), tenant.Context{OrgID: uuid.New(), UserID: uuid.New()})
+	err := svc.RemoveMember(ctx, uuid.New(), uuid.New())
 	require.Error(t, err)
 	assert.True(t, org.IsMembershipMissingError(err))
 }

@@ -43,7 +43,7 @@ func (h *InviteHandler) GetList(w http.ResponseWriter, r *http.Request) {
 	items, err := h.Invites.ListPending(ctx)
 	if err != nil {
 		h.LogErr("web invite: list", err)
-		h.ErrorPage(w, r, http.StatusInternalServerError, "List failed", "Could not load invites.")
+		h.ErrorPage(w, r, http.StatusInternalServerError, "List failed", "Could not load invites.", err)
 		return
 	}
 	canManage, _ := h.isManager(ctx, o.ID, p.UserID)
@@ -83,7 +83,7 @@ func (h *InviteHandler) PostSend(w http.ResponseWriter, r *http.Request) {
 	if _, err := h.Invites.Send(ctx, invite.SendRequest{Email: email, Role: role}); err != nil {
 		h.LogErr("web invite: send", err)
 		if invite.IsInvitesDisabledError(err) {
-			h.ErrorPage(w, r, http.StatusConflict, "Invites disabled", err.Error())
+			h.ErrorPage(w, r, http.StatusConflict, "Invites disabled", err.Error(), err)
 			return
 		}
 		h.ErrorPage(w, r, http.StatusBadRequest, "Send failed", err.Error())
@@ -117,7 +117,7 @@ func (h *InviteHandler) PostRevoke(w http.ResponseWriter, r *http.Request) {
 	if err := h.Invites.Revoke(ctx, id); err != nil {
 		h.LogErr("web invite: revoke", err)
 		if invite.IsNotFoundError(err) {
-			h.ErrorPage(w, r, http.StatusNotFound, "Invite not found", "That invite no longer exists.")
+			h.ErrorPage(w, r, http.StatusNotFound, "Invite not found", "That invite no longer exists.", err)
 			return
 		}
 		// SECURITY: err.Error() names internal ids, so it stays in the log and never reaches the page.
@@ -161,7 +161,8 @@ func (h *InviteHandler) GetAccept(w http.ResponseWriter, r *http.Request) {
 			return
 		default:
 			h.LogErr("web invite: accept", err)
-			h.ErrorPage(w, r, http.StatusInternalServerError, "Accept failed", err.Error())
+			// SECURITY: err.Error() names internal ids, so the page shows the code and request id instead.
+			h.ErrorPage(w, r, http.StatusInternalServerError, "Accept failed", "Could not accept that invite.", err)
 			return
 		}
 	}
