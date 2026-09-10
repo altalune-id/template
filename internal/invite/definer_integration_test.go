@@ -3,9 +3,11 @@
 package invite_test
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -48,6 +50,7 @@ func createInviteRole(t *testing.T, admin *sql.DB, name, attrs string) {
 type inviteDefinerFixture struct {
 	store   invite.Store
 	appConn *sql.DB
+	migDB   *sql.DB
 	prefix  string
 	userID  uuid.UUID
 	orgID   uuid.UUID
@@ -103,6 +106,7 @@ func newInviteDefinerFixture(t *testing.T) *inviteDefinerFixture {
 	require.NoError(t, schema.MigrateUp(t.Context(), migDB, cfg))
 
 	f := &inviteDefinerFixture{
+		migDB:  migDB,
 		prefix: prefix,
 		userID: uuid.New(),
 		orgID:  uuid.New(),
@@ -220,4 +224,50 @@ func TestPostgres_InviteWrappers_MissingTokenIsNotFound(t *testing.T) {
 	pending, err := f.store.FindPendingForEmail(t.Context(), "nobody@example.com")
 	require.NoError(t, err)
 	require.Empty(t, pending)
+}
+
+func sortedInviteIDs(t *testing.T, n int) []uuid.UUID {
+	t.Helper()
+	ids := make([]uuid.UUID, 0, n)
+	for range n {
+		ids = append(ids, uuid.New())
+	}
+	slices.SortFunc(ids, func(a, b uuid.UUID) int { return bytes.Compare(a[:], b[:]) })
+	return ids
+}
+
+// seedTiedInvites inserts pending invites that share one byte-identical created_at, in descending
+// id order so heap order is the opposite of the order the wrapper must return.
+func (f *inviteDefinerFixture) seedTiedInvites(t *testing.T, email string, ids []uuid.UUID) {
+	t.Helper()
+	tied := time.Now().UTC().Truncate(time.Microsecond)
+	for i := len(ids) - 1; i >= 0; i-- {
+		_, err := f.migDB.ExecContext(t.Context(),
+			"INSERT INTO public."+f.prefix+"invites (id, org_id, email, role, token_hash, expires_at, accepted_at, invited_by, created_at) VALUES ($1,$2,$3,'member',$4,$5,NULL,$6,$7)",
+			ids[i], f.orgID, email, "hash-"+ids[i].String(), tied.Add(time.Hour), f.userID, tied)
+		require.NoError(t, err)
+	}
+
+	var distinct int
+	require.NoError(t, f.migDB.QueryRowContext(t.Context(),
+		"SELECT count(DISTINCT created_at) FROM public."+f.prefix+"invites WHERE email = $1", email).Scan(&distinct))
+	require.Equal(t, 1, distinct, "test premise: every seeded invite must share one created_at")
+}
+
+// TestPostgres_InviteWrappers_TiedCreatedAtIsOrderedByID proves created_at alone is not a total order.
+func TestPostgres_InviteWrappers_TiedCreatedAtIsOrderedByID(t *testing.T) {
+	f := newInviteDefinerFixture(t)
+	email := "tied-" + f.inv.Email
+	ids := sortedInviteIDs(t, 12)
+	f.seedTiedInvites(t, email, ids)
+
+	for read := range 5 {
+		pending, err := f.store.FindPendingForEmail(t.Context(), email)
+		require.NoError(t, err)
+		got := make([]uuid.UUID, 0, len(pending))
+		for _, inv := range pending {
+			got = append(got, inv.ID)
+		}
+		require.Equal(t, ids, got, "read %d returned a different order for rows tied on created_at", read)
+	}
 }
