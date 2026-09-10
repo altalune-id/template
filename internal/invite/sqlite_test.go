@@ -12,6 +12,7 @@ import (
 	"altalune.id/template/internal/invite"
 	"altalune.id/template/internal/platform/config"
 	"altalune.id/template/internal/platform/db"
+	sqliteent "altalune.id/template/internal/platform/db/entity/sqlite"
 	"altalune.id/template/internal/platform/tenant"
 	"altalune.id/template/schema"
 )
@@ -41,7 +42,7 @@ func seedTenant(t *testing.T, sqlDB *sql.DB, prefix string) (userID, orgID uuid.
 	t.Helper()
 	userID = uuid.New()
 	orgID = uuid.New()
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	now := sqliteent.SQLiteTime(time.Now())
 	if _, err := sqlDB.Exec(
 		"INSERT INTO "+prefix+"users (id, email, name, avatar_url, is_admin, created_at, updated_at) "+
 			"VALUES (?, ?, '', '', 0, ?, ?)",
@@ -99,7 +100,7 @@ func TestSQLiteStore_ByID_NotFound(t *testing.T) {
 func TestSQLiteStore_ByID_CrossTenantHidden(t *testing.T) {
 	store, sqlDB, tcA := newSQLiteStoreForTest(t)
 	foreignOrg := uuid.New()
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	now := sqliteent.SQLiteTime(time.Now())
 	if _, err := sqlDB.Exec(
 		"INSERT INTO altempl_orgs (id, slug, name, created_by, created_at, updated_at) "+
 			"VALUES (?, 'other', 'Other', ?, ?, ?)",

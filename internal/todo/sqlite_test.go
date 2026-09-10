@@ -12,6 +12,7 @@ import (
 
 	"altalune.id/template/internal/platform/config"
 	"altalune.id/template/internal/platform/db"
+	sqliteent "altalune.id/template/internal/platform/db/entity/sqlite"
 	"altalune.id/template/internal/platform/tenant"
 	"altalune.id/template/internal/todo"
 	"altalune.id/template/schema"
@@ -44,7 +45,7 @@ func seedTenant(t *testing.T, sqlDB *sql.DB, prefix string) (userID, orgID, proj
 	userID = uuid.New()
 	orgID = uuid.New()
 	projID = uuid.New()
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	now := sqliteent.SQLiteTime(time.Now())
 	if _, err := sqlDB.Exec(
 		"INSERT INTO "+prefix+"users (id, email, name, avatar_url, is_admin, created_at, updated_at) "+
 			"VALUES (?, ?, '', '', 0, ?, ?)",
@@ -249,6 +250,44 @@ func TestSQLiteStore_MarkDoneOlderThan(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(open) != 1 || open[0].Title != "recent-open" {
+		t.Errorf("open todos after sweep: %+v", open)
+	}
+}
+
+func TestSQLiteStore_MarkDoneOlderThan_CutoffIsExclusiveOnAWholeSecond(t *testing.T) {
+	store, _, tc := newSQLiteStoreForTest(t)
+	ctx := tenant.Into(context.Background(), tc)
+
+	cutoff := time.Now().UTC().Add(-20 * 24 * time.Hour).Truncate(time.Second)
+
+	seed := func(title string, created time.Time) {
+		td, err := todo.New(tc.OrgID, tc.ProjectID, title)
+		if err != nil {
+			t.Fatal(err)
+		}
+		td.CreatedAt = created
+		td.UpdatedAt = created
+		if err := store.Save(ctx, td); err != nil {
+			t.Fatal(err)
+		}
+	}
+	seed("older-than-cutoff", cutoff.Add(-time.Second))
+	seed("exactly-at-cutoff", cutoff)
+
+	n, err := store.MarkDoneOlderThan(ctx, tc.OrgID, cutoff, 10)
+	if err != nil {
+		t.Fatalf("MarkDoneOlderThan: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("swept=%d want 1; stored rows and the cutoff must use the same padded rendering", n)
+	}
+
+	no := false
+	open, err := store.List(ctx, tc.OrgID, tc.ProjectID, todo.ListOpts{Done: &no})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(open) != 1 || open[0].Title != "exactly-at-cutoff" {
 		t.Errorf("open todos after sweep: %+v", open)
 	}
 }
