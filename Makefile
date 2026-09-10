@@ -1,7 +1,8 @@
-.PHONY: help build test test-race test-cover vet fmt check generate ui-vendor buf migrate docker clean install-tools lint dev
+.PHONY: help build test test-race test-cover vet fmt check generate ui-vendor buf migrate docker clean install-tools lint dev test-integration test-all
 
 GO      ?= go
 BIN     := bin/altempl
+INTEGRATION_TIMEOUT  ?= 30m
 VERSION := $(shell cat version/VERSION 2>/dev/null || echo dev)
 COMMIT  := $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 BUILD   := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -27,11 +28,14 @@ test-cover: ## Run tests with coverage report
 
 test-integration: ## Run integration tests. Uses TEST_PG_DSN if set, else spins ephemeral Postgres via testcontainers (docker or podman socket required).
 	@if [ -n "$$TEST_PG_DSN" ]; then \
-		echo "→ using TEST_PG_DSN=$$TEST_PG_DSN"; \
+		echo "→ using TEST_PG_DSN=$$TEST_PG_DSN (-p 1: packages share one cluster)"; \
 	else \
 		echo "→ TEST_PG_DSN unset — testcontainers will spin ephemeral Postgres (needs docker/podman socket)"; \
 	fi
-	$(GO) test -race -tags integration ./...
+	@# NOTE: -p 1 under a shared TEST_PG_DSN — parallel packages racing CREATE/DROP ROLE on one
+	@# cluster fail cleanup with "tuple concurrently updated". Own-container runs have no such contention.
+	$(GO) test -race -tags integration -timeout $(INTEGRATION_TIMEOUT) \
+		$$([ -n "$$TEST_PG_DSN" ] && echo -p 1) ./...
 
 test-all: test test-integration ## Unit + integration
 

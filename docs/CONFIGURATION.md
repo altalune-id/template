@@ -129,7 +129,39 @@ is independent of the scheduler and runs in every replica, so `/readyz` stays
 DB-aware under `scheduler.enabled=false` and `serve --no-scheduler` alike. See
 [`DEPLOYMENT.md`](DEPLOYMENT.md) for the role grants and the RLS interaction.
 
+## Encryption at rest
+
+| Key                      | Default | Awareness                     | Meaning                                                        |
+| ------------------------ | ------- | ----------------------------- | -------------------------------------------------------------- |
+| `security.encryptionKey` | `""`    | `required, secret, bootstrap` | 32 bytes as hex or standard base64. Seals the session payload. |
+
+Web sessions are rows in the `sessions` table, and the payload holds the
+`Principal` — which carries a live IdP ID token. The row is sealed with
+AES-256-GCM, bound to its session id, so a row copied under another id will not
+open. The table carries no `org_id` and no RLS policy: a session is resolved
+before any tenant scope exists, so a policy on it would reject every login under
+`db.allowBypassRLS=false`.
+
+`db.driver=postgres` and `mode=cloud` both require the key. Under
+`driver: sqlite` it is optional, and boot mints an **ephemeral** key when it is
+unset — the same shape as `http.stateSecret`. Sessions then work for the life of
+the process but not across a restart, and boot says so:
+
+```
+security.encryptionKey is empty — using an ephemeral key; sessions will not
+survive a restart; set ALT_SECURITY_ENCRYPTION_KEY to persist them
+```
+
+Rotating the key does not corrupt anything: rows sealed with the old key stop
+opening, so their holders are signed out and the `session-sweep` job reaps the
+rows at expiry.
+
 ## Validation
 
 `config.Validate()` runs on every boot with specific messages
 (e.g. `cloud requires db.driver=postgres, got "sqlite"`).
+
+Boot additionally asserts that every table in `schema.RequiredTableSuffixes`
+exists, failing with `schema: missing table(s) …`. Goose records only a version
+number and never checksums, so editing an already-applied migration is a silent
+no-op — this guard turns the resulting mystery into a clear message.

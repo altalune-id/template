@@ -15,8 +15,7 @@ type Todos struct {
 	CreatedAt postgres.ColumnTimestampz
 	UpdatedAt postgres.ColumnTimestampz
 
-	AllColumns     postgres.ColumnList
-	MutableColumns postgres.ColumnList
+	AllColumns postgres.ColumnList
 }
 
 // NewTodos builds the todos binding.
@@ -34,19 +33,17 @@ func NewTodos(schema, tablePrefix string) *Todos {
 		createdAt = postgres.TimestampzColumn("created_at")
 		updatedAt = postgres.TimestampzColumn("updated_at")
 		all       = postgres.ColumnList{id, orgID, projectID, userID, title, done, createdAt, updatedAt}
-		mutable   = postgres.ColumnList{orgID, projectID, userID, title, done, updatedAt}
 	)
 	return &Todos{
-		Table:          postgres.NewTable(schema, tablePrefix+"todos", "todos", all...),
-		ID:             id,
-		OrgID:          orgID,
-		ProjectID:      projectID,
-		UserID:         userID,
-		Title:          title,
-		Done:           done,
-		CreatedAt:      createdAt,
-		UpdatedAt:      updatedAt,
-		AllColumns:     all,
-		MutableColumns: mutable,
+		Table:      postgres.NewTable(schema, tablePrefix+"todos", "todos", all...),
+		ID:         id,
+		OrgID:      orgID,
+		ProjectID:  projectID,
+		UserID:     userID,
+		Title:      title,
+		Done:       done,
+		CreatedAt:  createdAt,
+		UpdatedAt:  updatedAt,
+		AllColumns: all,
 	}
 }

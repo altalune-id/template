@@ -108,3 +108,84 @@ func TestAuditPolicies_AcceptsMigratedHelperScopedPolicies(t *testing.T) {
 		t.Fatalf("AuditPolicies rejected the policies migration 002 creates: %v", err)
 	}
 }
+
+func TestAuditPolicies_PolicyShapes(t *testing.T) {
+	const scoped = `(org_id = current_setting('app.current_org_id')::uuid)`
+
+	tests := []struct {
+		name    string
+		policy  string
+		wantErr bool
+		bucket  func(*RLSAuditError) []string
+	}{
+		{
+			name:   "for all using only passes",
+			policy: `CREATE POLICY altempl_todos_tenant ON altempl_todos USING ` + scoped,
+		},
+		{
+			name:   "for all with an explicitly scoped with check passes",
+			policy: `CREATE POLICY altempl_todos_tenant ON altempl_todos USING ` + scoped + ` WITH CHECK ` + scoped,
+		},
+		{
+			name:    "explicit with check true fails",
+			policy:  `CREATE POLICY altempl_todos_tenant ON altempl_todos USING ` + scoped + ` WITH CHECK (true)`,
+			wantErr: true,
+			bucket:  func(e *RLSAuditError) []string { return e.UnscopedPolicy },
+		},
+		{
+			name:    "for select only fails",
+			policy:  `CREATE POLICY altempl_todos_tenant ON altempl_todos FOR SELECT USING ` + scoped,
+			wantErr: true,
+			bucket:  func(e *RLSAuditError) []string { return e.MissingWritePolicy },
+		},
+		{
+			name: "unscoped sibling policy fails",
+			policy: `CREATE POLICY altempl_todos_tenant ON altempl_todos USING ` + scoped + `;
+				CREATE POLICY altempl_todos_open ON altempl_todos FOR SELECT USING (true)`,
+			wantErr: true,
+			bucket:  func(e *RLSAuditError) []string { return e.UnscopedPolicy },
+		},
+	}
+
+	// NOTE: one container for every case — pgtest.New starts a Postgres per call, and a container
+	// per subtest pushed this package past its 10 minute timeout.
+	conn := pgtest.New(t).OpenDB(t)
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := t.Context()
+			if _, err := conn.ExecContext(ctx, `DROP TABLE IF EXISTS altempl_todos CASCADE`); err != nil {
+				t.Fatalf("drop table: %v", err)
+			}
+			if _, err := conn.ExecContext(ctx, `
+				CREATE TABLE altempl_todos (
+					id     UUID PRIMARY KEY,
+					org_id UUID NOT NULL,
+					title  TEXT NOT NULL
+				);
+				ALTER TABLE altempl_todos ENABLE ROW LEVEL SECURITY;
+				ALTER TABLE altempl_todos FORCE ROW LEVEL SECURITY;
+			`); err != nil {
+				t.Fatalf("create table: %v", err)
+			}
+			if _, err := conn.ExecContext(ctx, tt.policy); err != nil {
+				t.Fatalf("create policy: %v", err)
+			}
+
+			err := AuditPolicies(ctx, conn, []string{"altempl_todos"})
+			if !tt.wantErr {
+				if err != nil {
+					t.Fatalf("AuditPolicies = %v; want nil", err)
+				}
+				return
+			}
+			var audit *RLSAuditError
+			if !errors.As(err, &audit) {
+				t.Fatalf("AuditPolicies = %v; want *RLSAuditError", err)
+			}
+			if got := tt.bucket(audit); !slices.Contains(got, "altempl_todos") {
+				t.Errorf("bucket = %v; want to include %q (full audit: %+v)", got, "altempl_todos", audit)
+			}
+		})
+	}
+}

@@ -3,11 +3,13 @@
 package org_test
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"fmt"
 	"io"
 	"log/slog"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -54,6 +56,7 @@ func createDefinerRole(t *testing.T, admin *sql.DB, name, attrs string) {
 type definerFixture struct {
 	store   org.Store
 	appConn *sql.DB
+	migDB   *sql.DB
 	prefix  string
 	userID  uuid.UUID
 	orgID   uuid.UUID
@@ -107,6 +110,7 @@ func newDefinerFixture(t *testing.T) *definerFixture {
 	require.NoError(t, schema.MigrateUp(t.Context(), migDB, cfg))
 
 	f := &definerFixture{
+		migDB:  migDB,
 		prefix: prefix,
 		userID: uuid.New(),
 		orgID:  uuid.New(),
@@ -251,4 +255,56 @@ func TestPostgres_OrgCreate_ScopeNamingNoOrgIsRejected(t *testing.T) {
 	_, err := f.store.ByID(nilScoped, f.orgID)
 	require.Error(t, err)
 	require.True(t, tenant.IsUnscopedError(err), "want *UnscopedError, got %T: %v", err, err)
+}
+
+func sortedOrgIDs(t *testing.T, n int, extra ...uuid.UUID) []uuid.UUID {
+	t.Helper()
+	ids := make([]uuid.UUID, 0, n+len(extra))
+	for range n {
+		ids = append(ids, uuid.New())
+	}
+	ids = append(ids, extra...)
+	slices.SortFunc(ids, func(a, b uuid.UUID) int { return bytes.Compare(a[:], b[:]) })
+	return ids
+}
+
+// seedTiedOrgs inserts orgs and memberships sharing the fixture's byte-identical created_at, in
+// descending id order so heap order is the opposite of the order the wrapper must return.
+func (f *definerFixture) seedTiedOrgs(t *testing.T, ids []uuid.UUID) {
+	t.Helper()
+	for i := len(ids) - 1; i >= 0; i-- {
+		if ids[i] == f.orgID {
+			continue
+		}
+		_, err := f.migDB.ExecContext(t.Context(),
+			"INSERT INTO public."+f.prefix+"orgs (id, slug, name, system, created_by, created_at, updated_at) VALUES ($1,$2,'Tied',false,$3,$4,$4)",
+			ids[i], "tied-"+ids[i].String(), f.userID, f.now)
+		require.NoError(t, err)
+		_, err = f.migDB.ExecContext(t.Context(),
+			"INSERT INTO public."+f.prefix+"memberships (id, org_id, user_id, role, system, created_at) VALUES ($1,$2,$3,'member',false,$4)",
+			uuid.New(), ids[i], f.userID, f.now)
+		require.NoError(t, err)
+	}
+
+	var distinct int
+	require.NoError(t, f.migDB.QueryRowContext(t.Context(),
+		"SELECT count(DISTINCT created_at) FROM public."+f.prefix+"orgs").Scan(&distinct))
+	require.Equal(t, 1, distinct, "test premise: every seeded org must share one created_at")
+}
+
+// TestPostgres_DefinerWrappers_TiedCreatedAtIsOrderedByID proves created_at alone is not a total order.
+func TestPostgres_DefinerWrappers_TiedCreatedAtIsOrderedByID(t *testing.T) {
+	f := newDefinerFixture(t)
+	ids := sortedOrgIDs(t, 12, f.orgID)
+	f.seedTiedOrgs(t, ids)
+
+	for read := range 5 {
+		orgs, err := f.store.List(t.Context(), f.userID)
+		require.NoError(t, err)
+		got := make([]uuid.UUID, 0, len(orgs))
+		for _, o := range orgs {
+			got = append(got, o.ID)
+		}
+		require.Equal(t, ids, got, "read %d returned a different order for rows tied on created_at", read)
+	}
 }

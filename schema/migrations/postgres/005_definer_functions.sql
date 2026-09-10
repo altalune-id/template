@@ -16,12 +16,12 @@ END $$;
 
 -- SECURITY: pg_temp must stay last in search_path — https://www.postgresql.org/docs/17/sql-createfunction.html#SQL-CREATEFUNCTION-SECURITY
 CREATE OR REPLACE FUNCTION {{.Schema}}.{{.TablePrefix}}list_org_ids()
-RETURNS TABLE (id uuid)
+RETURNS TABLE (id uuid, created_at timestamptz)
 LANGUAGE sql STABLE
 SECURITY DEFINER
 SET search_path = {{.Schema}}, pg_catalog, pg_temp
 AS $$
-  SELECT o.id FROM {{.Schema}}.{{.TablePrefix}}orgs o ORDER BY o.created_at;
+  SELECT o.id, o.created_at FROM {{.Schema}}.{{.TablePrefix}}orgs o ORDER BY o.created_at ASC, o.id ASC;
 $$;
 
 CREATE OR REPLACE FUNCTION {{.Schema}}.{{.TablePrefix}}resolve_org_by_slug(p_slug text)
@@ -46,7 +46,7 @@ AS $$
   FROM {{.Schema}}.{{.TablePrefix}}orgs o
   INNER JOIN {{.Schema}}.{{.TablePrefix}}memberships m ON m.org_id = o.id
   WHERE m.user_id = p_user_id
-  ORDER BY o.created_at ASC;
+  ORDER BY o.created_at ASC, o.id ASC;
 $$;
 
 REVOKE EXECUTE ON FUNCTION {{.Schema}}.{{.TablePrefix}}list_org_ids() FROM PUBLIC;
@@ -75,7 +75,7 @@ AS $$
   SELECT i.id, i.org_id, i.email, i.role, i.token_hash, i.expires_at, i.accepted_at, i.created_at
   FROM {{.Schema}}.{{.TablePrefix}}invites i
   WHERE i.email = p_email AND i.accepted_at IS NULL
-  ORDER BY i.created_at ASC;
+  ORDER BY i.created_at ASC, i.id ASC;
 $$;
 
 REVOKE EXECUTE ON FUNCTION {{.Schema}}.{{.TablePrefix}}resolve_invite_by_token_hash(text) FROM PUBLIC;

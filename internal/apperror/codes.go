@@ -54,4 +54,7 @@ const (
 
 	CodeOnboardingRequired    = "ONB001"
 	CodeOnboardingAlreadyDone = "ONB002"
+
+	CodeEncryptionUnavailable = "ENC001"
+	CodeEncryptionOpenFailed  = "ENC002"
 )

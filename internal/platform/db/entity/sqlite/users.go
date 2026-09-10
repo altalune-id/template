@@ -17,8 +17,7 @@ type Users struct {
 	CreatedAt       sqlite.ColumnString
 	UpdatedAt       sqlite.ColumnString
 
-	AllColumns     sqlite.ColumnList
-	MutableColumns sqlite.ColumnList
+	AllColumns sqlite.ColumnList
 }
 
 // NewUsers builds the users binding. tablePrefix matches DB.TablePrefix (e.g. "altempl_").
@@ -35,7 +34,6 @@ func NewUsers(tablePrefix string) *Users {
 		createdAt       = sqlite.StringColumn("created_at")
 		updatedAt       = sqlite.StringColumn("updated_at")
 		all             = sqlite.ColumnList{id, idpIssuer, idpSubject, email, name, avatarURL, isAdmin, termsAcceptedAt, createdAt, updatedAt}
-		mutable         = sqlite.ColumnList{idpIssuer, idpSubject, email, name, avatarURL, isAdmin, termsAcceptedAt, updatedAt}
 	)
 	return &Users{
 		Table:           sqlite.NewTable("", tablePrefix+"users", "users", all...),
@@ -50,6 +48,5 @@ func NewUsers(tablePrefix string) *Users {
 		CreatedAt:       createdAt,
 		UpdatedAt:       updatedAt,
 		AllColumns:      all,
-		MutableColumns:  mutable,
 	}
 }

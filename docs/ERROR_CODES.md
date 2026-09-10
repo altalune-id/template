@@ -99,3 +99,10 @@ them from screenshots. `NNN` in the range `900`-`999` is reserved for unexpected
 | -------- | ------------------------------------ | ----------------------- |
 | `ONB001` | `apperror.CodeOnboardingRequired`    | Onboarding Required     |
 | `ONB002` | `apperror.CodeOnboardingAlreadyDone` | Onboarding Already Done |
+
+## ENC — Encryption at rest
+
+| Code     | Constant                             | Meaning                |
+| -------- | ------------------------------------ | ---------------------- |
+| `ENC001` | `apperror.CodeEncryptionUnavailable` | Encryption Unavailable |
+| `ENC002` | `apperror.CodeEncryptionOpenFailed`  | Encryption Open Failed |

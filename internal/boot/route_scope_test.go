@@ -177,7 +177,12 @@ func walkRoutes(t *testing.T, srv *boot.Server, logBuf *bytes.Buffer, p session.
 func TestRoutes_FreshUserWithoutAnOrgNeverHitsATenantScopeError(t *testing.T) {
 	for _, mode := range []config.Mode{config.ModeSelfhosted, config.ModeCloud} {
 		srv, logBuf := newScopeProbeServer(t, mode)
-		walkRoutes(t, srv, logBuf, session.Principal{UserID: uuid.New()}, string(mode)+" no-org")
+		// NOTE: a real row, not a bare uuid — sessions.user_id has a foreign key to users.
+		fresh, err := srv.Users.Create(context.Background(), user.CreateRequest{
+			Email: "probe-fresh@example.com", Name: "Probe Fresh", Source: user.SourceOIDC,
+		})
+		require.NoError(t, err)
+		walkRoutes(t, srv, logBuf, session.Principal{UserID: fresh.ID}, string(mode)+" no-org")
 	}
 }
 
