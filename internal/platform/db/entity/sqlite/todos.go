@@ -16,8 +16,7 @@ type Todos struct {
 	CreatedAt sqlite.ColumnString
 	UpdatedAt sqlite.ColumnString
 
-	AllColumns     sqlite.ColumnList
-	MutableColumns sqlite.ColumnList
+	AllColumns sqlite.ColumnList
 }
 
 // NewTodos builds the todos binding.
@@ -32,19 +31,17 @@ func NewTodos(tablePrefix string) *Todos {
 		createdAt = sqlite.StringColumn("created_at")
 		updatedAt = sqlite.StringColumn("updated_at")
 		all       = sqlite.ColumnList{id, orgID, projectID, userID, title, done, createdAt, updatedAt}
-		mutable   = sqlite.ColumnList{orgID, projectID, userID, title, done, updatedAt}
 	)
 	return &Todos{
-		Table:          sqlite.NewTable("", tablePrefix+"todos", "todos", all...),
-		ID:             id,
-		OrgID:          orgID,
-		ProjectID:      projectID,
-		UserID:         userID,
-		Title:          title,
-		Done:           done,
-		CreatedAt:      createdAt,
-		UpdatedAt:      updatedAt,
-		AllColumns:     all,
-		MutableColumns: mutable,
+		Table:      sqlite.NewTable("", tablePrefix+"todos", "todos", all...),
+		ID:         id,
+		OrgID:      orgID,
+		ProjectID:  projectID,
+		UserID:     userID,
+		Title:      title,
+		Done:       done,
+		CreatedAt:  createdAt,
+		UpdatedAt:  updatedAt,
+		AllColumns: all,
 	}
 }
