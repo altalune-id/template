@@ -7,6 +7,7 @@ import (
 
 	"altalune.id/template/internal/platform/config"
 	"altalune.id/template/internal/platform/db"
+	"altalune.id/template/internal/platform/sealer"
 	"altalune.id/template/internal/platform/tenant"
 	"altalune.id/template/schema"
 )
@@ -21,6 +22,10 @@ func openDBAndMigrate(ctx context.Context, cfg *config.Config, log *slog.Logger)
 	if err != nil {
 		return db.Pool{}, nil, err
 	}
+	if err := schema.AssertRequiredTables(ctx, pool.W, &cfg.DB); err != nil {
+		_ = pool.Close()
+		return db.Pool{}, nil, fmt.Errorf("boot: %w", err)
+	}
 	if cfg.DB.Driver == db.DriverPostgres {
 		if err := schema.RLSGuard(ctx, pool.W, cfg); err != nil {
 			_ = pool.Close()
@@ -28,6 +33,35 @@ func openDBAndMigrate(ctx context.Context, cfg *config.Config, log *slog.Logger)
 		}
 	}
 	return pool, tenant.NewPgConn(pool.W), nil
+}
+
+// NOTE: an ephemeral key leaves prior session rows unopenable, so a restart signs everyone out; the sweep reaps them at expiry.
+func buildSealer(cfg *config.Config, log *slog.Logger) (sealer.Sealer, error) {
+	key, err := sealerKey(cfg, log)
+	if err != nil {
+		return nil, err
+	}
+	sl, err := sealer.New(key)
+	if err != nil {
+		return nil, fmt.Errorf("boot: sealer: %w", err)
+	}
+	return sl, nil
+}
+
+func sealerKey(cfg *config.Config, log *slog.Logger) ([]byte, error) {
+	if cfg.Security.EncryptionKey != "" {
+		key, err := sealer.ParseKey(cfg.Security.EncryptionKey)
+		if err != nil {
+			return nil, fmt.Errorf("boot: security.encryptionKey: %w", err)
+		}
+		return key, nil
+	}
+	key, err := sealer.GenerateKey()
+	if err != nil {
+		return nil, fmt.Errorf("boot: %w", err)
+	}
+	log.Warn("security.encryptionKey is empty — using an ephemeral key; sessions will not survive a restart; set ALT_SECURITY_ENCRYPTION_KEY to persist them")
+	return key, nil
 }
 
 // MigratorDBConfig shapes the connection migrations run on: the migrator DSN when set, the migrator role always, on a single session.

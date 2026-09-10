@@ -90,9 +90,10 @@ log:
 func TestValidate_ModeInvariants(t *testing.T) {
 	base := func() *Config {
 		c := &Config{
-			Mode:    ModeSelfhosted,
-			DB:      validDB(),
-			Genesis: GenesisConfig{Email: "root@example.com", Password: "x"},
+			Mode:     ModeSelfhosted,
+			DB:       validDB(),
+			Genesis:  GenesisConfig{Email: "root@example.com", Password: "x"},
+			Security: validSecurity(),
 		}
 		c.Tenant.SingletonOrg.Slug = "default"
 		c.Tenant.SingletonOrg.Name = "Default Organization"
@@ -149,6 +150,32 @@ func TestValidate_ModeInvariants(t *testing.T) {
 				c.DB.Driver = "sqlite"
 			},
 			wantSub: "cloud requires db.driver=postgres",
+		},
+		{
+			name: "postgres without an encryption key fails",
+			mutate: func(c *Config) {
+				c.DB.Driver = db.DriverPostgres
+				c.Security.EncryptionKey = ""
+			},
+			wantSub: "db.driver=postgres requires security.encryptionKey",
+		},
+		{
+			name: "sqlite without an encryption key is allowed",
+			mutate: func(c *Config) {
+				c.Security.EncryptionKey = ""
+			},
+			wantSub: "",
+		},
+		{
+			name: "cloud without an encryption key fails",
+			mutate: func(c *Config) {
+				c.Mode = ModeCloud
+				c.OIDC = OIDCConfig{Issuer: "https://iss.example.com", ClientID: "c", ClientSecret: "s"}
+				c.DB.Driver = "postgres"
+				c.Genesis = GenesisConfig{Email: "root@example.com"}
+				c.Security.EncryptionKey = ""
+			},
+			wantSub: "mode=cloud requires security.encryptionKey",
 		},
 		{
 			name: "cloud with full oidc + postgres + genesis + singleton org (no break-glass) is allowed",
@@ -351,6 +378,10 @@ func writeTempYAML(t *testing.T, name, content string) string {
 
 func validDB() db.DBConfig {
 	return db.DBConfig{Driver: db.DriverSQLite, DSN: ":memory:"}
+}
+
+func validSecurity() SecurityConfig {
+	return SecurityConfig{EncryptionKey: strings.Repeat("ab", 32)}
 }
 
 func withCwdOverride(t *testing.T, dir string) Option {

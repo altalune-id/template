@@ -185,6 +185,10 @@ scheduler:
   # [bootstrap] env: ALT_SCHEDULER_TIMEZONE
   timezone: UTC
 
+security:
+  # [required, secret, bootstrap] env: ALT_SECURITY_ENCRYPTION_KEY
+  encryptionKey: ""
+
 session:
   # env: ALT_SESSION_PATH
   path: ~/.altempl/session.json

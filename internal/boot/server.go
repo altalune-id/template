@@ -119,7 +119,14 @@ func BootServer(ctx context.Context, cfg *config.Config, opts ...Option) (*Serve
 		return nil, fmt.Errorf("boot: authl: %w", err)
 	}
 
-	sessions := session.NewMemoryStore()
+	sl, err := buildSealer(cfg, log)
+	if err != nil {
+		_ = pool.Close()
+		_ = shutdownOTel(context.Background())
+		return nil, err
+	}
+
+	sessions := session.NewStore(cfg.DB, pool, sl, reporter.Unexpected)
 	caps := capabilities.From(cfg)
 
 	kernel := &platform.Kernel{
@@ -128,6 +135,7 @@ func BootServer(ctx context.Context, cfg *config.Config, opts ...Option) (*Serve
 		Log:      log,
 		Reporter: reporter,
 		Sessions: sessions,
+		Sealer:   sl,
 		Verifier: verifier,
 		Mail:     mail,
 		AltAuth:  altAuth,

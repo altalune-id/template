@@ -47,6 +47,13 @@ type Config struct {
 	Mail          MailConfig          `yaml:"mail"          mapstructure:"mail"`
 	I18n          I18nConfig          `yaml:"i18n"          mapstructure:"i18n"`
 	Compliance    ComplianceConfig    `yaml:"compliance"    mapstructure:"compliance"`
+	Security      SecurityConfig      `yaml:"security"      mapstructure:"security"`
+}
+
+// SecurityConfig holds the key that seals secrets at rest.
+type SecurityConfig struct {
+	// SECURITY: 32 bytes as hex or standard base64; seals the session Principal, which carries a live IdP ID token.
+	EncryptionKey string `yaml:"encryptionKey" mapstructure:"encryptionKey" awareness:"required,secret,bootstrap"`
 }
 
 // ComplianceConfig gates the T&C acceptance flow. When RequireAcceptance is true, signed-in users with no TermsAcceptedAt are redirected to /welcome until they check the box.
@@ -241,11 +248,15 @@ func validateInvariants(c *Config) error {
 	}
 	switch c.Mode {
 	case ModeSelfhosted:
-		return validateSelfhosted(c)
+		if err := validateSelfhosted(c); err != nil {
+			return err
+		}
 	case ModeCloud:
-		return validateCloud(c)
+		if err := validateCloud(c); err != nil {
+			return err
+		}
 	}
-	return nil
+	return validatePostgresNeedsEncryptionKey(c)
 }
 
 func validateSelfhosted(_ *Config) error { return nil }
@@ -266,7 +277,10 @@ func validateCloud(c *Config) error {
 	if err := validateCloudSingletonOrg(c); err != nil {
 		return err
 	}
-	return validateAutoMigrateNeedsMigrator(c)
+	if err := validateAutoMigrateNeedsMigrator(c); err != nil {
+		return err
+	}
+	return validateCloudEncryptionKey(c)
 }
 
 func validateCloudOIDC(c *Config) error {
@@ -292,6 +306,20 @@ func validateCloudDBDriver(c *Config) error {
 func validateCloudGenesisEmail(c *Config) error {
 	if c.Genesis.Email == "" {
 		return errors.New("config: mode=cloud requires genesis.email — first-boot admin identity, matched against OIDC subject email (set ALT_GENESIS_EMAIL)")
+	}
+	return nil
+}
+
+func validatePostgresNeedsEncryptionKey(c *Config) error {
+	if c.DB.Driver == db.DriverPostgres && c.Security.EncryptionKey == "" {
+		return errors.New("config: db.driver=postgres requires security.encryptionKey — 32 bytes hex or base64; without it persisted sessions cannot be sealed and every login fails (set ALT_SECURITY_ENCRYPTION_KEY)")
+	}
+	return nil
+}
+
+func validateCloudEncryptionKey(c *Config) error {
+	if c.Security.EncryptionKey == "" {
+		return errors.New("config: mode=cloud requires security.encryptionKey — 32 bytes hex or base64; without it persisted sessions cannot be sealed and every login fails (set ALT_SECURITY_ENCRYPTION_KEY)")
 	}
 	return nil
 }

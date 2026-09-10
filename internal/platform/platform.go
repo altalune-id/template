@@ -14,6 +14,7 @@ import (
 	"altalune.id/template/internal/apperror"
 	"altalune.id/template/internal/platform/capabilities"
 	"altalune.id/template/internal/platform/db"
+	"altalune.id/template/internal/platform/sealer"
 	"altalune.id/template/internal/platform/session"
 	"altalune.id/template/internal/platform/tenant"
 	"altalune.id/template/internal/platform/tokens"
@@ -30,6 +31,7 @@ type Kernel struct {
 	Log      *slog.Logger
 	Reporter *apperror.Reporter
 	Sessions session.Store
+	Sealer   sealer.Sealer
 	Verifier tokens.Verifier
 	Mail     mailer.Mailer
 	AltAuth  *authl.Client
