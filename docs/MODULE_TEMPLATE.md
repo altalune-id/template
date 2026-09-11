@@ -174,6 +174,13 @@ Each module owns its factory. No central `newRepos(...)` tuple.
   ```
 - Use `pgx.CollectRows` + `pgx.RowToStructByName` — no manual scanning
   unless irregular.
+- An upsert's conflict clause carries the tenant predicate —
+  `DO_UPDATE(SET(...).WHERE(t.OrgID.EQ(<tenant org>)))` — plus a
+  `RowsAffected() == 0` branch returning `&NotFoundError{...}`. Without it a
+  `Save` with a row id belonging to another org takes the UPDATE branch and
+  rewrites that org's row; SQLite has no RLS to catch it and a `BYPASSRLS`
+  role slips past Postgres. `schema.TestStoreUpserts_GuardConflictClauseByOrg`
+  fails the build when a conflict clause is missing it.
 
 ### Tests
 
