@@ -79,14 +79,40 @@ func openSQLite(cfg DBConfig) (*sql.DB, error) {
 	if err := ensureDirFor(dsn); err != nil {
 		return nil, err
 	}
-	if !strings.HasPrefix(dsn, "file:") && dsn != ":memory:" {
-		dsn = fmt.Sprintf("file:%s?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)", dsn)
-	}
+	dsn = sqliteDSNWithPragmas(dsn)
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("db: open sqlite: %w", err)
 	}
 	return db, nil
+}
+
+// NOTE: SQLite defaults foreign_keys off, so ON DELETE RESTRICT/CASCADE silently no-op without this.
+func sqliteDSNWithPragmas(dsn string) string {
+	pragmas := []string{"foreign_keys(1)", "journal_mode(WAL)", "busy_timeout(5000)"}
+	if dsn == ":memory:" {
+		pragmas = []string{"foreign_keys(1)"}
+	}
+	if !strings.HasPrefix(dsn, "file:") {
+		dsn = "file:" + dsn
+	}
+	sep := "?"
+	if strings.Contains(dsn, "?") {
+		sep = "&"
+	}
+	var b strings.Builder
+	b.WriteString(dsn)
+	for _, p := range pragmas {
+		name, _, _ := strings.Cut(p, "(")
+		if strings.Contains(dsn, "_pragma="+name) {
+			continue
+		}
+		b.WriteString(sep)
+		b.WriteString("_pragma=")
+		b.WriteString(p)
+		sep = "&"
+	}
+	return b.String()
 }
 
 func openPostgres(cfg DBConfig) (*sql.DB, error) {

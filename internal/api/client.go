@@ -9,6 +9,7 @@ import (
 	"connectrpc.com/connect"
 
 	authv1connect "altalune.id/template/gen/go/auth/v1/authv1connect"
+	blogv1connect "altalune.id/template/gen/go/blog/v1/blogv1connect"
 	todov1connect "altalune.id/template/gen/go/todo/v1/todov1connect"
 )
 
@@ -19,6 +20,7 @@ const DefaultClientTimeout = 30 * time.Second
 type Client struct {
 	Auth authv1connect.AuthServiceClient
 	Todo todov1connect.TodoServiceClient
+	Blog blogv1connect.BlogServiceClient
 }
 
 // NewClient builds a Client pointing at baseURL; a non-empty token becomes the Bearer header.
@@ -31,6 +33,7 @@ func NewClient(baseURL, token string) *Client {
 	return &Client{
 		Auth: authv1connect.NewAuthServiceClient(httpClient, base, opts...),
 		Todo: todov1connect.NewTodoServiceClient(httpClient, base, opts...),
+		Blog: blogv1connect.NewBlogServiceClient(httpClient, base, opts...),
 	}
 }
 

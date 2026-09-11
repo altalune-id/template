@@ -100,6 +100,8 @@ linters:
             - "**/internal/*/invite.go"
             - "**/internal/*/auth.go"
             - "**/internal/onboard/onboard.go"
+            - "**/internal/*/blog.go"
+            - "**/internal/blog/*/{category,tag,store,errors}.go"
             - "**/internal/*/store.go"
             - "**/internal/*/errors.go"
             # internal/cli holds Cobra command files whose names collide with the

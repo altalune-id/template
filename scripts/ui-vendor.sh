@@ -5,6 +5,7 @@
 #
 # Pinned versions (bump here + re-run):
 #   htmx        v2.0.4  (Aug 2025)
+#   easymde     v2.21.0 (MIT; CodeMirror bundled)
 #   basecoat    latest tagged release
 #   tailwind    v3 CLI standalone binary
 set -euo pipefail
@@ -14,6 +15,7 @@ STATIC="$ROOT/internal/web/static"
 mkdir -p "$STATIC"
 
 HTMX_VERSION="${HTMX_VERSION:-2.0.4}"
+EASYMDE_VERSION="${EASYMDE_VERSION:-2.21.0}"
 BASECOAT_VERSION="${BASECOAT_VERSION:-latest}"
 TAILWIND_VERSION="${TAILWIND_VERSION:-v3.4.15}"
 
@@ -25,6 +27,10 @@ fetch() {
 
 echo "==> htmx $HTMX_VERSION"
 fetch "https://unpkg.com/htmx.org@${HTMX_VERSION}/dist/htmx.min.js" "$STATIC/htmx.min.js"
+
+echo "==> easymde $EASYMDE_VERSION"
+fetch "https://cdn.jsdelivr.net/npm/easymde@${EASYMDE_VERSION}/dist/easymde.min.js" "$STATIC/easymde.min.js"
+fetch "https://cdn.jsdelivr.net/npm/easymde@${EASYMDE_VERSION}/dist/easymde.min.css" "$STATIC/easymde.min.css"
 
 echo "==> basecoat ${BASECOAT_VERSION}"
 fetch "https://cdn.jsdelivr.net/npm/basecoat-css@${BASECOAT_VERSION}/dist/basecoat.min.css" "$STATIC/basecoat.css"

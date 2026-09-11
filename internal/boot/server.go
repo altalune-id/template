@@ -16,6 +16,9 @@ import (
 	"altalune.id/template/internal/api"
 	"altalune.id/template/internal/apperror"
 	"altalune.id/template/internal/auth"
+	"altalune.id/template/internal/blog"
+	"altalune.id/template/internal/blog/category"
+	"altalune.id/template/internal/blog/tag"
 	"altalune.id/template/internal/invite"
 	"altalune.id/template/internal/onboard"
 	"altalune.id/template/internal/org"
@@ -46,13 +49,16 @@ type Server struct {
 	Caps     capabilities.Capabilities
 	Platform *platform.Kernel
 
-	Auth     *auth.Service
-	Users    *user.Service
-	Orgs     *org.Service
-	Projects *project.Service
-	Todos    *todo.Service
-	Invites  *invite.Service
-	Onboards *onboard.Service
+	Auth       *auth.Service
+	Users      *user.Service
+	Orgs       *org.Service
+	Projects   *project.Service
+	Todos      *todo.Service
+	Invites    *invite.Service
+	Onboards   *onboard.Service
+	Posts      *blog.Service
+	Categories *category.Service
+	Tags       *tag.Service
 
 	Onboard *user.OnboardWorkflow
 
@@ -242,7 +248,8 @@ func BootServer(ctx context.Context, cfg *config.Config, opts ...Option) (*Serve
 	}
 
 	webHandler := buildWebHandler(cfg, kernel, caps, log, reporter, healthOK,
-		svcs.Auth, svcs.Users, svcs.Orgs, svcs.Projects, svcs.Todos, svcs.Invites, svcs.Onboards, required, setup, apiHandler, bundle, defaultLoc)
+		svcs.Auth, svcs.Users, svcs.Orgs, svcs.Projects, svcs.Todos, svcs.Invites, svcs.Onboards,
+		svcs.Posts, svcs.Categories, svcs.Tags, required, setup, apiHandler, bundle, defaultLoc)
 
 	httpHandler := webHandler
 	if o.schedulerOnly {
@@ -261,6 +268,9 @@ func BootServer(ctx context.Context, cfg *config.Config, opts ...Option) (*Serve
 		Todos:        svcs.Todos,
 		Invites:      svcs.Invites,
 		Onboards:     svcs.Onboards,
+		Posts:        svcs.Posts,
+		Categories:   svcs.Categories,
+		Tags:         svcs.Tags,
 		Onboarded:    onboarded,
 		SetupToken:   setup,
 		Onboard:      svcs.Onboard,
