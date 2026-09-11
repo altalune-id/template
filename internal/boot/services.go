@@ -6,6 +6,9 @@ import (
 	"strings"
 
 	"altalune.id/template/internal/auth"
+	"altalune.id/template/internal/blog"
+	"altalune.id/template/internal/blog/category"
+	"altalune.id/template/internal/blog/tag"
 	"altalune.id/template/internal/invite"
 	"altalune.id/template/internal/onboard"
 	"altalune.id/template/internal/org"
@@ -27,13 +30,16 @@ type Services struct {
 	InviteStore  invite.Store
 	OnboardStore onboard.Store
 
-	Auth     *auth.Service
-	Users    *user.Service
-	Orgs     *org.Service
-	Projects *project.Service
-	Todos    *todo.Service
-	Invites  *invite.Service
-	Onboards *onboard.Service
+	Auth       *auth.Service
+	Users      *user.Service
+	Orgs       *org.Service
+	Projects   *project.Service
+	Todos      *todo.Service
+	Invites    *invite.Service
+	Onboards   *onboard.Service
+	Posts      *blog.Service
+	Categories *category.Service
+	Tags       *tag.Service
 
 	Onboard *user.OnboardWorkflow
 }
@@ -56,6 +62,9 @@ func buildServices(cfg *config.Config, k *platform.Kernel, caps capabilities.Cap
 	projects := project.NewService(projectStore, log, reporter.Unexpected)
 	todos := todo.NewService(todoStore, log, reporter.Unexpected)
 	onboards := onboard.NewService(onboardStore, log, reporter.Unexpected)
+	posts := blog.NewService(blog.NewStore(cfg.DB, pool, pgConn), log, reporter.Unexpected)
+	categories := category.NewService(category.NewStore(cfg.DB, pool, pgConn), log, reporter.Unexpected)
+	tags := tag.NewService(tag.NewStore(cfg.DB, pool, pgConn), log, reporter.Unexpected)
 
 	invitesEnabled := cfg.Mode == config.ModeCloud || cfg.OIDC.Issuer != ""
 
@@ -156,6 +165,9 @@ func buildServices(cfg *config.Config, k *platform.Kernel, caps capabilities.Cap
 		Todos:        todos,
 		Invites:      invites,
 		Onboards:     onboards,
+		Posts:        posts,
+		Categories:   categories,
+		Tags:         tags,
 		Onboard:      onboardWorkflow,
 	}, nil
 }

@@ -57,4 +57,21 @@ const (
 
 	CodeEncryptionUnavailable = "ENC001"
 	CodeEncryptionOpenFailed  = "ENC002"
+
+	CodePostNotFound         = "BLG001"
+	CodePostAlreadyExists    = "BLG002"
+	CodePostInvalidTitle     = "BLG003"
+	CodePostInvalidSlug      = "BLG004"
+	CodePostInvalidBody      = "BLG005"
+	CodePostCategoryRequired = "BLG006"
+
+	CodeCategoryNotFound      = "CAT001"
+	CodeCategoryAlreadyExists = "CAT002"
+	CodeCategoryInvalidName   = "CAT003"
+	CodeCategoryInUse         = "CAT004"
+
+	CodeTagNotFound      = "TAG001"
+	CodeTagAlreadyExists = "TAG002"
+	CodeTagInvalidName   = "TAG003"
+	CodeTagInUse         = "TAG004"
 )

@@ -12,6 +12,9 @@ import (
 	"altalune.id/template/internal/api"
 	"altalune.id/template/internal/apperror"
 	"altalune.id/template/internal/auth"
+	"altalune.id/template/internal/blog"
+	"altalune.id/template/internal/blog/category"
+	blogtag "altalune.id/template/internal/blog/tag"
 	i18npkg "altalune.id/template/internal/i18n"
 	"altalune.id/template/internal/invite"
 	"altalune.id/template/internal/onboard"
@@ -29,7 +32,7 @@ import (
 )
 
 func buildAPIHandler(cfg *config.Config, k *platform.Kernel, s *Services) (*api.Server, http.Handler) {
-	srv := api.New(cfg, k, s.Auth, s.Users, s.Orgs, s.Projects, s.Todos, s.Invites, s.TodoStore)
+	srv := api.New(cfg, k, s.Auth, s.Users, s.Orgs, s.Projects, s.Todos, s.Invites, s.TodoStore, s.Posts, s.Categories, s.Tags)
 	if !cfg.API.Enabled {
 		return srv, nil
 	}
@@ -51,6 +54,9 @@ func buildWebHandler(
 	todos *todo.Service,
 	invites *invite.Service,
 	onboards *onboard.Service,
+	posts *blog.Service,
+	cats *category.Service,
+	tags *blogtag.Service,
 	required *atomic.Bool,
 	setupToken string,
 	apiHandler http.Handler,
@@ -69,6 +75,7 @@ func buildWebHandler(
 	orgHandler := webhandlers.NewOrgHandler(deps, orgs)
 	projectHandler := webhandlers.NewProjectHandler(deps, projects)
 	todoHandler := webhandlers.NewTodoHandler(deps, projects, todos)
+	blogHandler := webhandlers.NewBlogHandler(deps, projects, posts, cats, tags)
 	inviteHandler := webhandlers.NewInviteHandler(deps, orgs, invites)
 	localeHandler := webhandlers.NewLocaleHandler(deps, users)
 	welcomeHandler := webhandlers.NewWelcomeHandler(deps, users)
@@ -81,7 +88,7 @@ func buildWebHandler(
 		BasePath: cfg.HTTP.BasePath,
 		HealthOK: healthOK,
 		AppHandlers: []web.Register{
-			authHandler, onboardingHandler, onboardHandler, homeHandler, orgHandler, projectHandler, todoHandler, inviteHandler, localeHandler, welcomeHandler, signupHandler, legalHandler,
+			authHandler, onboardingHandler, onboardHandler, homeHandler, orgHandler, projectHandler, todoHandler, blogHandler, inviteHandler, localeHandler, welcomeHandler, signupHandler, legalHandler,
 		},
 		APIHandler: apiHandler,
 		RobotsCfg:  &struct{ RobotsTxt string }{RobotsTxt: cfg.HTTP.RobotsTxt},

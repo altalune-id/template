@@ -27,9 +27,10 @@ func TestTenantTableSuffixes_OmitsSessions(t *testing.T) {
 	}
 }
 
-// TestRLSMigration_MatchesTenantTableSuffixes checks 002_rls.sql against the generated list in both directions.
+// TestRLSMigration_MatchesTenantTableSuffixes checks the postgres migrations against the generated list in both directions.
 func TestRLSMigration_MatchesTenantTableSuffixes(t *testing.T) {
-	src := readPostgresMigration(t, "002_rls.sql")
+	// NOTE: scans every migration, not just 002_rls.sql — a table added after 002 declares its own RLS block, exactly as gen-tenant-tables scans for it.
+	src := allPostgresMigrations(t)
 
 	if len(TenantTableSuffixes) == 0 {
 		t.Fatal("TenantTableSuffixes is empty; the guard would pass vacuously")
@@ -37,15 +38,15 @@ func TestRLSMigration_MatchesTenantTableSuffixes(t *testing.T) {
 	for _, suffix := range TenantTableSuffixes {
 		enable := fmt.Sprintf("ALTER TABLE {{.Schema}}.{{.TablePrefix}}%s ENABLE ROW LEVEL SECURITY;", suffix)
 		if !strings.Contains(src, enable) {
-			t.Errorf("002_rls.sql does not enable RLS on %q, but tenant_tables_gen.go lists it as tenant-scoped; the boot RLS audit will fail on every start", suffix)
+			t.Errorf("no postgres migration enables RLS on %q, but tenant_tables_gen.go lists it as tenant-scoped; the boot RLS audit will fail on every start", suffix)
 		}
 		policy := fmt.Sprintf("CREATE POLICY {{.TablePrefix}}%s_tenant", suffix)
 		if !strings.Contains(src, policy) {
-			t.Errorf("002_rls.sql has no tenant policy for %q; with FORCE ROW LEVEL SECURITY and no policy the table reads as empty for every org", suffix)
+			t.Errorf("no postgres migration has a tenant policy for %q; with FORCE ROW LEVEL SECURITY and no policy the table reads as empty for every org", suffix)
 		}
 	}
 
-	if strings.Contains(src, "sessions") {
+	if rls := readPostgresMigration(t, "002_rls.sql"); strings.Contains(rls, "sessions") {
 		t.Errorf("002_rls.sql mentions sessions: %s", sessionsRLSConsequence)
 	}
 }
@@ -72,6 +73,26 @@ func TestPostgresMigrations_NeverEnableRLSOnSessions(t *testing.T) {
 	if seen == 0 {
 		t.Fatal("no postgres migrations found; the guard would pass vacuously")
 	}
+}
+
+func allPostgresMigrations(t *testing.T) string {
+	t.Helper()
+	entries, err := migrationsFS.ReadDir("migrations/postgres")
+	if err != nil {
+		t.Fatalf("read migrations: %v", err)
+	}
+	var b strings.Builder
+	for _, e := range entries {
+		if !strings.HasSuffix(e.Name(), ".sql") {
+			continue
+		}
+		b.WriteString(readPostgresMigration(t, e.Name()))
+		b.WriteString("\n")
+	}
+	if b.Len() == 0 {
+		t.Fatal("no postgres migrations found; the guard would pass vacuously")
+	}
+	return b.String()
 }
 
 func readPostgresMigration(t *testing.T, name string) string {

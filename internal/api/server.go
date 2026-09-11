@@ -7,10 +7,14 @@ import (
 	"connectrpc.com/connect"
 
 	authv1connect "altalune.id/template/gen/go/auth/v1/authv1connect"
+	blogv1connect "altalune.id/template/gen/go/blog/v1/blogv1connect"
 	todov1connect "altalune.id/template/gen/go/todo/v1/todov1connect"
 	"altalune.id/template/internal/api/interceptor"
 	"altalune.id/template/internal/apperror"
 	"altalune.id/template/internal/auth"
+	"altalune.id/template/internal/blog"
+	"altalune.id/template/internal/blog/category"
+	"altalune.id/template/internal/blog/tag"
 	"altalune.id/template/internal/invite"
 	"altalune.id/template/internal/org"
 	"altalune.id/template/internal/platform"
@@ -33,8 +37,13 @@ type Server struct {
 	Todos    *todo.Service
 	Invites  *invite.Service
 
+	Posts      *blog.Service
+	Categories *category.Service
+	Tags       *tag.Service
+
 	AuthSvc *AuthService
 	TodoSvc *TodoService
+	BlogSvc *BlogService
 
 	OpenAPIEnabled   bool
 	OpenAPIBasicAuth *BasicAuth
@@ -51,6 +60,9 @@ func New(
 	todos *todo.Service,
 	invites *invite.Service,
 	todoStore todo.Store,
+	posts *blog.Service,
+	categories *category.Service,
+	tags *tag.Service,
 ) *Server {
 	s := &Server{
 		Cfg:      cfg,
@@ -61,8 +73,14 @@ func New(
 		Projects: projects,
 		Todos:    todos,
 		Invites:  invites,
-		AuthSvc:  NewAuthService(orgs),
-		TodoSvc:  NewTodoService(todos, todoStore, projects),
+
+		Posts:      posts,
+		Categories: categories,
+		Tags:       tags,
+
+		AuthSvc: NewAuthService(orgs),
+		TodoSvc: NewTodoService(todos, todoStore, projects),
+		BlogSvc: NewBlogService(posts, categories, tags, projects),
 	}
 	if cfg != nil {
 		s.OpenAPIEnabled = cfg.API.OpenAPI.Enabled
@@ -79,6 +97,7 @@ func New(
 var (
 	_ authv1connect.AuthServiceHandler = (*AuthService)(nil)
 	_ todov1connect.TodoServiceHandler = (*TodoService)(nil)
+	_ blogv1connect.BlogServiceHandler = (*BlogService)(nil)
 )
 
 // Handler mounts the Connect handlers plus OpenAPI endpoints under basePath+"/api".
@@ -90,6 +109,8 @@ func (s *Server) Handler(basePath string) http.Handler {
 	inner.Handle(todoPath, todoHandler)
 	authPath, authHandler := authv1connect.NewAuthServiceHandler(s.AuthSvc, opts...)
 	inner.Handle(authPath, authHandler)
+	blogPath, blogHandler := blogv1connect.NewBlogServiceHandler(s.BlogSvc, opts...)
+	inner.Handle(blogPath, blogHandler)
 
 	if s.OpenAPIEnabled {
 		yamlBody, jsonBody := openAPI()

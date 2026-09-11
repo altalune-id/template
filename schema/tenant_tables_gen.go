@@ -4,6 +4,10 @@ package schema
 
 // TenantTableSuffixes lists every table (without TablePrefix) that carries an org_id column and therefore participates in RLS.
 var TenantTableSuffixes = []string{
+	"blog_categories",
+	"blog_post_tags",
+	"blog_posts",
+	"blog_tags",
 	"invites",
 	"memberships",
 	"orgs",

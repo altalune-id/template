@@ -11,6 +11,9 @@ import (
 
 	"altalune.id/template/internal/api"
 	"altalune.id/template/internal/apperror"
+	"altalune.id/template/internal/blog"
+	"altalune.id/template/internal/blog/category"
+	"altalune.id/template/internal/blog/tag"
 	"altalune.id/template/internal/org"
 	"altalune.id/template/internal/platform"
 	"altalune.id/template/internal/platform/capabilities"
@@ -27,6 +30,9 @@ func openAPIServer(t *testing.T, enabled bool, auth *api.BasicAuth) *httptest.Se
 	orgs := fakes.NewOrg()
 	projs := fakes.NewProject()
 	tds := fakes.NewTodo()
+	posts := fakes.NewBlog()
+	cats := fakes.NewCategory()
+	tags := fakes.NewTag()
 
 	kernel := &platform.Kernel{
 		Log:      log,
@@ -41,6 +47,9 @@ func openAPIServer(t *testing.T, enabled bool, auth *api.BasicAuth) *httptest.Se
 		todo.NewService(tds, log, reporter.Unexpected),
 		nil,
 		tds,
+		blog.NewService(posts, log, reporter.Unexpected),
+		category.NewService(cats, log, reporter.Unexpected),
+		tag.NewService(tags, log, reporter.Unexpected),
 	)
 	srv.OpenAPIEnabled = enabled
 	srv.OpenAPIBasicAuth = auth

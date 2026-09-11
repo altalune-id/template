@@ -106,3 +106,32 @@ them from screenshots. `NNN` in the range `900`-`999` is reserved for unexpected
 | -------- | ------------------------------------ | ---------------------- |
 | `ENC001` | `apperror.CodeEncryptionUnavailable` | Encryption Unavailable |
 | `ENC002` | `apperror.CodeEncryptionOpenFailed`  | Encryption Open Failed |
+
+## BLG — Blog posts
+
+| Code     | Constant                            | Meaning                |
+| -------- | ----------------------------------- | ---------------------- |
+| `BLG001` | `apperror.CodePostNotFound`         | Post Not Found         |
+| `BLG002` | `apperror.CodePostAlreadyExists`    | Post Already Exists    |
+| `BLG003` | `apperror.CodePostInvalidTitle`     | Post Invalid Title     |
+| `BLG004` | `apperror.CodePostInvalidSlug`      | Post Invalid Slug      |
+| `BLG005` | `apperror.CodePostInvalidBody`      | Post Invalid Body      |
+| `BLG006` | `apperror.CodePostCategoryRequired` | Post Category Required |
+
+## CAT — Blog categories
+
+| Code     | Constant                             | Meaning                 |
+| -------- | ------------------------------------ | ----------------------- |
+| `CAT001` | `apperror.CodeCategoryNotFound`      | Category Not Found      |
+| `CAT002` | `apperror.CodeCategoryAlreadyExists` | Category Already Exists |
+| `CAT003` | `apperror.CodeCategoryInvalidName`   | Category Invalid Name   |
+| `CAT004` | `apperror.CodeCategoryInUse`         | Category In Use         |
+
+## TAG — Blog tags
+
+| Code     | Constant                        | Meaning            |
+| -------- | ------------------------------- | ------------------ |
+| `TAG001` | `apperror.CodeTagNotFound`      | Tag Not Found      |
+| `TAG002` | `apperror.CodeTagAlreadyExists` | Tag Already Exists |
+| `TAG003` | `apperror.CodeTagInvalidName`   | Tag Invalid Name   |
+| `TAG004` | `apperror.CodeTagInUse`         | Tag In Use         |
