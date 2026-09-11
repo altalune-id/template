@@ -134,7 +134,11 @@ func TestPostgres_Post_SaveAndByID(t *testing.T) {
 	assert.Equal(t, blog.StatusDraft, got.Status)
 	assert.Nil(t, got.FirstPublishedAt)
 	assert.Empty(t, got.TagIDs)
-	assert.True(t, got.CreatedAt.Equal(p.CreatedAt), "CreatedAt round-trip: got=%v want=%v", got.CreatedAt, p.CreatedAt)
+	// NOTE: postgres timestamptz is microsecond precision, so a nanosecond-precision
+	// time.Now() does not survive the round trip. On macOS the nanoseconds are often
+	// already zero, which hides this locally; linux CI fails it.
+	assert.True(t, got.CreatedAt.Equal(p.CreatedAt.Truncate(time.Microsecond)),
+		"CreatedAt round-trip: got=%v want=%v", got.CreatedAt, p.CreatedAt.Truncate(time.Microsecond))
 }
 
 func TestPostgres_Post_NotFound(t *testing.T) {
@@ -158,7 +162,7 @@ func TestPostgres_Post_RoundTripsPublication(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, blog.StatusPublished, got.Status)
 	require.NotNil(t, got.FirstPublishedAt)
-	assert.True(t, got.FirstPublishedAt.Equal(*p.FirstPublishedAt))
+	assert.True(t, got.FirstPublishedAt.Equal(p.FirstPublishedAt.Truncate(time.Microsecond)))
 
 	first := *p.FirstPublishedAt
 	p.Unpublish()
@@ -168,7 +172,7 @@ func TestPostgres_Post_RoundTripsPublication(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, blog.StatusDraft, got.Status)
 	require.NotNil(t, got.FirstPublishedAt, "unpublishing must retain the first publication")
-	assert.True(t, got.FirstPublishedAt.Equal(first))
+	assert.True(t, got.FirstPublishedAt.Equal(first.Truncate(time.Microsecond)))
 }
 
 func TestPostgres_Post_SaveReplacesTagSetWithoutOrphans(t *testing.T) {

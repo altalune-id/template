@@ -103,7 +103,11 @@ func TestPostgres_Tag_SaveAndByID(t *testing.T) {
 	assert.Equal(t, tg.ID, got.ID)
 	assert.Equal(t, "Go Lang", got.Name)
 	assert.Equal(t, "go-lang", got.Slug)
-	assert.True(t, got.CreatedAt.Equal(tg.CreatedAt), "CreatedAt round-trip: got=%v want=%v", got.CreatedAt, tg.CreatedAt)
+	// NOTE: postgres timestamptz is microsecond precision, so a nanosecond-precision
+	// time.Now() does not survive the round trip. On macOS the nanoseconds are often
+	// already zero, which hides this locally; linux CI fails it.
+	assert.True(t, got.CreatedAt.Equal(tg.CreatedAt.Truncate(time.Microsecond)),
+		"CreatedAt round-trip: got=%v want=%v", got.CreatedAt, tg.CreatedAt.Truncate(time.Microsecond))
 }
 
 func TestPostgres_Tag_NotFound(t *testing.T) {
