@@ -29,27 +29,9 @@ func NewBlogHandler(d Deps, projects *project.Service, posts *blog.Service, cats
 	return &BlogHandler{Deps: d, Posts: posts, Categories: cats, Tags: tags}
 }
 
-// requireProject resolves the org and project the path names, gating membership before any row is read.
-func (h *BlogHandler) requireProject(w http.ResponseWriter, r *http.Request) (projectScope, bool) {
-	p, sid, ok := h.LoadSession(r)
-	if !ok {
-		http.Redirect(w, r, ResolveReturnTo(h.Cfg.HTTP.BasePath, "/login"), http.StatusSeeOther)
-		return projectScope{}, false
-	}
-	o, r, ok := h.OrgScopeFor(w, r, p, r.PathValue("org"))
-	if !ok {
-		return projectScope{}, false
-	}
-	proj, r, ok := h.ProjectScopeFor(w, r, o.ID, r.PathValue("project"))
-	if !ok {
-		return projectScope{}, false
-	}
-	return projectScope{principal: p, sid: sid, org: o, project: proj, req: r}, true
-}
-
 // GetCategories renders the category admin page.
 func (h *BlogHandler) GetCategories(w http.ResponseWriter, r *http.Request) {
-	sc, ok := h.requireProject(w, r)
+	sc, ok := h.RequireProject(w, r)
 	if !ok {
 		return
 	}
@@ -67,7 +49,7 @@ func (h *BlogHandler) GetCategories(w http.ResponseWriter, r *http.Request) {
 
 // PostCategoryCreate adds a category and returns the refreshed list fragment.
 func (h *BlogHandler) PostCategoryCreate(w http.ResponseWriter, r *http.Request) {
-	sc, ok := h.requireProject(w, r)
+	sc, ok := h.RequireProject(w, r)
 	if !ok {
 		return
 	}
@@ -124,7 +106,7 @@ func (h *BlogHandler) PostCategoryDelete(w http.ResponseWriter, r *http.Request)
 
 // GetTags renders the tag admin page.
 func (h *BlogHandler) GetTags(w http.ResponseWriter, r *http.Request) {
-	sc, ok := h.requireProject(w, r)
+	sc, ok := h.RequireProject(w, r)
 	if !ok {
 		return
 	}
@@ -142,7 +124,7 @@ func (h *BlogHandler) GetTags(w http.ResponseWriter, r *http.Request) {
 
 // PostTagCreate adds a tag and returns the refreshed list fragment.
 func (h *BlogHandler) PostTagCreate(w http.ResponseWriter, r *http.Request) {
-	sc, ok := h.requireProject(w, r)
+	sc, ok := h.RequireProject(w, r)
 	if !ok {
 		return
 	}
@@ -200,7 +182,7 @@ func (h *BlogHandler) PostTagDelete(w http.ResponseWriter, r *http.Request) {
 // PostTagQuick creates the named tag when the project has none with that slug, then returns the
 // refreshed fragment — the post form's tag picker when the caller sent picker=1, else the tag list.
 func (h *BlogHandler) PostTagQuick(w http.ResponseWriter, r *http.Request) {
-	sc, ok := h.requireProject(w, r)
+	sc, ok := h.RequireProject(w, r)
 	if !ok {
 		return
 	}
@@ -230,60 +212,60 @@ func (h *BlogHandler) PostTagQuick(w http.ResponseWriter, r *http.Request) {
 }
 
 // requireCategory resolves the project scope from the path, then the category inside it.
-func (h *BlogHandler) requireCategory(w http.ResponseWriter, r *http.Request) (projectScope, *category.Category, bool) {
-	sc, ok := h.requireProject(w, r)
+func (h *BlogHandler) requireCategory(w http.ResponseWriter, r *http.Request) (ProjectScope, *category.Category, bool) {
+	sc, ok := h.RequireProject(w, r)
 	if !ok {
-		return projectScope{}, nil, false
+		return ProjectScope{}, nil, false
 	}
 	id, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
 		h.ErrorPage(w, sc.req, http.StatusBadRequest, "Bad id", "Malformed category id.")
-		return projectScope{}, nil, false
+		return ProjectScope{}, nil, false
 	}
 	c, err := h.Categories.ByID(sc.req.Context(), id)
 	if err != nil {
 		if category.IsNotFoundError(err) {
 			h.ErrorPage(w, sc.req, http.StatusNotFound, "Not found", "That category no longer exists.", err)
-			return projectScope{}, nil, false
+			return ProjectScope{}, nil, false
 		}
 		h.LogErr("web blog: category byID", err)
 		h.ErrorPage(w, sc.req, http.StatusInternalServerError, "Lookup failed", "Could not load that category.", err)
-		return projectScope{}, nil, false
+		return ProjectScope{}, nil, false
 	}
 	return sc, c, true
 }
 
 // requireTag resolves the project scope from the path, then the tag inside it.
-func (h *BlogHandler) requireTag(w http.ResponseWriter, r *http.Request) (projectScope, *tag.Tag, bool) {
-	sc, ok := h.requireProject(w, r)
+func (h *BlogHandler) requireTag(w http.ResponseWriter, r *http.Request) (ProjectScope, *tag.Tag, bool) {
+	sc, ok := h.RequireProject(w, r)
 	if !ok {
-		return projectScope{}, nil, false
+		return ProjectScope{}, nil, false
 	}
 	id, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
 		h.ErrorPage(w, sc.req, http.StatusBadRequest, "Bad id", "Malformed tag id.")
-		return projectScope{}, nil, false
+		return ProjectScope{}, nil, false
 	}
 	t, err := h.Tags.ByID(sc.req.Context(), id)
 	if err != nil {
 		if tag.IsNotFoundError(err) {
 			h.ErrorPage(w, sc.req, http.StatusNotFound, "Not found", "That tag no longer exists.")
-			return projectScope{}, nil, false
+			return ProjectScope{}, nil, false
 		}
 		h.LogErr("web blog: tag byID", err)
 		h.ErrorPage(w, sc.req, http.StatusInternalServerError, "Lookup failed", "Could not load that tag.", err)
-		return projectScope{}, nil, false
+		return ProjectScope{}, nil, false
 	}
 	// SECURITY: tag.ByID does not compare the row's scope to the caller's, so a tag from another
 	// project would otherwise be renamable through a guessed id. Same 404 as a missing row.
 	if t.OrgID != sc.org.ID || t.ProjectID != sc.project.ID {
 		h.ErrorPage(w, sc.req, http.StatusNotFound, "Not found", "That tag no longer exists.")
-		return projectScope{}, nil, false
+		return ProjectScope{}, nil, false
 	}
 	return sc, t, true
 }
 
-func (h *BlogHandler) categoriesView(sc projectScope, errKind string, inUseID uuid.UUID, code string) (templates.CategoriesView, error) {
+func (h *BlogHandler) categoriesView(sc ProjectScope, errKind string, inUseID uuid.UUID, code string) (templates.CategoriesView, error) {
 	items, err := h.Categories.List(sc.req.Context())
 	if err != nil {
 		return templates.CategoriesView{}, err
@@ -313,7 +295,7 @@ func (h *BlogHandler) categoriesView(sc projectScope, errKind string, inUseID uu
 	}, nil
 }
 
-func (h *BlogHandler) tagsView(sc projectScope, errKind string, inUseID uuid.UUID, code string) (templates.TagsView, error) {
+func (h *BlogHandler) tagsView(sc ProjectScope, errKind string, inUseID uuid.UUID, code string) (templates.TagsView, error) {
 	items, err := h.Tags.List(sc.req.Context())
 	if err != nil {
 		return templates.TagsView{}, err
@@ -346,13 +328,13 @@ func (h *BlogHandler) tagsView(sc projectScope, errKind string, inUseID uuid.UUI
 // fragmentBase returns a chromeless LayoutData that still names the org, so d.ProjectPath inside a
 // swapped-in fragment resolves to the same URLs the full page rendered. Deps.Base alone leaves
 // ActiveOrg nil, which collapses every project path to /orgs.
-func (h *BlogHandler) fragmentBase(sc projectScope) web.LayoutData {
+func (h *BlogHandler) fragmentBase(sc ProjectScope) web.LayoutData {
 	d := h.Base(sc.req, "")
 	d.ActiveOrg = &web.ActiveOrg{ID: sc.org.ID.String(), Slug: sc.org.Slug, Name: sc.org.Name}
 	return d
 }
 
-func (h *BlogHandler) writeCategoryList(w http.ResponseWriter, sc projectScope, errKind string, inUseID uuid.UUID, code string) {
+func (h *BlogHandler) writeCategoryList(w http.ResponseWriter, sc ProjectScope, errKind string, inUseID uuid.UUID, code string) {
 	v, err := h.categoriesView(sc, errKind, inUseID, code)
 	if err != nil {
 		h.LogErr("web blog: list categories", err)
@@ -362,7 +344,7 @@ func (h *BlogHandler) writeCategoryList(w http.ResponseWriter, sc projectScope, 
 	Render(w, sc.req, templates.CategoryList(h.fragmentBase(sc), v))
 }
 
-func (h *BlogHandler) writeTagList(w http.ResponseWriter, sc projectScope, errKind string, inUseID uuid.UUID, code string) {
+func (h *BlogHandler) writeTagList(w http.ResponseWriter, sc ProjectScope, errKind string, inUseID uuid.UUID, code string) {
 	v, err := h.tagsView(sc, errKind, inUseID, code)
 	if err != nil {
 		h.LogErr("web blog: list tags", err)
@@ -446,7 +428,7 @@ func selectedSet(raw []string) map[string]bool {
 
 // GetPosts renders the post list page.
 func (h *BlogHandler) GetPosts(w http.ResponseWriter, r *http.Request) {
-	sc, ok := h.requireProject(w, r)
+	sc, ok := h.RequireProject(w, r)
 	if !ok {
 		return
 	}
@@ -464,7 +446,7 @@ func (h *BlogHandler) GetPosts(w http.ResponseWriter, r *http.Request) {
 
 // GetPostNew renders the empty post form.
 func (h *BlogHandler) GetPostNew(w http.ResponseWriter, r *http.Request) {
-	sc, ok := h.requireProject(w, r)
+	sc, ok := h.RequireProject(w, r)
 	if !ok {
 		return
 	}
@@ -482,7 +464,7 @@ func (h *BlogHandler) GetPostEdit(w http.ResponseWriter, r *http.Request) {
 
 // PostPostCreate creates a draft post with its tag set and redirects to the list.
 func (h *BlogHandler) PostPostCreate(w http.ResponseWriter, r *http.Request) {
-	sc, ok := h.requireProject(w, r)
+	sc, ok := h.RequireProject(w, r)
 	if !ok {
 		return
 	}
@@ -597,7 +579,7 @@ func (h *BlogHandler) PostPostDelete(w http.ResponseWriter, r *http.Request) {
 // PostPostPreview renders the submitted markdown body as the preview fragment.
 // NOTE: a POST, not a GET — a body can exceed a URL's practical length and must stay out of access logs.
 func (h *BlogHandler) PostPostPreview(w http.ResponseWriter, r *http.Request) {
-	sc, ok := h.requireProject(w, r)
+	sc, ok := h.RequireProject(w, r)
 	if !ok {
 		return
 	}
@@ -611,38 +593,38 @@ func (h *BlogHandler) PostPostPreview(w http.ResponseWriter, r *http.Request) {
 }
 
 // requirePost resolves the project scope from the path, then the post inside it.
-func (h *BlogHandler) requirePost(w http.ResponseWriter, r *http.Request) (projectScope, *blog.Post, bool) {
-	sc, ok := h.requireProject(w, r)
+func (h *BlogHandler) requirePost(w http.ResponseWriter, r *http.Request) (ProjectScope, *blog.Post, bool) {
+	sc, ok := h.RequireProject(w, r)
 	if !ok {
-		return projectScope{}, nil, false
+		return ProjectScope{}, nil, false
 	}
 	id, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
 		h.ErrorPage(w, sc.req, http.StatusBadRequest, "Bad id", "Malformed post id.")
-		return projectScope{}, nil, false
+		return ProjectScope{}, nil, false
 	}
 	p, err := h.Posts.ByID(sc.req.Context(), id)
 	if err != nil {
 		if blog.IsNotFoundError(err) {
 			h.ErrorPage(w, sc.req, http.StatusNotFound, "Not found", "That post no longer exists.")
-			return projectScope{}, nil, false
+			return ProjectScope{}, nil, false
 		}
 		h.LogErr("web blog: post byID", err)
 		h.ErrorPage(w, sc.req, http.StatusInternalServerError, "Lookup failed", "Could not load that post.", err)
-		return projectScope{}, nil, false
+		return ProjectScope{}, nil, false
 	}
 	// SECURITY: blog.ByID scopes to the org but not the project, so a sibling project's post would
 	// otherwise be editable through a guessed id. Same 404 as a missing row.
 	if p.OrgID != sc.org.ID || p.ProjectID != sc.project.ID {
 		h.ErrorPage(w, sc.req, http.StatusNotFound, "Not found", "That post no longer exists.")
-		return projectScope{}, nil, false
+		return ProjectScope{}, nil, false
 	}
 	return sc, p, true
 }
 
 // resolveTagIDs maps the submitted tag ids onto the project's tags, reporting false when one is unknown.
 // NOTE: blog has no TagNotFoundError, so an unknown id would otherwise surface as a wrapped FK failure.
-func (h *BlogHandler) resolveTagIDs(sc projectScope, raw []string) ([]uuid.UUID, bool, error) {
+func (h *BlogHandler) resolveTagIDs(sc ProjectScope, raw []string) ([]uuid.UUID, bool, error) {
 	items, err := h.Tags.List(sc.req.Context())
 	if err != nil {
 		return nil, false, err
@@ -664,7 +646,7 @@ func (h *BlogHandler) resolveTagIDs(sc projectScope, raw []string) ([]uuid.UUID,
 	return out, true, nil
 }
 
-func (h *BlogHandler) postsView(sc projectScope, errKind, code string) (templates.PostsView, error) {
+func (h *BlogHandler) postsView(sc ProjectScope, errKind, code string) (templates.PostsView, error) {
 	posts, err := h.Posts.List(sc.req.Context(), blog.ListOpts{})
 	if err != nil {
 		return templates.PostsView{}, err
@@ -705,7 +687,7 @@ func (h *BlogHandler) postsView(sc projectScope, errKind, code string) (template
 	}, nil
 }
 
-func (h *BlogHandler) categoryNames(sc projectScope) (map[uuid.UUID]string, error) {
+func (h *BlogHandler) categoryNames(sc ProjectScope) (map[uuid.UUID]string, error) {
 	items, err := h.Categories.List(sc.req.Context())
 	if err != nil {
 		return nil, err
@@ -717,7 +699,7 @@ func (h *BlogHandler) categoryNames(sc projectScope) (map[uuid.UUID]string, erro
 	return out, nil
 }
 
-func (h *BlogHandler) tagNames(sc projectScope) (map[uuid.UUID]string, error) {
+func (h *BlogHandler) tagNames(sc ProjectScope) (map[uuid.UUID]string, error) {
 	items, err := h.Tags.List(sc.req.Context())
 	if err != nil {
 		return nil, err
@@ -729,7 +711,7 @@ func (h *BlogHandler) tagNames(sc projectScope) (map[uuid.UUID]string, error) {
 	return out, nil
 }
 
-func (h *BlogHandler) postFormView(sc projectScope, d postDraft, errKind, code string) (templates.PostFormView, error) {
+func (h *BlogHandler) postFormView(sc ProjectScope, d postDraft, errKind, code string) (templates.PostFormView, error) {
 	cats, err := h.Categories.List(sc.req.Context())
 	if err != nil {
 		return templates.PostFormView{}, err
@@ -762,7 +744,7 @@ func (h *BlogHandler) postFormView(sc projectScope, d postDraft, errKind, code s
 	}, nil
 }
 
-func (h *BlogHandler) postTagPicker(sc projectScope, selected map[string]bool, errKind, code string) (templates.PostTagPickerView, error) {
+func (h *BlogHandler) postTagPicker(sc ProjectScope, selected map[string]bool, errKind, code string) (templates.PostTagPickerView, error) {
 	items, err := h.Tags.List(sc.req.Context())
 	if err != nil {
 		return templates.PostTagPickerView{}, err
@@ -782,7 +764,7 @@ func (h *BlogHandler) postTagPicker(sc projectScope, selected map[string]bool, e
 	}, nil
 }
 
-func (h *BlogHandler) writePostList(w http.ResponseWriter, sc projectScope, errKind, code string) {
+func (h *BlogHandler) writePostList(w http.ResponseWriter, sc ProjectScope, errKind, code string) {
 	v, err := h.postsView(sc, errKind, code)
 	if err != nil {
 		h.LogErr("web blog: list posts", err)
@@ -792,7 +774,7 @@ func (h *BlogHandler) writePostList(w http.ResponseWriter, sc projectScope, errK
 	Render(w, sc.req, templates.PostList(h.fragmentBase(sc), v))
 }
 
-func (h *BlogHandler) writePostForm(w http.ResponseWriter, sc projectScope, d postDraft, errKind, code string) {
+func (h *BlogHandler) writePostForm(w http.ResponseWriter, sc ProjectScope, d postDraft, errKind, code string) {
 	v, err := h.postFormView(sc, d, errKind, code)
 	if err != nil {
 		h.LogErr("web blog: post form", err)
@@ -809,7 +791,7 @@ func (h *BlogHandler) writePostForm(w http.ResponseWriter, sc projectScope, d po
 	))
 }
 
-func (h *BlogHandler) writePostTagPicker(w http.ResponseWriter, sc projectScope, selected map[string]bool, errKind, code string) {
+func (h *BlogHandler) writePostTagPicker(w http.ResponseWriter, sc ProjectScope, selected map[string]bool, errKind, code string) {
 	v, err := h.postTagPicker(sc, selected, errKind, code)
 	if err != nil {
 		h.LogErr("web blog: list tags", err)
@@ -819,7 +801,7 @@ func (h *BlogHandler) writePostTagPicker(w http.ResponseWriter, sc projectScope,
 	Render(w, sc.req, templates.PostTagPicker(h.fragmentBase(sc), v))
 }
 
-func (h *BlogHandler) redirectToPosts(w http.ResponseWriter, sc projectScope) {
+func (h *BlogHandler) redirectToPosts(w http.ResponseWriter, sc ProjectScope) {
 	target := web.Path(h.Cfg.HTTP.BasePath, projectPath(sc.org.Slug, sc.project.Slug, "/posts"))
 	http.Redirect(w, sc.req, target, http.StatusSeeOther) //nolint:gosec // G710: both slugs come from rows already resolved by their own slug patterns
 }
@@ -850,7 +832,7 @@ func postErrorKind(err error) string {
 }
 
 // Register wires the blog post, category and tag routes onto mux.
-func (h *BlogHandler) Register(mux *http.ServeMux) {
+func (h *BlogHandler) Register(mux web.Mux) {
 	mux.HandleFunc("GET /orgs/{org}/projects/{project}/posts", h.GetPosts)
 	mux.HandleFunc("GET /orgs/{org}/projects/{project}/posts/new", h.GetPostNew)
 	mux.HandleFunc("POST /orgs/{org}/projects/{project}/posts", h.PostPostCreate)

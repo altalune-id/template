@@ -70,12 +70,22 @@ type I18nConfig struct {
 
 // HTTPConfig configures the web-facing HTTP server.
 type HTTPConfig struct {
-	Addr         string `yaml:"addr"         mapstructure:"addr"         awareness:"required"`
-	BasePath     string `yaml:"basePath"     mapstructure:"basePath"`
-	BaseURL      string `yaml:"baseURL"      mapstructure:"baseURL"      awareness:"required"                  validate:"omitempty,url"`
-	CookieSecure bool   `yaml:"cookieSecure" mapstructure:"cookieSecure"`
-	StateSecret  string `yaml:"stateSecret"  mapstructure:"stateSecret"  awareness:"required,secret,bootstrap"`
-	RobotsTxt    string `yaml:"robotsTxt"    mapstructure:"robotsTxt"`
+	Addr         string    `yaml:"addr"         mapstructure:"addr"         awareness:"required"`
+	BasePath     string    `yaml:"basePath"     mapstructure:"basePath"`
+	BaseURL      string    `yaml:"baseURL"      mapstructure:"baseURL"      awareness:"required"                  validate:"omitempty,url"`
+	CookieSecure bool      `yaml:"cookieSecure" mapstructure:"cookieSecure"`
+	StateSecret  string    `yaml:"stateSecret"  mapstructure:"stateSecret"  awareness:"required,secret,bootstrap"`
+	RobotsTxt    string    `yaml:"robotsTxt"    mapstructure:"robotsTxt"`
+	CSP          CSPConfig `yaml:"csp"          mapstructure:"csp"`
+}
+
+// CSPConfig configures the Content-Security-Policy response header.
+type CSPConfig struct {
+	// SECURITY: disabling this lets markup injected into user content execute in a viewer's session.
+	Enabled bool `yaml:"enabled"    mapstructure:"enabled"    awareness:"required"`
+	// ReportOnly logs violations without blocking, for rolling a policy out against real traffic.
+	ReportOnly bool   `yaml:"reportOnly" mapstructure:"reportOnly" awareness:"-"`
+	ReportURI  string `yaml:"reportURI"  mapstructure:"reportURI"  awareness:"-"                validate:"omitempty,uri"`
 }
 
 // GenesisConfig configures the built-in admin account.

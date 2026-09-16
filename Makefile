@@ -1,4 +1,4 @@
-.PHONY: help build test test-race test-cover vet fmt check generate ui-vendor buf migrate docker clean install-tools lint dev test-integration test-all
+.PHONY: help build test test-race test-cover vet fmt check generate templ-normalize templ-normalize-check ui-vendor buf migrate docker clean install-tools lint dev test-integration test-all
 
 GO      ?= go
 BIN     := bin/altempl
@@ -45,16 +45,23 @@ vet: ## Run go vet
 fmt: ## gofmt -w
 	gofmt -w .
 
-check: fmt vet test ## fmt + vet + test — pre-commit gate
+check: fmt vet templ-normalize test-race ## fmt + vet + race tests — pre-commit gate
 
 generate: ## Regenerate templ + buf outputs (pnpm-managed buf, go-tool templ)
-	$(GO) tool templ generate
+	$(GO) tool templ generate -path .
+	@bash scripts/templ-normalize.sh
 	@if command -v pnpm >/dev/null 2>&1; then \
 		pnpm exec buf generate; \
 	else \
 		echo "WARN: pnpm not on PATH — falling back to \`go tool buf generate\`. Install pnpm for reproducible plugin versions."; \
 		$(GO) tool buf generate; \
 	fi
+
+templ-normalize: ## Pin generated templ FileName paths to repo-root-relative form
+	@bash scripts/templ-normalize.sh
+
+templ-normalize-check: ## Fail if any generated templ FileName is not root-relative (CI check)
+	@bash scripts/templ-normalize.sh --check
 
 ui-vendor: ## Download pinned static assets into internal/web/static
 	@if [ -x scripts/ui-vendor.sh ]; then bash scripts/ui-vendor.sh; else echo "(scripts/ui-vendor.sh missing — skipping)"; fi

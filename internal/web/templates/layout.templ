@@ -15,17 +15,17 @@ templ Layout(d web.LayoutData) {
 			<link rel="icon" href={ d.Static("favicon.ico") } sizes="any"/>
 			<link rel="icon" type="image/png" sizes="32x32" href={ d.Static("favicon-32x32.png") }/>
 			<link rel="apple-touch-icon" href={ d.Static("apple-touch-icon.png") }/>
-			@themeInitScript()
+			@themeInitScript(d.Nonce)
 			if d.UIMode == web.UIModeVendored {
 				<link rel="stylesheet" href={ d.Static("basecoat.css") }/>
 				<link rel="stylesheet" href={ d.Static("app.css") }/>
-				<script src={ d.Static("htmx.min.js") } defer></script>
+				<script src={ d.Static("htmx.min.js") } nonce={ d.Nonce } defer></script>
 			} else {
-				@tailwindThemeBridge()
+				@tailwindThemeBridge(d.Nonce)
 				<!-- CDN mode is for local dev only; the Tailwind CDN prints a production warning. For prod deploys, vendor assets via `scripts/ui-vendor.sh` and set ALT_UI_MODE=vendored. -->
-				<script src="https://cdn.tailwindcss.com"></script>
+				<script src="https://cdn.tailwindcss.com" nonce={ d.Nonce }></script>
 				<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/basecoat-css@latest/dist/basecoat.min.css"/>
-				<script src="https://unpkg.com/htmx.org@2" defer></script>
+				<script src="https://unpkg.com/htmx.org@2" nonce={ d.Nonce } defer></script>
 			}
 			<!-- themes.css MUST load AFTER basecoat so our per-theme HSL variables win the cascade. -->
 			<link rel="stylesheet" href={ d.Static("themes.css") }/>
@@ -74,7 +74,7 @@ templ Layout(d web.LayoutData) {
 			if d.Principal != nil && d.ActiveNav.Scope != web.NavScopeNone {
 				@mobileDrawer(d)
 			}
-			<script>
+			<script nonce={ d.Nonce }>
 				document.addEventListener('click', function(e) {
 					document.querySelectorAll('details[data-switcher][open]').forEach(function(d) {
 						if (!d.contains(e.target)) d.removeAttribute('open');
@@ -123,7 +123,7 @@ templ topNav(d web.LayoutData) {
 					@publicUtilityBar(d)
 				} else if d.Principal.Email != "" {
 					@userMenu(d)
-					@themeApplyScript()
+					@themeApplyScript(d.Nonce)
 				}
 			</div>
 		</div>
@@ -136,7 +136,7 @@ templ publicUtilityBar(d web.LayoutData) {
 			@colorModeSelectorPill(d, false)
 		</div>
 	}
-	@themeApplyScript()
+	@themeApplyScript(d.Nonce)
 }
 
 templ publicLocaleFooter(d web.LayoutData) {
@@ -227,12 +227,12 @@ templ sidebarFooterUtils(d web.LayoutData) {
 		if d.Version != "" {
 			<p class="px-2 pt-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground/60">altempl · { d.Version }</p>
 		}
-		@themeApplyScript()
+		@themeApplyScript(d.Nonce)
 	</div>
 }
 
-templ tailwindThemeBridge() {
-	<script>
+templ tailwindThemeBridge(nonce string) {
+	<script nonce={ nonce }>
 	window.tailwind = window.tailwind || {};
 	window.tailwind.config = {
 		darkMode: 'class',
@@ -279,8 +279,8 @@ templ tailwindThemeBridge() {
 	</script>
 }
 
-templ themeInitScript() {
-	<script>
+templ themeInitScript(nonce string) {
+	<script nonce={ nonce }>
 	(function() {
 		try {
 			var t = localStorage.getItem('altempl.theme') || 'slate';
@@ -354,8 +354,8 @@ templ modeIcon(m string) {
 	}
 }
 
-templ themeApplyScript() {
-	<script>
+templ themeApplyScript(nonce string) {
+	<script nonce={ nonce }>
 	(function() {
 		var root = document.documentElement;
 		function cap(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : s; }

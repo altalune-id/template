@@ -62,7 +62,7 @@ func buildWebHandler(
 	apiHandler http.Handler,
 	bundle *i18npkg.Bundle,
 	defaultLoc i18npkg.Locale,
-) http.Handler {
+) (handler http.Handler, routes []string) { //nolint:nonamedreturns // two return values differ in role
 	deps := newWebDeps(cfg, caps, kernel.Sessions, slogger)
 	deps.Orgs = orgs
 	deps.Projects = projects
@@ -84,7 +84,7 @@ func buildWebHandler(
 
 	errTmpl := webmw.LogError{Log: slogger}
 
-	return web.NewServer(web.ServerOpts{
+	return web.NewServerWithRoutes(web.ServerOpts{
 		BasePath: cfg.HTTP.BasePath,
 		HealthOK: healthOK,
 		AppHandlers: []web.Register{
@@ -94,6 +94,7 @@ func buildWebHandler(
 		RobotsCfg:  &struct{ RobotsTxt string }{RobotsTxt: cfg.HTTP.RobotsTxt},
 		Middlewares: []web.Middleware{
 			webmw.RequestID,
+			webmw.CSP(cspOptions(web.ResolveUIMode(), cfg.HTTP.CSP)),
 			webmw.RequestLog(slogger),
 			webmw.OTel,
 			webmw.Recover(reporter.Unexpected, errTmpl),
@@ -154,4 +155,17 @@ func (w logSlogWriter) Write(p []byte) (int, error) {
 		w.log.Info(strings.TrimRight(string(p), "\n"))
 	}
 	return len(p), nil
+}
+
+func cspOptions(mode web.UIMode, cfg config.CSPConfig) webmw.CSPOptions {
+	opts := webmw.CSPOptions{
+		Enabled:    cfg.Enabled,
+		ReportOnly: cfg.ReportOnly,
+		ReportURI:  cfg.ReportURI,
+	}
+	if mode == web.UIModeCDN {
+		opts.ExtraScriptSrc = []string{"https://cdn.tailwindcss.com", "https://unpkg.com", "https://cdn.jsdelivr.net"}
+		opts.ExtraStyleSrc = []string{"https://cdn.jsdelivr.net"}
+	}
+	return opts
 }

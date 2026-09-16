@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"altalune.id/template/internal/legal"
+	"altalune.id/template/internal/web"
 	"altalune.id/template/internal/web/templates"
 )
 
@@ -14,7 +15,7 @@ type LegalHandler struct{ Deps }
 func NewLegalHandler(d Deps) *LegalHandler { return &LegalHandler{Deps: d} }
 
 // Register mounts the /terms and /privacy routes on mux.
-func (h *LegalHandler) Register(mux *http.ServeMux) {
+func (h *LegalHandler) Register(mux web.Mux) {
 	mux.HandleFunc("GET /terms", h.get(legal.TermsSlug, "Terms of Service"))
 	mux.HandleFunc("GET /privacy", h.get(legal.PrivacySlug, "Privacy Policy"))
 }

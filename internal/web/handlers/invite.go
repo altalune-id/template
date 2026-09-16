@@ -30,16 +30,12 @@ func NewInviteHandler(d Deps, orgs *org.Service, invites *invite.Service) *Invit
 
 // GetList renders /orgs/{slug}/invites.
 func (h *InviteHandler) GetList(w http.ResponseWriter, r *http.Request) {
-	p, _, authed := h.LoadSession(r)
-	if !authed {
-		http.Redirect(w, r, ResolveReturnTo(h.Cfg.HTTP.BasePath, "/login"), http.StatusSeeOther)
-		return
-	}
-	slug := r.PathValue("org")
-	o, r, ok := h.OrgScopeFor(w, r, p, slug)
+	sc, ok := h.RequireOrg(w, r)
 	if !ok {
 		return
 	}
+	p, o, r := sc.principal, sc.org, sc.req
+	slug := o.Slug
 	items, err := h.Invites.ListPending(r.Context())
 	if err != nil {
 		h.LogErr("web invite: list", err)
@@ -54,16 +50,12 @@ func (h *InviteHandler) GetList(w http.ResponseWriter, r *http.Request) {
 
 // PostSend handles POST /orgs/{slug}/invites.
 func (h *InviteHandler) PostSend(w http.ResponseWriter, r *http.Request) {
-	p, _, authed := h.LoadSession(r)
-	if !authed {
-		http.Redirect(w, r, ResolveReturnTo(h.Cfg.HTTP.BasePath, "/login"), http.StatusSeeOther)
-		return
-	}
-	slug := r.PathValue("org")
-	o, r, ok := h.OrgScopeFor(w, r, p, slug)
+	sc, ok := h.RequireOrg(w, r)
 	if !ok {
 		return
 	}
+	p, o, r := sc.principal, sc.org, sc.req
+	slug := o.Slug
 	canManage, _ := h.isManager(r.Context(), o.ID, p.UserID)
 	if !canManage {
 		h.ErrorPage(w, r, http.StatusForbidden, "Not allowed", "Only owners and admins can invite.")
@@ -94,16 +86,12 @@ func (h *InviteHandler) PostSend(w http.ResponseWriter, r *http.Request) {
 
 // PostRevoke handles POST /orgs/{slug}/invites/{id}/revoke.
 func (h *InviteHandler) PostRevoke(w http.ResponseWriter, r *http.Request) {
-	p, _, authed := h.LoadSession(r)
-	if !authed {
-		http.Redirect(w, r, ResolveReturnTo(h.Cfg.HTTP.BasePath, "/login"), http.StatusSeeOther)
-		return
-	}
-	slug := r.PathValue("org")
-	o, r, ok := h.OrgScopeFor(w, r, p, slug)
+	sc, ok := h.RequireOrg(w, r)
 	if !ok {
 		return
 	}
+	p, o, r := sc.principal, sc.org, sc.req
+	slug := o.Slug
 	canManage, _ := h.isManager(r.Context(), o.ID, p.UserID)
 	if !canManage {
 		h.ErrorPage(w, r, http.StatusForbidden, "Not allowed", "Only owners and admins can revoke invites.")
@@ -214,7 +202,7 @@ func inviteRows(items []*invite.Invite) []templates.InviteRow {
 }
 
 // Register wires all invite routes onto the mux.
-func (h *InviteHandler) Register(mux *http.ServeMux) {
+func (h *InviteHandler) Register(mux web.Mux) {
 	mux.HandleFunc("GET /orgs/{org}/invites", h.GetList)
 	mux.HandleFunc("POST /orgs/{org}/invites", h.PostSend)
 	mux.HandleFunc("POST /orgs/{org}/invites/{id}/revoke", h.PostRevoke)

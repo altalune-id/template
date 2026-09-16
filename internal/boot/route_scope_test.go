@@ -7,8 +7,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -35,7 +33,7 @@ type probeRoute struct {
 }
 
 // probeRoutes is every path the web stack registers, with a body for the mutating ones.
-// NOTE: asserted complete against the handler sources in TestRoutes_ListCoversEveryRegisteredRoute.
+// NOTE: asserted complete against the registered mux in TestRoutes_ListMatchesTheMux.
 func probeRoutes() []probeRoute {
 	const (
 		org   = "probe-org"
@@ -48,6 +46,8 @@ func probeRoutes() []probeRoute {
 		{http.MethodGet, "/", nil},
 		{http.MethodGet, "/login", nil},
 		{http.MethodGet, "/admin-login", nil},
+		{http.MethodGet, "/login/oidc", nil},
+		{http.MethodGet, "/oauth/callback", nil},
 		{http.MethodGet, "/onboarding", nil},
 		{http.MethodGet, "/welcome", nil},
 		{http.MethodGet, "/terms", nil},
@@ -220,25 +220,40 @@ func TestRoutes_UserWithAnActiveOrgNeverHitsATenantScopeError(t *testing.T) {
 		Slug: "probe-org", Name: "Probe Org", OwnerID: owner.ID,
 	})
 	require.NoError(t, err, "org.Create must work with no ambient tenant scope — the signup case")
+
+	// NOTE: without the project, every project-scoped probe short-circuits on the handler's own 404 and reaches no handler code.
+	orgCtx := tenant.Into(context.Background(), tenant.Context{OrgID: o.ID, UserID: owner.ID})
+	_, err = srv.Projects.Create(orgCtx, o.ID, "probe-project", "Probe Project")
+	require.NoError(t, err)
+
 	walkRoutes(t, srv, logBuf, session.Principal{UserID: owner.ID, ActiveOrgID: o.ID}, "cloud with-org")
 }
 
-// TestRoutes_ListCoversEveryRegisteredRoute keeps the table above honest by deriving the truth from the handler sources.
-func TestRoutes_ListCoversEveryRegisteredRoute(t *testing.T) {
+// TestRoutes_ListMatchesTheMux asserts the probe table and the registered mux name the same routes, in both directions.
+func TestRoutes_ListMatchesTheMux(t *testing.T) {
+	srv, _ := newScopeProbeServer(t, config.ModeCloud)
+
 	walked := map[string]bool{}
 	for _, rt := range probeRoutes() {
 		walked[rt.method+" "+templatize(rt.path)] = true
 	}
-	for _, pat := range registeredRoutes(t) {
+	registered := map[string]bool{}
+	for _, pat := range srv.Routes {
+		registered[pat] = true
+	}
+	require.NotEmpty(t, registered, "the server registered no app routes")
+
+	for pat := range registered {
 		require.True(t, walked[pat],
-			"%q is registered but no probe walks it — add it to the routes table in %s", pat, "route_scope_test.go")
+			"%q is registered on the mux but no probe walks it — add it to probeRoutes in route_scope_test.go", pat)
+	}
+	for pat := range walked {
+		require.True(t, registered[pat],
+			"%q is probed but the mux does not register it — the handler was dropped from AppHandlers, or the probe is stale", pat)
 	}
 }
 
-var (
-	reRegister = regexp.MustCompile(`mux\.HandleFunc\("([A-Z]+) ([^"]+)"`)
-	reUUID     = regexp.MustCompile(`[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}`)
-)
+var reUUID = regexp.MustCompile(`[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}`)
 
 // templatize rewrites a concrete probe path back into the mux pattern it exercises.
 func templatize(path string) string {
@@ -252,25 +267,6 @@ func templatize(path string) string {
 		return "/{$}"
 	}
 	return path
-}
-
-func registeredRoutes(t *testing.T) []string {
-	t.Helper()
-	files, err := filepath.Glob("../web/handlers/*.go")
-	require.NoError(t, err)
-	var out []string
-	for _, f := range files {
-		if strings.HasSuffix(f, "_test.go") {
-			continue
-		}
-		b, rErr := os.ReadFile(f)
-		require.NoError(t, rErr)
-		for _, m := range reRegister.FindAllStringSubmatch(string(b), -1) {
-			out = append(out, m[1]+" "+m[2])
-		}
-	}
-	require.NotEmpty(t, out, "found no registered routes — the scraper regex has gone stale")
-	return out
 }
 
 // stubIssuer serves the discovery document boot needs so cloud mode can be exercised without network access.

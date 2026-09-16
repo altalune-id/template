@@ -47,6 +47,17 @@ When invoked (Claude Code loads them automatically on task match):
   `Is<TypeName>` with the FULL type name (e.g. `IsNotFoundError`), never
   `IsErr*`, never a shortcut.
 - **No mocks.** Fakes are hand-written under `internal/testutil/fakes/`.
+- **Never wrap jet's `NULL` singleton.** `postgres.TimestampzExp(postgres.NULL)`
+  and `sqlite.StringExp(sqlite.NULL)` mutate a package-level var and race. Use
+  the `Null*` helpers in `internal/platform/db/entity/{postgres,sqlite}`, and
+  pick the one matching the column's declared type — Postgres has no assignment
+  cast, so a mistyped null fails the statement at analyze time.
+- **Tenant-scoped routes call `Deps.RequireProject`** (or `RequireOrg`), never
+  their own `OrgScopeFor` → `ProjectScopeFor` chain. A guard test enforces it.
+- **Every `<script>` carries `nonce={ d.Nonce }`.** The CSP middleware sets a
+  nonce-based `script-src`; an unnonced script silently does not run.
+- **Keys a handler resolves at runtime** get a standalone `//i18n:use <key>`
+  comment (or `//i18n:use <prefix>.*`), or `make i18n-check` reads them as dead.
 - **Comments** — default NO comments. Keep 1-line godoc on exported
   symbols, TODO/SECURITY/FIXME/NOTE markers, external URL references.
   Delete rationale, history, architecture prose.
@@ -61,14 +72,19 @@ When invoked (Claude Code loads them automatically on task match):
 ## Common commands
 
 ```bash
-make check              # fmt + vet + test — pre-commit gate
+make check              # fmt + vet + templ-normalize + race tests — pre-commit gate
 make test               # unit (fast)
 make test-integration   # requires TEST_PG_DSN or docker/podman socket
 make generate           # regenerate templ + buf outputs
 make config-examples    # regenerate .env.example + config.example.yaml
 make tenant-tables      # regenerate schema/tenant_tables_gen.go
 make lint               # golangci-lint (or go vet fallback)
+make templ-normalize    # pin generated templ FileName paths to root-relative form
 ```
+
+`make check` runs the race detector. It is not optional: the template's stores
+build jet expressions concurrently, and the one data race found downstream was
+invisible to a non-race run.
 
 ## Before finishing a task
 

@@ -23,8 +23,29 @@ func StaticFS() fs.FS {
 	return sub
 }
 
+// Mux is the subset of *http.ServeMux a handler registers against.
+type Mux interface {
+	Handle(pattern string, handler http.Handler)
+	HandleFunc(pattern string, handler func(http.ResponseWriter, *http.Request))
+}
+
 // Register registers each handler onto the given mux.
-type Register interface{ Register(mux *http.ServeMux) }
+type Register interface{ Register(mux Mux) }
+
+type recordingMux struct {
+	mux      *http.ServeMux
+	patterns []string
+}
+
+func (m *recordingMux) Handle(pattern string, handler http.Handler) {
+	m.patterns = append(m.patterns, pattern)
+	m.mux.Handle(pattern, handler)
+}
+
+func (m *recordingMux) HandleFunc(pattern string, handler func(http.ResponseWriter, *http.Request)) {
+	m.patterns = append(m.patterns, pattern)
+	m.mux.HandleFunc(pattern, handler)
+}
 
 // Middleware is the standard net/http middleware shape.
 type Middleware = func(http.Handler) http.Handler
@@ -47,10 +68,17 @@ type robotsConfig = struct{ RobotsTxt string }
 
 // NewServer wires handlers, static, robots, healthz and API into one http.Handler.
 func NewServer(o ServerOpts) http.Handler {
-	app := http.NewServeMux()
+	h, _ := NewServerWithRoutes(o)
+	return h
+}
+
+// NewServerWithRoutes is NewServer plus the app-route patterns the handlers registered.
+func NewServerWithRoutes(o ServerOpts) (handler http.Handler, routes []string) { //nolint:nonamedreturns // two return values differ in role
+	rec := &recordingMux{mux: http.NewServeMux()}
 	for _, h := range o.AppHandlers {
-		h.Register(app)
+		h.Register(rec)
 	}
+	app := rec.mux
 	app.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.FS(StaticFS()))))
 
 	outer := http.NewServeMux()
@@ -81,11 +109,11 @@ func NewServer(o ServerOpts) http.Handler {
 		})
 	}
 
-	var handler http.Handler = outer
+	handler = outer
 	for i := len(o.Middlewares) - 1; i >= 0; i-- {
 		handler = o.Middlewares[i](handler)
 	}
-	return handler
+	return handler, rec.patterns
 }
 
 func robotsFromServerOpts(o ServerOpts) http.Handler {

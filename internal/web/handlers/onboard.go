@@ -64,7 +64,7 @@ func NewOnboardHandler(
 }
 
 // Register wires the /onboard routes onto mux.
-func (h *OnboardHandler) Register(mux *http.ServeMux) {
+func (h *OnboardHandler) Register(mux web.Mux) {
 	mux.HandleFunc("GET /onboard", h.GetOnboard)
 	mux.HandleFunc("POST /onboard/local", h.PostLocal)
 	mux.HandleFunc("GET /onboard/oidc", h.GetOIDCStart)

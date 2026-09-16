@@ -88,6 +88,8 @@ type LayoutData struct {
 	ColorModes    []ColorMode
 	// RequestID is echoed on every user-visible error so a report can be matched to a log line.
 	RequestID string
+	// SECURITY: every <script> the layout renders must carry this, or the browser refuses to run it.
+	Nonce string
 }
 
 // LocaleOption is one row in the locale-selector dropdown.

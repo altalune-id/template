@@ -2,13 +2,13 @@ package handlers
 
 import (
 	"context"
-	"net/http"
 
 	"github.com/google/uuid"
 
 	"altalune.id/template/internal/i18n"
 	"altalune.id/template/internal/platform/session"
 	"altalune.id/template/internal/user"
+	"altalune.id/template/internal/web"
 )
 
 // LocaleHandler serves POST /locale, persisting the locale choice for signed-in users.
@@ -23,7 +23,7 @@ func NewLocaleHandler(d Deps, users *user.Service) *LocaleHandler {
 }
 
 // Register mounts POST /locale on mux.
-func (h *LocaleHandler) Register(mux *http.ServeMux) {
+func (h *LocaleHandler) Register(mux web.Mux) {
 	if h.I18n == nil {
 		return
 	}
