@@ -23,7 +23,7 @@ func NewHomeHandler(d Deps, orgs *org.Service, projects *project.Service) *HomeH
 }
 
 // Register wires the root redirect and the per-org overview onto mux.
-func (h *HomeHandler) Register(mux *http.ServeMux) {
+func (h *HomeHandler) Register(mux web.Mux) {
 	mux.HandleFunc("GET /{$}", h.GetRoot)
 	mux.HandleFunc("GET /orgs/{org}", h.GetOverview)
 }
@@ -61,15 +61,11 @@ func (h *HomeHandler) landingPath(r *http.Request, p session.Principal) string {
 
 // GetOverview renders /orgs/{org} — that org's dashboard.
 func (h *HomeHandler) GetOverview(w http.ResponseWriter, r *http.Request) {
-	p, sid, ok := h.LoadSession(r)
-	if !ok || p.UserID == uuid.Nil {
-		http.Redirect(w, r, web.Path(h.Cfg.HTTP.BasePath, "/login"), http.StatusSeeOther)
-		return
-	}
-	o, r, ok := h.OrgScopeFor(w, r, p, r.PathValue("org"))
+	sc, ok := h.RequireOrg(w, r)
 	if !ok {
 		return
 	}
+	p, sid, o, r := sc.principal, sc.sid, sc.org, sc.req
 	h.remember(r, sid, p, o.ID)
 
 	view := templates.DashboardView{

@@ -1,6 +1,8 @@
 package api
 
 import (
+	"crypto/rand"
+	"encoding/base64"
 	"fmt"
 	"net/http"
 )
@@ -8,16 +10,33 @@ import (
 const swaggerUIVersion = "5.17.14"
 
 // docsHandler serves a self-contained Swagger UI page pointing at specURL. Assets load from unpkg.com; the spec URL is fetched same-origin so basic-auth credentials are reused across the same realm.
+// NOTE: this page carries its own CSP, overriding the app policy, because its assets and inline bootstrap are third-party and would otherwise be blocked.
 func docsHandler(specURL string) http.Handler {
-	body := swaggerHTML(specURL)
 	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		nonce := docsNonce()
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-cache")
-		_, _ = w.Write(body)
+		w.Header().Set("Content-Security-Policy", docsCSP(nonce))
+		w.Header().Del("Content-Security-Policy-Report-Only")
+		_, _ = w.Write(swaggerHTML(specURL, nonce))
 	})
 }
 
-func swaggerHTML(specURL string) []byte {
+func docsCSP(nonce string) string {
+	return "default-src 'self'; " +
+		"script-src 'self' 'nonce-" + nonce + "' https://unpkg.com; " +
+		"style-src 'self' 'unsafe-inline' https://unpkg.com; " +
+		"img-src 'self' data:; font-src 'self' data:; connect-src 'self'; " +
+		"object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+}
+
+func docsNonce() string {
+	b := make([]byte, 16)
+	_, _ = rand.Read(b)
+	return base64.RawStdEncoding.EncodeToString(b)
+}
+
+func swaggerHTML(specURL, nonce string) []byte {
 	const tmpl = `<!doctype html>
 <html lang="en">
 <head>
@@ -30,9 +49,9 @@ func swaggerHTML(specURL string) []byte {
 </head>
 <body>
   <div id="swagger-ui"></div>
-  <script src="https://unpkg.com/swagger-ui-dist@%[1]s/swagger-ui-bundle.js" crossorigin></script>
-  <script src="https://unpkg.com/swagger-ui-dist@%[1]s/swagger-ui-standalone-preset.js" crossorigin></script>
-  <script>
+  <script src="https://unpkg.com/swagger-ui-dist@%[1]s/swagger-ui-bundle.js" nonce="%[3]s" crossorigin></script>
+  <script src="https://unpkg.com/swagger-ui-dist@%[1]s/swagger-ui-standalone-preset.js" nonce="%[3]s" crossorigin></script>
+  <script nonce="%[3]s">
     window.addEventListener('load', function () {
       window.ui = SwaggerUIBundle({
         url: %[2]q,
@@ -50,5 +69,5 @@ func swaggerHTML(specURL string) []byte {
 </body>
 </html>
 `
-	return fmt.Appendf(nil, tmpl, swaggerUIVersion, specURL)
+	return fmt.Appendf(nil, tmpl, swaggerUIVersion, specURL, nonce)
 }

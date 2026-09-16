@@ -100,6 +100,13 @@ http:
   baseURL: ""
   # env: ALT_HTTP_COOKIE_SECURE
   cookieSecure: false
+  csp:
+    # [required] env: ALT_HTTP_CSP_ENABLED
+    enabled: true
+    # env: ALT_HTTP_CSP_REPORT_ONLY
+    reportOnly: false
+    # env: ALT_HTTP_CSP_REPORT_URI
+    reportURI: ""
   # env: ALT_HTTP_ROBOTS_TXT
   robotsTxt: ""
   # [required, secret, bootstrap] env: ALT_HTTP_STATE_SECRET

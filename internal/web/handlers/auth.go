@@ -283,7 +283,7 @@ func (h *AuthHandler) postLogoutRedirectURL() string {
 }
 
 // Register wires all routes onto mux; OIDC routes mount only when authl.Client is non-nil.
-func (h *AuthHandler) Register(mux *http.ServeMux) {
+func (h *AuthHandler) Register(mux web.Mux) {
 	mux.HandleFunc("GET /login", h.GetLogin)
 	mux.HandleFunc("POST /login", h.PostLogin)
 	mux.HandleFunc("GET /admin-login", h.GetAdminLogin)

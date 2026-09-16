@@ -33,35 +33,42 @@ that becoming a cross-tenant leak. Never treat either as sufficient alone.
 
 ```go
 func (h *ThingHandler) GetList(w http.ResponseWriter, r *http.Request) {
-    p, _, ok := h.LoadSession(r)
-    if !ok {
-        http.Redirect(w, r, ResolveReturnTo(h.Cfg.HTTP.BasePath, "/login"), http.StatusSeeOther)
-        return
-    }
-    // r now carries the org scope; membership was checked, and a non-member gets the same 404 as a bad slug.
-    o, r, ok := h.OrgScopeFor(w, r, p, r.PathValue("org"))
+    sc, ok := h.RequireOrg(w, r)
     if !ok {
         return
     }
+    // sc.req carries the org scope; membership was checked, and a non-member gets the same 404 as a bad slug.
+    o, r := sc.org, sc.req
     items, err := h.Things.List(r.Context(), o.ID)
     ...
 }
 ```
 
-Assigning back into `r` is deliberate: the scoped request replaces the unscoped one, so a later
-`r.Context()` cannot accidentally be the wrong scope.
+Using `sc.req` rather than the original `r` is deliberate: the scoped request replaces the
+unscoped one, so a later `r.Context()` cannot accidentally be the wrong scope.
 
-For a project-scoped route, chain the second helper:
+For a project-scoped route, use the project gate instead — it performs the org membership check
+first, then resolves the project:
 
 ```go
-proj, r, ok := h.ProjectScopeFor(w, r, o.ID, r.PathValue("project"))
+sc, ok := h.RequireProject(w, r)
+if !ok {
+    return
+}
+o, proj, r := sc.org, sc.project, sc.req
 ```
+
+**Call `RequireOrg` / `RequireProject`, never `OrgScopeFor` / `ProjectScopeFor` directly.** The
+sequence is the only thing separating one org's members from another org's rows, so it lives in
+`internal/web/handlers/scope.go` once and a change there reaches every route. A handler that calls
+the primitives itself can resolve a project without the org check above it, which is the bypass.
+`TestTenantGateIsNotCopiedIntoHandlers` fails the build if a handler does.
 
 ## Where scope comes from, by entry point
 
 | Entry point       | Source of scope                                                           |
 | ----------------- | ------------------------------------------------------------------------- |
-| Web handler       | `Deps.OrgScopeFor` / `Deps.ProjectScopeFor`, from the path                |
+| Web handler       | `Deps.RequireOrg` / `Deps.RequireProject`, from the path                  |
 | Connect-RPC       | `interceptor.Tenant`, from the session principal                          |
 | CLI               | the resolved `--org` flag, via `tenant.Into`                              |
 | Scheduler         | one fan-out per tenant, from `tenant.NewEnumerator` — see below           |
@@ -110,7 +117,7 @@ disambiguate it. Keeping the org in the path means:
 
 1. Register it under `/orgs/{org}/...` (and `/orgs/{org}/projects/{project}/...` when it belongs
    to a project). Never mount a tenant-scoped page at a bare path.
-2. Resolve scope with `OrgScopeFor`, then `ProjectScopeFor`. Do not build a `tenant.Context` by hand.
+2. Resolve scope with `RequireOrg` or `RequireProject`. Do not build a `tenant.Context` by hand.
 3. Build links with `LayoutData.OrgPath` / `LayoutData.ProjectPath`. Hand-written `/orgs/...`
    strings in templates drift the moment a route moves.
 4. Pass the org to the layout: `LayoutForOrg(r, title, o.Slug, navKey)` or

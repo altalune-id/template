@@ -34,7 +34,7 @@ func NewSignupHandler(d Deps, users *user.Service, orgs *org.Service, projects *
 }
 
 // Register wires the /signup/complete routes onto mux.
-func (h *SignupHandler) Register(mux *http.ServeMux) {
+func (h *SignupHandler) Register(mux web.Mux) {
 	mux.HandleFunc("GET /signup/complete", h.GetSignup)
 	mux.HandleFunc("POST /signup/complete", h.PostSignup)
 }

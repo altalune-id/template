@@ -18,7 +18,7 @@ type stubRegister struct {
 	path, body string
 }
 
-func (s stubRegister) Register(mux *http.ServeMux) {
+func (s stubRegister) Register(mux web.Mux) {
 	mux.HandleFunc(s.path, func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(s.body))
 	})

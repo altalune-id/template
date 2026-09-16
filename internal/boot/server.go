@@ -67,7 +67,9 @@ type Server struct {
 	// SetupToken gates /onboard while onboarding is still required; empty once onboarded.
 	SetupToken string
 
-	Web        http.Handler
+	Web http.Handler
+	// Routes are the app-route patterns the web handlers registered, taken from the mux.
+	Routes     []string
 	API        *api.Server
 	Scheduler  *scheduler.Runner
 	Health     *db.HealthMonitor
@@ -247,7 +249,7 @@ func BootServer(ctx context.Context, cfg *config.Config, opts ...Option) (*Serve
 		logSetupToken(cfg, log, setup)
 	}
 
-	webHandler := buildWebHandler(cfg, kernel, caps, log, reporter, healthOK,
+	webHandler, webRoutes := buildWebHandler(cfg, kernel, caps, log, reporter, healthOK,
 		svcs.Auth, svcs.Users, svcs.Orgs, svcs.Projects, svcs.Todos, svcs.Invites, svcs.Onboards,
 		svcs.Posts, svcs.Categories, svcs.Tags, required, setup, apiHandler, bundle, defaultLoc)
 
@@ -272,6 +274,7 @@ func BootServer(ctx context.Context, cfg *config.Config, opts ...Option) (*Serve
 		Categories:   svcs.Categories,
 		Tags:         svcs.Tags,
 		Onboarded:    onboarded,
+		Routes:       webRoutes,
 		SetupToken:   setup,
 		Onboard:      svcs.Onboard,
 		Web:          webHandler,

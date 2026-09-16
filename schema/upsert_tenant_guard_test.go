@@ -26,6 +26,7 @@ const unguardedConflictConsequence = "an ON_CONFLICT ... DO_UPDATE with no tenan
 // upsertGuardExemptions lists DO_UPDATE sites whose table carries no org_id column, keyed by "<path under internal/>:<func>".
 var upsertGuardExemptions = map[string]string{ //nolint:gochecknoglobals // Immutable manifest; not runtime state.
 	"user/pgwriter.go:Save":             "users is global — a user exists before and across every org, so the table has no org_id column",
+	"user/sqlite.go:Save":               "users is global — a user exists before and across every org, so the table has no org_id column",
 	"platform/session/postgres.go:Save": "sessions carries no org_id by design; a session is resolved before any tenant scope exists (see schema.RequiredTableSuffixes and migrations/postgres/001_init.sql)",
 	"platform/session/sqlite.go:Save":   "sessions carries no org_id by design; a session is resolved before any tenant scope exists (see schema.RequiredTableSuffixes and migrations/postgres/001_init.sql)",
 	"org/pgwriter.go:Save":              "the orgs table has no org_id column — its own id is the tenant id, and org.Service.Create writes a row for an org that does not exist yet",

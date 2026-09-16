@@ -4,7 +4,7 @@
 
 1. Write a failing test that names the behavior.
 2. Make it pass with the minimum code.
-3. Run `make check` (fmt + vet + test).
+3. Run `make check` (fmt + vet + templ-normalize + race tests).
 4. Refactor with all tests green.
 
 Coverage floor: aggregate ≥ 90%, service ≥ 85%. Exported root packages
@@ -24,7 +24,7 @@ expensive to propagate.
 
 ```bash
 make test               # unit (fast, no external deps)
-make test-race          # unit + -race
+make test-race          # unit + -race (also run by `make check`)
 make test-cover         # unit + coverage summary
 make test-integration   # integration (ephemeral PG via testcontainers, or TEST_PG_DSN)
 make test-all           # both

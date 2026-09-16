@@ -21,6 +21,7 @@ import (
 	"altalune.id/template/internal/platform/tenant"
 	"altalune.id/template/internal/project"
 	"altalune.id/template/internal/web"
+	"altalune.id/template/internal/web/middleware"
 	"altalune.id/template/internal/web/templates"
 	"altalune.id/template/reqid"
 	"altalune.id/template/version"
@@ -67,6 +68,7 @@ func (d Deps) Base(r *http.Request, title string) web.LayoutData {
 		Themes:        web.Themes(),
 		ColorModes:    web.ColorModes(),
 		RequestID:     reqid.FromContext(r.Context()),
+		Nonce:         middleware.NonceFrom(r.Context()),
 	}
 }
 

@@ -83,6 +83,8 @@ func setDefaults(v *viper.Viper) {
 
 	v.SetDefault("http.addr", ":5150")
 	v.SetDefault("http.cookieSecure", false)
+	v.SetDefault("http.csp.enabled", true)
+	v.SetDefault("http.csp.reportOnly", false)
 
 	v.SetDefault("db.driver", "sqlite")
 	v.SetDefault("db.dsn", filepath.Join(homeDir(), ".altempl", "altempl.db"))
