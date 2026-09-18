@@ -94,6 +94,9 @@ type LayoutData struct {
 	RequestID string
 	// SECURITY: every <script> the layout renders must carry this, or the browser refuses to run it.
 	Nonce string
+	// SECURITY: gates the hx-csp nonce gate, which strips every htmx attribute when it cannot read
+	// the nonce back from an enforcing Content-Security-Policy response header.
+	CSPEnforced bool
 }
 
 // LocaleOption is one row in the locale-selector dropdown.

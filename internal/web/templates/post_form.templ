@@ -89,6 +89,7 @@ templ postQuickTag(d web.LayoutData, v PostFormView) {
 			<button
 				type="button"
 				hx-post={ d.ProjectPath(v.ProjectSlug, "/tags/quick") }
+				hx-nonce={ d.Nonce }
 				hx-include="#quick-tag-fields, #post-tag-picker"
 				hx-target="#post-tag-picker"
 				hx-swap="outerHTML"
@@ -248,6 +249,7 @@ templ PostFormPage(d web.LayoutData, v PostFormView) {
 						id="post-preview-button"
 						type="button"
 						hx-post={ d.ProjectPath(v.ProjectSlug, "/posts/preview") }
+						hx-nonce={ d.Nonce }
 						hx-include="#post-body"
 						hx-target="#post-preview"
 						hx-swap="outerHTML"

@@ -38,6 +38,7 @@ templ TodosPage(d web.LayoutData, v TodosView) {
 				method="post"
 				action={ templ.SafeURL(d.ProjectPath(v.ProjectSlug, "/todos/clear")) }
 				hx-post={ d.ProjectPath(v.ProjectSlug, "/todos/clear") }
+				hx-nonce={ d.Nonce }
 				hx-target="#todo-list"
 				hx-swap="outerHTML"
 				hx-disable="find button, find input"
@@ -58,6 +59,7 @@ templ TodosPage(d web.LayoutData, v TodosView) {
 			method="post"
 			action={ templ.SafeURL(d.ProjectPath(v.ProjectSlug, "/todos")) }
 			hx-post={ d.ProjectPath(v.ProjectSlug, "/todos") }
+			hx-nonce={ d.Nonce }
 			hx-target="#todo-list"
 			hx-swap="outerHTML"
 			hx-disable="find button, find input"

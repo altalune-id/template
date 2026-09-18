@@ -28,6 +28,9 @@ fetch() {
 echo "==> htmx $HTMX_VERSION"
 fetch "https://unpkg.com/htmx.org@${HTMX_VERSION}/dist/htmx.min.js" "$STATIC/htmx.min.js"
 
+echo "==> htmx extension: hx-csp"
+fetch "https://unpkg.com/htmx.org@${HTMX_VERSION}/dist/ext/hx-csp.min.js" "$STATIC/hx-csp.min.js"
+
 echo "==> easymde $EASYMDE_VERSION"
 fetch "https://cdn.jsdelivr.net/npm/easymde@${EASYMDE_VERSION}/dist/easymde.min.js" "$STATIC/easymde.min.js"
 fetch "https://cdn.jsdelivr.net/npm/easymde@${EASYMDE_VERSION}/dist/easymde.min.css" "$STATIC/easymde.min.css"

@@ -69,6 +69,7 @@ func (d Deps) Base(r *http.Request, title string) web.LayoutData {
 		ColorModes:    web.ColorModes(),
 		RequestID:     reqid.FromContext(r.Context()),
 		Nonce:         middleware.NonceFrom(r.Context()),
+		CSPEnforced:   d.Cfg.HTTP.CSP.Enabled && !d.Cfg.HTTP.CSP.ReportOnly,
 	}
 }
 

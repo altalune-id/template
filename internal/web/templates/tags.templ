@@ -48,6 +48,7 @@ templ TagList(d web.LayoutData, v TagsView) {
 						method="post"
 						action={ templ.SafeURL(d.ProjectPath(v.ProjectSlug, "/tags/" + t.ID + "/rename")) }
 						hx-post={ d.ProjectPath(v.ProjectSlug, "/tags/" + t.ID + "/rename") }
+						hx-nonce={ d.Nonce }
 						hx-target="#tag-list"
 						hx-swap="outerHTML"
 						hx-disable="find button, find input"
@@ -73,6 +74,7 @@ templ TagList(d web.LayoutData, v TagsView) {
 						method="post"
 						action={ templ.SafeURL(d.ProjectPath(v.ProjectSlug, "/tags/" + t.ID + "/delete")) }
 						hx-post={ d.ProjectPath(v.ProjectSlug, "/tags/" + t.ID + "/delete") }
+						hx-nonce={ d.Nonce }
 						hx-target="#tag-list"
 						hx-swap="outerHTML"
 						hx-disable="find button, find input"
@@ -104,6 +106,7 @@ templ TagsPage(d web.LayoutData, v TagsView) {
 			method="post"
 			action={ templ.SafeURL(d.ProjectPath(v.ProjectSlug, "/tags")) }
 			hx-post={ d.ProjectPath(v.ProjectSlug, "/tags") }
+			hx-nonce={ d.Nonce }
 			hx-target="#tag-list"
 			hx-swap="outerHTML"
 			hx-disable="find button, find input"
