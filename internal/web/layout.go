@@ -1,6 +1,7 @@
 package web
 
 import (
+	"net/http"
 	"os"
 	"strings"
 
@@ -28,6 +29,9 @@ func ResolveUIMode() UIMode {
 	}
 	return UIModeCDN
 }
+
+// IsHTMXRequest reports whether r was issued by htmx rather than a browser navigation.
+func IsHTMXRequest(r *http.Request) bool { return r.Header.Get("HX-Request") == "true" }
 
 // NavScope selects which sidebars the shell renders.
 type NavScope string
@@ -90,6 +94,9 @@ type LayoutData struct {
 	RequestID string
 	// SECURITY: every <script> the layout renders must carry this, or the browser refuses to run it.
 	Nonce string
+	// SECURITY: gates the hx-csp nonce gate, which strips every htmx attribute when it cannot read
+	// the nonce back from an enforcing Content-Security-Policy response header.
+	CSPEnforced bool
 }
 
 // LocaleOption is one row in the locale-selector dropdown.

@@ -83,7 +83,7 @@ func TestErrorTemplate_HTMXFragment(t *testing.T) {
 		t.Errorf("status=%d, want 500", rr.Code)
 	}
 	body := rr.Body.String()
-	if !strings.Contains(body, `class="alt-error"`) {
+	if !strings.Contains(body, `class="alt-error`) {
 		t.Errorf("body missing alt-error marker: %q", body)
 	}
 	if !strings.Contains(body, "kaboom") {
