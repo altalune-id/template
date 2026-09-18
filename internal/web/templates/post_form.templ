@@ -92,7 +92,10 @@ templ postQuickTag(d web.LayoutData, v PostFormView) {
 				hx-include="#quick-tag-fields, #post-tag-picker"
 				hx-target="#post-tag-picker"
 				hx-swap="outerHTML"
-				hx-on::after-request="document.getElementById('quick-tag-name').value = ''"
+				data-clear-on-success="#quick-tag-name"
+				hx-status:4xx="target:#hx-error swap:innerHTML"
+				hx-status:5xx="target:#hx-error swap:innerHTML"
+				hx-disable="find button, find input"
 				class="mt-2 w-full rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground shadow-sm hover:bg-primary/90"
 			>
 				{ d.Tr("blog.post_quick_tag_add") }
@@ -249,9 +252,14 @@ templ PostFormPage(d web.LayoutData, v PostFormView) {
 						hx-target="#post-preview"
 						hx-swap="outerHTML"
 						hx-trigger="click, preview-refresh"
+						hx-indicator="#post-preview-spinner"
+						hx-status:4xx="target:#hx-error swap:innerHTML"
+						hx-status:5xx="target:#hx-error swap:innerHTML"
+						hx-disable="find button, find input"
 						class="rounded-md border border-border px-3 py-1.5 text-xs font-medium text-foreground/90 hover:bg-muted"
 					>
 						{ d.Tr("blog.post_preview") }
+						<span id="post-preview-spinner" class="htmx-indicator ml-1.5 inline-block align-middle">…</span>
 					</button>
 					<div class="mt-2 rounded-lg border border-border bg-card p-4 shadow-sm">
 						@PostPreviewFragment(d, v.PreviewHTML)

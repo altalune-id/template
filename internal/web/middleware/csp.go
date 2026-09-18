@@ -27,7 +27,6 @@ type CSPOptions struct {
 
 // CSP sets a nonce-based Content-Security-Policy and exposes the nonce on the request context.
 // SECURITY: script-src carries a nonce rather than 'unsafe-inline', so markup injected into user content does not execute.
-// NOTE: 'unsafe-eval' is required by htmx's hx-on:* attributes; it permits eval but not inline event handlers.
 // NOTE: style-src keeps 'unsafe-inline' because the layout sets style="" attributes, which a nonce cannot cover.
 func CSP(opts CSPOptions) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
@@ -53,7 +52,7 @@ func NonceFrom(ctx context.Context) string {
 }
 
 func buildPolicy(nonce string, opts CSPOptions) string {
-	scriptSrc := append([]string{"'self'", "'nonce-" + nonce + "'", "'unsafe-eval'"}, opts.ExtraScriptSrc...)
+	scriptSrc := append([]string{"'self'", "'nonce-" + nonce + "'"}, opts.ExtraScriptSrc...)
 	styleSrc := append([]string{"'self'", "'unsafe-inline'"}, opts.ExtraStyleSrc...)
 	connectSrc := append([]string{"'self'"}, opts.ExtraConnectSrc...)
 

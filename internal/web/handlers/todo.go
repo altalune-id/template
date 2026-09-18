@@ -24,6 +24,13 @@ func NewTodoHandler(d Deps, projects *project.Service, todos *todo.Service) *Tod
 	return &TodoHandler{Deps: d, Todos: todos}
 }
 
+// NOTE: Deps.Base leaves ActiveOrg nil, which collapses d.ProjectPath to /orgs in swapped-in fragments.
+func (h *TodoHandler) fragmentBase(sc ProjectScope) web.LayoutData {
+	d := h.Base(sc.req, "")
+	d.ActiveOrg = &web.ActiveOrg{ID: sc.org.ID.String(), Slug: sc.org.Slug, Name: sc.org.Name}
+	return d
+}
+
 // remember stores the org and project as the session's last-used pair, which only /  reads.
 func (h *TodoHandler) remember(sc ProjectScope) {
 	if sc.principal.ActiveOrgID == sc.org.ID && sc.principal.ActiveProjectID == sc.project.ID {
@@ -130,7 +137,7 @@ func (h *TodoHandler) PostToggle(w http.ResponseWriter, r *http.Request) {
 		h.ErrorPage(w, sc.req, http.StatusInternalServerError, "Toggle failed", "Could not update that todo.", err)
 		return
 	}
-	Render(w, sc.req, templates.TodoRowFragment(h.Base(sc.req, ""), todoRow(sc.org.Slug, sc.project.Slug, updated)))
+	Render(w, sc.req, templates.TodoRowFragment(h.fragmentBase(sc), todoRow(sc.org.Slug, sc.project.Slug, updated)))
 }
 
 // Delete removes the row.
@@ -189,7 +196,7 @@ func (h *TodoHandler) writeListFragment(w http.ResponseWriter, sc ProjectScope) 
 		h.ErrorPage(w, sc.req, http.StatusInternalServerError, "List failed", "Could not load todos.", err)
 		return
 	}
-	Render(w, sc.req, templates.TodoList(h.Base(sc.req, ""), renderRowsFor(sc.org.Slug, sc.project.Slug, items)))
+	Render(w, sc.req, templates.TodoList(h.fragmentBase(sc), renderRowsFor(sc.org.Slug, sc.project.Slug, items)))
 }
 
 // Register wires the todo routes onto mux.

@@ -241,11 +241,16 @@ func RenderStatus(w http.ResponseWriter, r *http.Request, status int, c templ.Co
 // ErrorPage renders the error.templ full page with the given status/title/message.
 func (d Deps) ErrorPage(w http.ResponseWriter, r *http.Request, status int, title, msg string, cause ...error) {
 	base := d.Base(r, title)
-	RenderStatus(w, r, status, templates.ErrorLayout(base, templates.ErrorView{
+	view := templates.ErrorView{
 		Status: status, Title: title, Message: msg,
 		RequestID: reqid.FromContext(r.Context()),
 		Code:      ErrorRef(cause...),
-	}))
+	}
+	if web.IsHTMXRequest(r) {
+		RenderStatus(w, r, status, templates.ErrorFragment(base, view))
+		return
+	}
+	RenderStatus(w, r, status, templates.ErrorLayout(base, view))
 }
 
 // ErrorRef returns the code carried by the first of errs that is an AppError, or "" when none is.

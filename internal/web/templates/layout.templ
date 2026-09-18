@@ -25,8 +25,9 @@ templ Layout(d web.LayoutData) {
 				<!-- CDN mode is for local dev only; the Tailwind CDN prints a production warning. For prod deploys, vendor assets via `scripts/ui-vendor.sh` and set ALT_UI_MODE=vendored. -->
 				<script src="https://cdn.tailwindcss.com" nonce={ d.Nonce }></script>
 				<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/basecoat-css@latest/dist/basecoat.min.css"/>
-				<script src="https://unpkg.com/htmx.org@2" nonce={ d.Nonce } defer></script>
+				<script src="https://unpkg.com/htmx.org@4.0.0" nonce={ d.Nonce } defer></script>
 			}
+			@htmxRequestHooks(d.Nonce)
 			<!-- themes.css MUST load AFTER basecoat so our per-theme HSL variables win the cascade. -->
 			<link rel="stylesheet" href={ d.Static("themes.css") }/>
 			<style>
@@ -57,6 +58,7 @@ templ Layout(d web.LayoutData) {
 						if d.Flash != nil {
 							<div class={ "mb-4 rounded-md p-3 text-sm", flashClass(d.Flash.Kind) }>{ d.Flash.Message }</div>
 						}
+						<div id="hx-error" class="mb-4 empty:hidden empty:mb-0" aria-live="polite"></div>
 						@d.Content
 					</main>
 				</div>
@@ -65,6 +67,7 @@ templ Layout(d web.LayoutData) {
 					if d.Flash != nil {
 						<div class={ "mb-4 rounded-md p-3 text-sm", flashClass(d.Flash.Kind) }>{ d.Flash.Message }</div>
 					}
+					<div id="hx-error" class="mb-4 empty:hidden empty:mb-0" aria-live="polite"></div>
 					@d.Content
 					if d.Principal == nil && len(d.SupportedLocs) > 1 {
 						@publicLocaleFooter(d)
@@ -276,6 +279,26 @@ templ tailwindThemeBridge(nonce string) {
 			}
 		}
 	};
+	</script>
+}
+
+// SECURITY: this replaces per-element hx-on handlers so script-src needs no 'unsafe-eval'.
+templ htmxRequestHooks(nonce string) {
+	<script nonce={ nonce }>
+	document.addEventListener('htmx:after:request', function(e) {
+		var ctx = e.detail && e.detail.ctx;
+		var status = ctx && ctx.response && ctx.response.status;
+		if (typeof status !== 'number' || status >= 400) return;
+		var banner = document.getElementById('hx-error');
+		if (banner) banner.innerHTML = '';
+		var elt = e.target || (ctx && ctx.sourceElement);
+		if (!elt || !elt.getAttribute) return;
+		if (elt.hasAttribute('data-reset-on-success') && elt.reset) elt.reset();
+		var sel = elt.getAttribute('data-clear-on-success');
+		if (sel) {
+			document.querySelectorAll(sel).forEach(function(i) { i.value = ''; });
+		}
+	});
 	</script>
 }
 

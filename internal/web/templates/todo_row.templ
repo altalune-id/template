@@ -21,6 +21,9 @@ templ TodoRowFragment(d web.LayoutData, t TodoRow) {
 			hx-post={ d.ProjectPath(t.ProjectSlug, "/todos/" + t.ID + "/toggle") }
 			hx-target={ "#todo-" + t.ID }
 			hx-swap="outerHTML"
+			hx-disable="find button, find input"
+			hx-status:4xx="target:#hx-error swap:innerHTML"
+			hx-status:5xx="target:#hx-error swap:innerHTML"
 			class="inline"
 		>
 			<button
@@ -44,6 +47,9 @@ templ TodoRowFragment(d web.LayoutData, t TodoRow) {
 			hx-delete={ d.ProjectPath(t.ProjectSlug, "/todos/" + t.ID) }
 			hx-target={ "#todo-" + t.ID }
 			hx-swap="outerHTML"
+			hx-disable="find button, find input"
+			hx-status:4xx="target:#hx-error swap:innerHTML"
+			hx-status:5xx="target:#hx-error swap:innerHTML"
 			class="inline"
 		>
 			<button
