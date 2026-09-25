@@ -13,8 +13,6 @@ import (
 	"altalune.id/template/internal/user"
 )
 
-// scopeSpyProjects records the tenant scope ListByOrg is called with. The postgres store derives
-// its transaction from that scope, so an unscoped call fails at runtime with tenant: missing context.
 type scopeSpyProjects struct {
 	*fakeProjects
 	sawOrgID uuid.UUID

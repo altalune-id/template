@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strings"
 
 	"altalune.id/template/internal/apperror"
@@ -50,18 +51,41 @@ func (m *recordingMux) HandleFunc(pattern string, handler func(http.ResponseWrit
 // Middleware is the standard net/http middleware shape.
 type Middleware = func(http.Handler) http.Handler
 
+// SurfaceChains carries one middleware chain per surface.
+type SurfaceChains struct {
+	Console []Middleware
+	Control []Middleware
+	Data    []Middleware
+	Ingest  []Middleware
+	MCP     []Middleware
+	Probes  []Middleware
+}
+
+func wrap(chain []Middleware, h http.Handler) http.Handler {
+	for _, mw := range slices.Backward(chain) {
+		h = mw(h)
+	}
+	return h
+}
+
 // ServerOpts bundles the pieces NewServer assembles.
 type ServerOpts struct {
-	AppHandlers  []Register
-	APIHandler   http.Handler
-	RobotsCfg    *robotsConfig
-	BasePath     string
-	HealthOK     func() bool
-	Middlewares  []Middleware
-	Logger       *slog.Logger
-	SessionStore session.Store
-	Secret       []byte
-	Reporter     apperror.UnexpectedFunc
+	AppHandlers        []Register
+	APIHandler         http.Handler
+	DataHandler        http.Handler
+	IngestHandler      http.Handler
+	MCPHandler         http.Handler
+	MCPMetadataHandler http.Handler
+	MCPMetadataPath    string
+	MCPChallengeRoutes map[string]http.Handler
+	RobotsCfg          *robotsConfig
+	BasePath           string
+	HealthOK           func() bool
+	Chains             SurfaceChains
+	Logger             *slog.Logger
+	SessionStore       session.Store
+	Secret             []byte
+	Reporter           apperror.UnexpectedFunc
 }
 
 type robotsConfig = struct{ RobotsTxt string }
@@ -83,8 +107,8 @@ func NewServerWithRoutes(o ServerOpts) (handler http.Handler, routes []string) {
 
 	outer := http.NewServeMux()
 
-	outer.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok")) })
-	outer.HandleFunc("GET /readyz", func(w http.ResponseWriter, _ *http.Request) {
+	healthz := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok")) })
+	readyz := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		if o.HealthOK != nil && !o.HealthOK() {
 			http.Error(w, "unready", http.StatusServiceUnavailable)
 			return
@@ -92,28 +116,44 @@ func NewServerWithRoutes(o ServerOpts) (handler http.Handler, routes []string) {
 		_, _ = w.Write([]byte("ok"))
 	})
 
-	robots := robotsFromServerOpts(o)
-	outer.Handle("GET /robots.txt", robots)
+	outer.Handle("GET /healthz", wrap(o.Chains.Probes, healthz))
+	outer.Handle("GET /readyz", wrap(o.Chains.Probes, readyz))
+	outer.Handle("GET /robots.txt", wrap(o.Chains.Probes, robotsFromServerOpts(o)))
 
 	if o.APIHandler != nil {
-		outer.Handle(Path(o.BasePath, "/api")+"/", o.APIHandler)
+		outer.Handle(Path(o.BasePath, "/api")+"/", wrap(o.Chains.Control, o.APIHandler))
+	}
+	// NOTE: ServeMux resolves /api/v1/ over /api/ by specificity, whatever the registration order.
+	if o.DataHandler != nil {
+		outer.Handle(Path(o.BasePath, "/api")+"/v1/", wrap(o.Chains.Data, o.DataHandler))
+	}
+	if o.IngestHandler != nil {
+		outer.Handle(Path(o.BasePath, "/hooks")+"/", wrap(o.Chains.Ingest, o.IngestHandler))
+	}
+	// NOTE: RFC 9728 inserts the well-known URI between host and path, so the metadata document
+	// sits outside BasePath even when BasePath is set.
+	if o.MCPMetadataHandler != nil && o.MCPMetadataPath != "" {
+		outer.Handle("GET "+o.MCPMetadataPath, wrap(o.Chains.Probes, o.MCPMetadataHandler))
+	}
+	for pattern, h := range o.MCPChallengeRoutes {
+		outer.Handle(pattern, wrap(o.Chains.Probes, h))
+	}
+	if o.MCPHandler != nil {
+		outer.Handle(Path(o.BasePath, "/mcp"), wrap(o.Chains.MCP, o.MCPHandler))
+		outer.Handle(Path(o.BasePath, "/mcp")+"/", wrap(o.Chains.MCP, o.MCPHandler))
 	}
 
 	base := strings.TrimRight(o.BasePath, "/")
 	if base == "" {
-		outer.Handle("/", app)
-	} else {
-		outer.Handle(base+"/", http.StripPrefix(base, app))
-		outer.HandleFunc(base, func(w http.ResponseWriter, r *http.Request) {
-			http.Redirect(w, r, base+"/", http.StatusMovedPermanently)
-		})
+		outer.Handle("/", wrap(o.Chains.Console, app))
+		return outer, rec.patterns
 	}
-
-	handler = outer
-	for i := len(o.Middlewares) - 1; i >= 0; i-- {
-		handler = o.Middlewares[i](handler)
-	}
-	return handler, rec.patterns
+	outer.Handle("/", wrap(o.Chains.Console, http.NotFoundHandler()))
+	outer.Handle(base+"/", wrap(o.Chains.Console, http.StripPrefix(base, app)))
+	outer.HandleFunc(base, func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, base+"/", http.StatusMovedPermanently)
+	})
+	return outer, rec.patterns
 }
 
 func robotsFromServerOpts(o ServerOpts) http.Handler {

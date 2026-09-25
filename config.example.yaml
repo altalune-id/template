@@ -14,6 +14,8 @@
 api:
   # env: ALT_API_ENABLED
   enabled: true
+  # env: ALT_API_KEY_PREFIX
+  keyPrefix: key_
   openapi:
     # [secret] env: ALT_API_OPENAPI_BASIC_AUTH_PASSWORD
     basicAuthPassword: ""
@@ -24,6 +26,10 @@ api:
     # env: ALT_API_OPENAPI_REQUIRE_BASIC_AUTH
     requireBasicAuth: true
 
+blog:
+  # env: ALT_BLOG_PUBLIC_READS
+  publicReads: ""
+
 compliance:
   # env: ALT_COMPLIANCE_PRIVACY_URL
   privacyURL: ""
@@ -31,6 +37,10 @@ compliance:
   requireAcceptance: ""
   # env: ALT_COMPLIANCE_TERMS_URL
   termsURL: ""
+
+dataplane:
+  # env: ALT_DATAPLANE_ENABLED
+  enabled: true
 
 db:
   # [bootstrap] env: ALT_DB_ALLOW_BYPASS_RLS
@@ -149,6 +159,20 @@ mail:
     tls: true
     # env: ALT_MAIL_SMTP_USER
     user: ""
+
+mcp:
+  # env: ALT_MCP_APPS_UI
+  appsUI: ""
+  # env: ALT_MCP_AUDIENCE
+  audience: ""
+  # env: ALT_MCP_AUDIENCE_OVERRIDE
+  audienceOverride: ""
+  # env: ALT_MCP_CHALLENGE_PREFIX
+  challengePrefix: ""
+  # env: ALT_MCP_CHALLENGE_TOKEN
+  challengeToken: ""
+  # env: ALT_MCP_ENABLED
+  enabled: ""
 
 # [required, bootstrap] env: ALT_MODE
 mode: selfhosted

@@ -2,7 +2,6 @@ package web
 
 import (
 	"net/http"
-	"os"
 	"strings"
 
 	"altalune.id/template/internal/i18n"
@@ -11,24 +10,6 @@ import (
 
 	"github.com/a-h/templ"
 )
-
-// UIMode names the asset delivery strategy.
-type UIMode string
-
-const (
-	// UIModeCDN pulls Tailwind/Basecoat/HTMX from public CDNs.
-	UIModeCDN UIMode = "cdn"
-	// UIModeVendored serves them from the embedded /static/* mount.
-	UIModeVendored UIMode = "vendored"
-)
-
-// ResolveUIMode reads ALT_UI_MODE; "vendored" flips to vendored, otherwise CDN.
-func ResolveUIMode() UIMode {
-	if os.Getenv("ALT_UI_MODE") == string(UIModeVendored) {
-		return UIModeVendored
-	}
-	return UIModeCDN
-}
 
 // IsHTMXRequest reports whether r was issued by htmx rather than a browser navigation.
 func IsHTMXRequest(r *http.Request) bool { return r.Header.Get("HX-Request") == "true" }
@@ -73,7 +54,6 @@ type LayoutData struct {
 	BasePath      string
 	BaseURL       string
 	Version       string
-	UIMode        UIMode
 	Caps          capabilities.Capabilities
 	Principal     *session.Principal
 	Flash         *FlashMessage
@@ -94,8 +74,7 @@ type LayoutData struct {
 	RequestID string
 	// SECURITY: every <script> the layout renders must carry this, or the browser refuses to run it.
 	Nonce string
-	// SECURITY: gates the hx-csp nonce gate, which strips every htmx attribute when it cannot read
-	// the nonce back from an enforcing Content-Security-Policy response header.
+	// SECURITY: gates the hx-csp nonce gate, which strips every htmx attribute when it cannot read the nonce back.
 	CSPEnforced bool
 }
 
@@ -106,7 +85,7 @@ type LocaleOption struct {
 	Active bool
 }
 
-// Tr returns the translation for key. Args are key/value pairs.
+// Tr returns the translation for key, with args as key/value pairs.
 func (d LayoutData) Tr(key string, args ...any) string {
 	if d.Translator == nil {
 		return key
@@ -114,7 +93,7 @@ func (d LayoutData) Tr(key string, args ...any) string {
 	return d.Translator.T(key, args...)
 }
 
-// TrN returns the pluralized translation with Count auto-injected. Extra args are key/value pairs.
+// TrN returns the pluralized translation with Count auto-injected, with extra args as key/value pairs.
 func (d LayoutData) TrN(key string, n int, args ...any) string {
 	if d.Translator == nil {
 		return key
@@ -152,10 +131,10 @@ type FlashMessage struct {
 // Static returns a basePath-aware URL for a vendored asset (e.g. static/htmx.min.js).
 func (d LayoutData) Static(sub string) string { return Path(d.BasePath, "static/"+sub) }
 
-// Href joins BasePath with a subpath. Templates use this so mounts under /app work.
+// Href joins BasePath with a subpath.
 func (d LayoutData) Href(sub string) string { return Path(d.BasePath, sub) }
 
-// OrgPath returns sub under the active org, so the nested URL shape lives in one place.
+// OrgPath returns sub under the active org.
 func (d LayoutData) OrgPath(sub string) string {
 	if d.ActiveOrg == nil {
 		return d.Href("/orgs")

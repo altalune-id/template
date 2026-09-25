@@ -6,40 +6,61 @@ which is canonical.
 
 ## Surfaces
 
-A **surface** is one way the outside world reaches the app. There are three,
-and they all live in one process behind one HTTP listener.
+A **surface** is one way the outside world reaches the app, or one way the app reaches the
+outside world on a tenant's behalf. There are seven. Rules and mount contracts live in
+[`surfaces`](docs/surfaces/README.md); this table is the naming authority.
 
-| Term  | Where           | What it is                                                                                                                                                                                                                      |
-| ----- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `web` | `internal/web/` | Browser surface: templ-rendered HTML, HTMX partials, session-cookie auth (`webmw.Session`), i18n middleware, `/static/`.                                                                                                        |
-| `api` | `internal/api/` | Machine surface: Connect-RPC (gRPC-compatible + JSON), contracts in `api/*/v1/*.proto` generated into `gen/`, bearer-token auth (`internal/api/interceptor/auth.go` + `tokens.Verifier`), OpenAPI docs. Gated by `api.enabled`. |
-| `cli` | `internal/cli/` | Operator surface: Cobra tree, contract in [`docs/CLI_CONTRACT.md`](docs/CLI_CONTRACT.md). Some commands boot the full server graph locally (`ServerBootFn`); others talk to a remote over the API (`ClientBootFn`).             |
+| Term            | Where                                                              | Mount                | What it is                                                            |
+| --------------- | ------------------------------------------------------------------ | -------------------- | --------------------------------------------------------------------- |
+| `console`       | `internal/web/handlers/`                                           | `/`                  | Browser surface: templ + HTMX, session-cookie auth, i18n, `/static/`. |
+| `control plane` | `internal/controlplane/`                                           | `/api/`              | Connect-RPC, contracts in `api/*/v1/*.proto`. Gated by `api.enabled`. |
+| `data plane`    | `internal/dataplane/`                                              | `/api/v1/`           | REST for integrators, API-key auth. Gated by `dataplane.enabled`.     |
+| `ingest`        | `internal/ingest/` — seam only, no provider registered             | `/hooks/{provider}/` | Inbound third-party pushes, verified by provider signature.           |
+| `dispatch`      | `internal/platform/outbox/` — primitive only, no sender registered | — (egress)           | Outbound tenant deliveries, durable and retried.                      |
+| `cli`           | `internal/cli/`                                                    | — (dual-mode)        | Operator surface. Contract in [`cli`](docs/cli/README.md).            |
+| `mcp`           | `internal/mcp/` + `mcp/` (root)                                    | `/mcp`               | Tools for an MCP host. See [`mcp`](docs/mcp/README.md).               |
 
-NOTE: web and api are **not** peers. `web.NewServer` is also the outer mux — it
-owns `/healthz`, `/readyz` and `/robots.txt` unprefixed, mounts the API at
-`<basePath>/api/` (`internal/web/server.go:71-72`), and mounts the app itself
-(including `/static/`) under `basePath`. The api surface is nested inside the
-web one.
+NOTE: five of the seven speak HTTP and share one listener: console, control plane, data
+plane, ingest and mcp. `web.NewServer` owns the outer mux — it mounts `/healthz`, `/readyz`
+and `/robots.txt` unprefixed, each machine surface at its reserved prefix, and the console
+under `basePath`. Every mount gets its **own** middleware chain via `web.SurfaceChains`; there
+is no global chain. `dispatch` is egress and has no mount. The `cli` surface is not behind the
+listener at all: it either boots the graph in-process or speaks HTTP to a remote.
+
+NOTE: the dispatch surface sends to **tenants**. `internal/platform/notify` sends to
+**operators**. They are never the same code path.
+
+Four names S7 introduces, all detailed in [`mcp`](docs/mcp/README.md):
+
+| Term            | Where                                           | What it is                                                                                                               |
+| --------------- | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| tool            | `option (mcp.v1.tool)` on an RPC in `api/*/v1/` | A control-plane RPC republished for an MCP host. A tool and its RPC are one verb reached two ways — never two impls.     |
+| `mcp.audience`  | derived: `baseURL` + `basePath` + `/mcp`        | The RFC 8707 resource id the token verifier pins. `mcp.audienceOverride` accepts one that differs from the mount.        |
+| challenge token | `mcp.challengeToken`                            | Issued by authl (Resource servers → the MCP one → Start), never generated locally. Rotating it breaks the deployment.    |
+| Apps UI         | `mcp.appsUI`, `internal/mcp/ui/`                | Optional: publishes the UI resource and binds `_meta.ui`. Assets are digest-pinned; re-vendor with `make mcp-ui-vendor`. |
 
 ## Architecture
 
-| Term             | Where                                     | What it is                                                                                                                                         |
-| ---------------- | ----------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| domain module    | `internal/<name>/`                        | A bounded context with business logic. Shape fixed by [`docs/MODULE_TEMPLATE.md`](docs/MODULE_TEMPLATE.md); reference impl `internal/todo/`.       |
-| platform package | see note                                  | A cross-cutting primitive. Shape fixed by [`docs/PLATFORM_TEMPLATE.md`](docs/PLATFORM_TEMPLATE.md).                                                |
-| aggregate        | `internal/<name>/<name>.go`               | The root type plus `New(...)` enforcing creation invariants. Mutations are methods on it. No JSON tags.                                            |
-| `Store`          | `internal/<name>/store.go`                | The driven port — persistence interface the domain declares and adapters implement. Verbs only: `Save`, `ByID`, `List`, `Delete`.                  |
-| `Service`        | `internal/<name>/service.go`              | The driving port — application methods the surfaces call. Holds a `Store`, never SQL.                                                              |
-| workflow         | e.g. `internal/user/onboard.go`           | A stateful multi-step operation spanning more than one `Store` or an external system (`OnboardWorkflow`, `invite.SendWorkflow`).                   |
-| `Kernel`         | `internal/platform/platform.go`           | The platform bag handed to every service: Pool, PgConn, Log, Reporter, Sessions, Verifier, Mail, AltAuth, Tracer, Meter, Notify, Nano, Caps.       |
-| composition root | `internal/boot/`                          | The only place that knows the whole graph. `BootServer` wires Kernel + services + jobs + handlers onto one `worker.Supervisor`.                    |
-| `Capabilities`   | `internal/platform/capabilities/`         | Config-derived feature flags handed to templates so views never read config directly.                                                              |
-| awareness tag    | `awareness:"..."` on every `Config` field | Declares a field's operational role — `required`, `bootstrap`, `secret`, `mode:<x>`, or `-`. Drives `.env.example` generation and mode validation. |
+| Term                | Where                                                      | What it is                                                                                                                                                   |
+| ------------------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| domain module       | `internal/<name>/`                                         | A bounded context with business logic. Shape fixed by [`modules`](docs/modules/README.md); reference impl `internal/todo/`.                                  |
+| platform package    | see note                                                   | A cross-cutting primitive. Shape fixed by [`platform`](docs/platform/README.md).                                                                             |
+| aggregate           | `internal/<name>/<name>.go`                                | The root type plus `New(...)` enforcing creation invariants. Mutations are methods on it. No JSON tags.                                                      |
+| `Store`             | `internal/<name>/store.go`                                 | The driven port — persistence interface the domain declares and adapters implement. Verbs only: `Save`, `ByID`, `List`, `Delete`.                            |
+| `Service`           | `internal/<name>/service.go`                               | The driving port — application methods the surfaces call. Holds a `Store`, never SQL.                                                                        |
+| workflow            | e.g. `internal/user/onboard.go`                            | A stateful multi-step operation spanning more than one `Store` or an external system (`OnboardWorkflow`, `invite.SendWorkflow`).                             |
+| `Kernel`            | `internal/platform/platform.go:29`                         | The platform bag handed to every service: Pool, PgConn, Log, Reporter, Sessions, Sealer, Verifier, Mail, AltAuth, Tracer, Meter, Notify, Nano, Caps, Outbox. |
+| composition root    | `internal/boot/`                                           | The only place that knows the whole graph. `BootServer` wires Kernel + services + jobs + handlers onto one `worker.Supervisor`.                              |
+| `Capabilities`      | `internal/platform/capabilities/`                          | Config-derived feature flags handed to templates so views never read config directly.                                                                        |
+| awareness tag       | `awareness:"..."` on every `Config` field                  | Declares a field's operational role — `required`, `bootstrap`, `secret`, `mode:<x>`, or `-`. Drives `.env.example` generation and mode validation.           |
+| precondition        | `ifVersion int`, last param of a mutating `Service` method | Optimistic concurrency. `0` writes unconditionally; a non-zero value must match the stored row version or the write is refused.                              |
+| `StaleVersionError` | `internal/blog/errors.go:145`                              | The refusal a non-zero `ifVersion` returns when the row moved underneath the caller. Carries `Want` (asked for) and `Got` (stored).                          |
 
 NOTE: "platform package" is a **category, not a directory**. Some live under
-`internal/platform/<name>/` (`config`, `db`, `session`, `tenant`, `tokens`,
-`capabilities`, `notify`); others are exported roots (`worker/`, `scheduler/`,
-`logger/`, `telemetry/`, `mailer/`, `nanoid/`, `reqid/`, `authl/`).
+`internal/platform/<name>/` (`authn`, `capabilities`, `config`, `db`, `notify`,
+`outbox`, `sealer`, `session`, `surfaces`, `tenant`, `tokens`); others are exported
+roots (`worker/`, `scheduler/`, `logger/`, `telemetry/`, `mailer/`, `nanoid/`,
+`reqid/`, `authl/`, `httpclient/`, `mcp/`).
 
 ## Tenancy
 
@@ -60,6 +81,23 @@ Three DB credentials, three jobs:
 | `db.dsn`          | The app. Must be `NOBYPASSRLS`.                          |
 | `db.migrator.dsn` | Schema changes only; opened at boot, then closed.        |
 | `db.reader.dsn`   | Replica reads. Falls back to the writer pool when empty. |
+
+## Authorization
+
+Tenant scope answers _whose rows_. A scope answers _which verbs_. They are independent
+checks and both run.
+
+| Term          | Where                                     | What it is                                                                                                                      |
+| ------------- | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| scope         | `internal/platform/authn/scope.go`        | A permission string minted into an API key or JWT: `posts:read`, `posts:write`, `posts:admin`, `apikeys:read`, `apikeys:write`. |
+| scope catalog | `authn.AllScopes()` / `authn.Valid()`     | The closed set minting is gated on. A **wire contract** — additive only; renaming one invalidates keys in the field.            |
+| `ScopeTable`  | `internal/controlplane/scopes.go:12`      | Maps each RPC procedure to the scope it requires. Read by both the control plane interceptor and the MCP surface.               |
+| `Principal`   | `internal/platform/session/session.go:21` | The authenticated caller. A key principal keeps `UserID == uuid.Nil`, so it is never mistaken for a signed-in human.            |
+| `authn.Chain` | `internal/platform/authn/authn.go:48`     | Tries each `Authenticator` in order and returns the first `Principal`; otherwise `UnauthorizedError`.                           |
+
+NOTE: scopes do **not** imply one another — the check is `slices.Contains`. A key needing
+read plus delete holds both strings. Full catalog and per-surface enforcement:
+[`scopes`](docs/scopes/README.md).
 
 ## Identity and lifecycle
 

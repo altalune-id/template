@@ -8,9 +8,7 @@ import (
 	"testing"
 )
 
-// SECURITY: the gate lives in Deps.RequireOrg / Deps.RequireProject so a change reaches every
-// route. A handler that calls the primitives directly can resolve a project without the org
-// membership check above it, which is the bypass; this guard names any such file.
+// SECURITY: a handler calling the scope primitives directly resolves a project without the org membership check above it; this guard names any such file.
 func TestTenantGateIsNotCopiedIntoHandlers(t *testing.T) {
 	t.Parallel()
 

@@ -13,7 +13,6 @@ import (
 	"altalune.id/template/internal/web"
 )
 
-// stubRegister is a minimal Register that answers a fixed route.
 type stubRegister struct {
 	path, body string
 }
@@ -119,7 +118,7 @@ func TestServer_MiddlewareChain_OuterFirst(t *testing.T) {
 	handler := web.NewServer(web.ServerOpts{
 		BasePath:    "",
 		AppHandlers: []web.Register{stubRegister{path: "GET /x", body: "ok"}},
-		Middlewares: []web.Middleware{mw("outer"), mw("inner")},
+		Chains:      web.SurfaceChains{Console: []web.Middleware{mw("outer"), mw("inner")}},
 	})
 	ts := httptest.NewServer(handler)
 	defer ts.Close()

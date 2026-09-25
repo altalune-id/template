@@ -1,8 +1,6 @@
 package apperror
 
-// Error code registry: <DOM><NNN>, a three-letter domain mnemonic plus a per-domain sequence.
-// Codes are quoted by users off an error page, so they are append-only: never renumber, never reuse a retired code.
-// NNN 900-999 is reserved per domain for unexpected or internal failures.
+// Error code registry: <DOM><NNN>, a domain mnemonic plus a per-domain sequence. NOTE: append-only — never renumber, never reuse a retired code; 900-999 is reserved per domain for internal failures.
 const (
 	CodeTenantMissing   = "GEN001"
 	CodeUnauthenticated = "GEN002"
@@ -64,6 +62,7 @@ const (
 	CodePostInvalidSlug      = "BLG004"
 	CodePostInvalidBody      = "BLG005"
 	CodePostCategoryRequired = "BLG006"
+	CodePostStaleVersion     = "BLG007"
 
 	CodeCategoryNotFound      = "CAT001"
 	CodeCategoryAlreadyExists = "CAT002"
@@ -74,4 +73,6 @@ const (
 	CodeTagAlreadyExists = "TAG002"
 	CodeTagInvalidName   = "TAG003"
 	CodeTagInUse         = "TAG004"
+
+	CodeMCPUnauthenticated = "MCP001"
 )

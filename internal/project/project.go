@@ -71,8 +71,7 @@ func validateSlug(s string) error {
 	return nil
 }
 
-// NOTE: ServeMux prefers a literal pattern over the wildcard beside it, so a row slugged like a
-// literal segment under /orgs/{org}/projects/ would be unreachable.
+// NOTE: ServeMux prefers a literal pattern over the wildcard beside it, so a row slugged like a literal segment under /orgs/{org}/projects/ would be unreachable.
 func reservedSlug(s string) bool {
 	return s == "new"
 }

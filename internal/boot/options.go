@@ -1,6 +1,10 @@
 package boot
 
-import "log/slog"
+import (
+	"log/slog"
+
+	"altalune.id/template/internal/platform/outbox"
+)
 
 // Option tunes what BootServer wires and starts.
 type Option func(*options)
@@ -9,6 +13,8 @@ type options struct {
 	scheduler     bool
 	schedulerOnly bool
 	logger        *slog.Logger
+	deliverer     outbox.Deliverer
+	dispatch      outbox.WorkerOpts
 }
 
 func newOptions() *options { return &options{scheduler: true} }
@@ -21,3 +27,11 @@ func WithSchedulerOnly(on bool) Option { return func(o *options) { o.schedulerOn
 
 // WithLogger replaces the logger built from log config, so an embedder or test can observe boot and request output.
 func WithLogger(l *slog.Logger) Option { return func(o *options) { o.logger = l } }
+
+// WithDispatch supplies the outbound Deliverer surface S5 drains the outbox through, plus the dispatch worker's tuning.
+func WithDispatch(d outbox.Deliverer, opts outbox.WorkerOpts) Option {
+	return func(o *options) {
+		o.deliverer = d
+		o.dispatch = opts
+	}
+}

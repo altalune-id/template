@@ -4,6 +4,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 
@@ -39,6 +40,7 @@ type Config struct {
 	OIDC          OIDCConfig          `yaml:"oidc"          mapstructure:"oidc"          awareness:"required,mode:cloud"`
 	Tokens        tokens.Config       `yaml:"tokens"        mapstructure:"tokens"`
 	API           APIConfig           `yaml:"api"           mapstructure:"api"`
+	MCP           MCPConfig           `yaml:"mcp"           mapstructure:"mcp"`
 	Session       SessionConfig       `yaml:"session"       mapstructure:"session"`
 	Log           logger.Config       `yaml:"log"           mapstructure:"log"`
 	Telemetry     telemetry.Config    `yaml:"telemetry"     mapstructure:"telemetry"`
@@ -48,6 +50,19 @@ type Config struct {
 	I18n          I18nConfig          `yaml:"i18n"          mapstructure:"i18n"`
 	Compliance    ComplianceConfig    `yaml:"compliance"    mapstructure:"compliance"`
 	Security      SecurityConfig      `yaml:"security"      mapstructure:"security"`
+	Blog          BlogConfig          `yaml:"blog"          mapstructure:"blog"`
+	DataPlane     DataPlaneConfig     `yaml:"dataplane"     mapstructure:"dataplane"`
+}
+
+// BlogConfig gates the blog data plane's uncredentialed reads.
+type BlogConfig struct {
+	// SECURITY: when true an anonymous caller may read PUBLISHED posts over S3; drafts stay 404.
+	PublicReads bool `yaml:"publicReads" mapstructure:"publicReads" awareness:"-"`
+}
+
+// DataPlaneConfig gates S3, the REST data plane.
+type DataPlaneConfig struct {
+	Enabled bool `yaml:"enabled" mapstructure:"enabled" awareness:"-"`
 }
 
 // SecurityConfig holds the key that seals secrets at rest.
@@ -56,7 +71,7 @@ type SecurityConfig struct {
 	EncryptionKey string `yaml:"encryptionKey" mapstructure:"encryptionKey" awareness:"required,secret,bootstrap"`
 }
 
-// ComplianceConfig gates the T&C acceptance flow. When RequireAcceptance is true, signed-in users with no TermsAcceptedAt are redirected to /welcome until they check the box.
+// ComplianceConfig gates the T&C acceptance flow.
 type ComplianceConfig struct {
 	TermsURL          string `yaml:"termsURL"          mapstructure:"termsURL"          validate:"omitempty,url"`
 	PrivacyURL        string `yaml:"privacyURL"        mapstructure:"privacyURL"        validate:"omitempty,url"`
@@ -83,7 +98,7 @@ type HTTPConfig struct {
 type CSPConfig struct {
 	// SECURITY: disabling this lets markup injected into user content execute in a viewer's session.
 	Enabled bool `yaml:"enabled"    mapstructure:"enabled"    awareness:"required"`
-	// ReportOnly logs violations without blocking, for rolling a policy out against real traffic.
+	// ReportOnly logs violations without blocking.
 	ReportOnly bool   `yaml:"reportOnly" mapstructure:"reportOnly" awareness:"-"`
 	ReportURI  string `yaml:"reportURI"  mapstructure:"reportURI"  awareness:"-"                validate:"omitempty,uri"`
 }
@@ -109,7 +124,7 @@ type TenantConfig struct {
 	TenantScopedTables      []string           `yaml:"tenantScopedTables"      mapstructure:"tenantScopedTables"       awareness:"bootstrap"`
 }
 
-// SingletonOrgConfig seeds the first organization created during onboarding. Applies to both modes.
+// SingletonOrgConfig seeds the first organization created during onboarding.
 type SingletonOrgConfig struct {
 	Slug string `yaml:"slug" mapstructure:"slug" awareness:"bootstrap"`
 	Name string `yaml:"name" mapstructure:"name" awareness:"bootstrap"`
@@ -130,8 +145,21 @@ type OIDCConfig struct {
 
 // APIConfig configures the Connect-RPC API surface.
 type APIConfig struct {
-	Enabled bool          `yaml:"enabled" mapstructure:"enabled"`
-	OpenAPI OpenAPIConfig `yaml:"openapi" mapstructure:"openapi"`
+	Enabled   bool          `yaml:"enabled"   mapstructure:"enabled"`
+	KeyPrefix string        `yaml:"keyPrefix" mapstructure:"keyPrefix" awareness:"-"`
+	OpenAPI   OpenAPIConfig `yaml:"openapi"   mapstructure:"openapi"`
+}
+
+// MCPConfig configures the Model Context Protocol surface mounted at basePath+"/mcp".
+type MCPConfig struct {
+	Enabled          bool   `yaml:"enabled"          mapstructure:"enabled"          awareness:"-"`
+	Audience         string `yaml:"audience"         mapstructure:"audience"         awareness:"-"`
+	AudienceOverride bool   `yaml:"audienceOverride" mapstructure:"audienceOverride" awareness:"-"`
+	AppsUI           bool   `yaml:"appsUI"           mapstructure:"appsUI"           awareness:"-"`
+	// ChallengeToken is the host-control proof the authorization server issues; it is published, not secret.
+	ChallengeToken string `yaml:"challengeToken" mapstructure:"challengeToken" awareness:"-"`
+	// ChallengePrefix overrides the path the proof is served under; empty means mcp.DefaultChallengePrefix.
+	ChallengePrefix string `yaml:"challengePrefix" mapstructure:"challengePrefix" awareness:"-"`
 }
 
 // OpenAPIConfig configures the OpenAPI documentation endpoint.
@@ -176,7 +204,7 @@ type ResendConfig struct {
 	MaxAttempts int    `yaml:"maxAttempts" mapstructure:"maxAttempts" validate:"gte=0,lte=10"`
 }
 
-// SchedulerConfig tunes the periodic-job runner. Job cadences are baked into each domain's scheduler adapter, not exposed here.
+// SchedulerConfig tunes the periodic-job runner.
 type SchedulerConfig struct {
 	Enabled       bool                          `yaml:"enabled"       mapstructure:"enabled"       awareness:"bootstrap"`
 	Timezone      string                        `yaml:"timezone"      mapstructure:"timezone"      awareness:"bootstrap"`
@@ -251,9 +279,11 @@ var v10 = validator.New() //nolint:gochecknoglobals // validator instance is sta
 
 func validate() *validator.Validate { return v10 }
 
-// validateInvariants enforces conditional and cross-field rules that struct-tag validation can't express — each helper focuses on one rule and emits a specific, actionable error message.
 func validateInvariants(c *Config) error {
 	if err := validateGenesisPasswordNeedsEmail(c); err != nil {
+		return err
+	}
+	if err := validateMCP(c); err != nil {
 		return err
 	}
 	switch c.Mode {
@@ -363,4 +393,115 @@ func validateAutoMigrateNeedsMigrator(c *Config) error {
 		return errors.New("config: mode=cloud with autoMigrate and RLS enforced requires db.migrator.dsn — run scripts/db/provision.sh (APP=altempl DB_NAME=altempl) and set ALT_DB_MIGRATOR_DSN to the altempl_migrator credential, or disable autoMigrate and run migrations out-of-band")
 	}
 	return nil
+}
+
+// MCPIssuerRequiredError reports mcp.enabled with no tokens.issuer to verify MCP access tokens against.
+type MCPIssuerRequiredError struct{}
+
+func (*MCPIssuerRequiredError) Error() string {
+	return "config: mcp.enabled requires tokens.issuer — no issuer, no verifier, and every MCP call would be unauthenticated (set ALT_TOKENS_ISSUER, or unset ALT_MCP_ENABLED)"
+}
+
+// IsMCPIssuerRequiredError reports whether err is an *MCPIssuerRequiredError.
+func IsMCPIssuerRequiredError(err error) bool {
+	var target *MCPIssuerRequiredError
+	return errors.As(err, &target)
+}
+
+// MCPBaseURLRequiredError reports mcp.enabled with neither http.baseURL nor an explicit mcp.audience.
+type MCPBaseURLRequiredError struct{}
+
+func (*MCPBaseURLRequiredError) Error() string {
+	return "config: mcp.enabled requires http.baseURL to derive mcp.audience — without it the audience cannot name this deployment (set ALT_HTTP_BASE_URL, or set ALT_MCP_AUDIENCE with ALT_MCP_AUDIENCE_OVERRIDE=true)"
+}
+
+// IsMCPBaseURLRequiredError reports whether err is an *MCPBaseURLRequiredError.
+func IsMCPBaseURLRequiredError(err error) bool {
+	var target *MCPBaseURLRequiredError
+	return errors.As(err, &target)
+}
+
+// MCPAudienceInvalidError reports an mcp.audience that is not an absolute, fragment-free URL.
+type MCPAudienceInvalidError struct {
+	Audience string
+	Reason   string
+}
+
+func (e *MCPAudienceInvalidError) Error() string {
+	return fmt.Sprintf("config: mcp.audience %q is %s — a token audience must be an absolute, fragment-free URL identifying this MCP endpoint (set ALT_MCP_AUDIENCE)", e.Audience, e.Reason)
+}
+
+// IsMCPAudienceInvalidError reports whether err is an *MCPAudienceInvalidError.
+func IsMCPAudienceInvalidError(err error) bool {
+	var target *MCPAudienceInvalidError
+	return errors.As(err, &target)
+}
+
+// MCPAudienceMismatchError reports an mcp.audience that names something other than the mounted endpoint.
+type MCPAudienceMismatchError struct {
+	Audience string
+	Mounted  string
+}
+
+func (e *MCPAudienceMismatchError) Error() string {
+	// SECURITY: an audience naming another resource means tokens minted for that resource are accepted here.
+	return fmt.Sprintf("config: mcp.audience %q does not match the mounted endpoint %q — tokens minted for another resource would be accepted (set ALT_MCP_AUDIENCE=%s, or ALT_MCP_AUDIENCE_OVERRIDE=true when a proxy rewrites the public URL)", e.Audience, e.Mounted, e.Mounted)
+}
+
+// IsMCPAudienceMismatchError reports whether err is an *MCPAudienceMismatchError.
+func IsMCPAudienceMismatchError(err error) bool {
+	var target *MCPAudienceMismatchError
+	return errors.As(err, &target)
+}
+
+func validateMCP(c *Config) error {
+	if !c.MCP.Enabled {
+		return nil
+	}
+	if err := validateMCPNeedsTokensIssuer(c); err != nil {
+		return err
+	}
+	if err := validateMCPNeedsBaseURL(c); err != nil {
+		return err
+	}
+	return validateMCPAudience(c)
+}
+
+func validateMCPNeedsTokensIssuer(c *Config) error {
+	if c.Tokens.Issuer == "" {
+		return &MCPIssuerRequiredError{}
+	}
+	return nil
+}
+
+func validateMCPNeedsBaseURL(c *Config) error {
+	if c.MCP.Audience == "" && c.HTTP.BaseURL == "" {
+		return &MCPBaseURLRequiredError{}
+	}
+	return nil
+}
+
+func validateMCPAudience(c *Config) error {
+	mounted := defaultMCPAudience(c.HTTP.BaseURL, c.HTTP.BasePath)
+	if c.MCP.Audience == "" {
+		c.MCP.Audience = mounted
+	}
+	u, err := url.Parse(c.MCP.Audience)
+	if err != nil {
+		return &MCPAudienceInvalidError{Audience: c.MCP.Audience, Reason: "not a URL"}
+	}
+	if !u.IsAbs() {
+		return &MCPAudienceInvalidError{Audience: c.MCP.Audience, Reason: "not absolute"}
+	}
+	if strings.Contains(c.MCP.Audience, "#") {
+		return &MCPAudienceInvalidError{Audience: c.MCP.Audience, Reason: "carrying a fragment"}
+	}
+	if !c.MCP.AudienceOverride && c.MCP.Audience != mounted {
+		return &MCPAudienceMismatchError{Audience: c.MCP.Audience, Mounted: mounted}
+	}
+	return nil
+}
+
+func defaultMCPAudience(baseURL, basePath string) string {
+	return strings.TrimRight(baseURL, "/") + strings.TrimRight(basePath, "/") + "/mcp"
 }

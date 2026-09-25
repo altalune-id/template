@@ -15,8 +15,7 @@ import (
 	"altalune.id/template/internal/platform/tenant"
 )
 
-// NOTE: the definer wrappers are set-returning functions in FROM position, which go-jet cannot build;
-// the column aliases mirror what jet emits for a real table so pgOrgRow still maps.
+// NOTE: the definer wrappers are set-returning functions in FROM position, which go-jet cannot build; the column aliases mirror what jet emits for a real table so pgOrgRow still maps.
 const orgFuncSelect = `SELECT o.id AS "orgs.id", o.slug AS "orgs.slug", o.name AS "orgs.name", ` +
 	`o.created_by AS "orgs.created_by", o.created_at AS "orgs.created_at", o.system AS "orgs.system" FROM `
 

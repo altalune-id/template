@@ -99,7 +99,6 @@ func normalizeName(s string) (string, error) {
 	return n, nil
 }
 
-// defaultNameFromEmail derives a passable display name from the local part of an email address, for OIDC users whose IdP omits the `name` claim; falls back to the trimmed email if the local part is empty.
 func defaultNameFromEmail(email string) string {
 	e := strings.TrimSpace(email)
 	local, _, ok := strings.Cut(e, "@")

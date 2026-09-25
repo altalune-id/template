@@ -47,7 +47,7 @@ func (s *Service) Create(ctx context.Context, categoryID uuid.UUID, title, slug,
 		span.RecordError(err)
 		return nil, err
 	}
-	if saveErr := s.store.Save(ctx, p); saveErr != nil {
+	if saveErr := s.store.Save(ctx, p, 0); saveErr != nil {
 		span.RecordError(saveErr)
 		if IsAlreadyExistsError(saveErr) {
 			return nil, saveErr
@@ -59,8 +59,8 @@ func (s *Service) Create(ctx context.Context, categoryID uuid.UUID, title, slug,
 	return p, nil
 }
 
-// Update re-validates and replaces the editable fields of an existing post.
-func (s *Service) Update(ctx context.Context, id uuid.UUID, title, slug, body string, categoryID uuid.UUID) (*Post, error) {
+// Update re-validates and replaces the editable fields of an existing post, leaving its tag set alone; ifVersion 0 writes unconditionally.
+func (s *Service) Update(ctx context.Context, id uuid.UUID, title, slug, body string, categoryID uuid.UUID, ifVersion int) (*Post, error) {
 	ctx, span := tracer.Start(ctx, "blog.Update")
 	defer span.End()
 	span.SetAttributes(attribute.String("post.id", id.String()))
@@ -73,7 +73,25 @@ func (s *Service) Update(ctx context.Context, id uuid.UUID, title, slug, body st
 		span.RecordError(updErr)
 		return nil, updErr
 	}
-	return s.persist(ctx, span, "blog.Update", p)
+	return s.persist(ctx, span, "blog.Update", p, ifVersion)
+}
+
+// UpdateWithTags replaces the editable fields and the tag set in one conditional write; ifVersion 0 writes unconditionally.
+func (s *Service) UpdateWithTags(ctx context.Context, id uuid.UUID, title, slug, body string, categoryID uuid.UUID, tagIDs []uuid.UUID, ifVersion int) (*Post, error) {
+	ctx, span := tracer.Start(ctx, "blog.UpdateWithTags")
+	defer span.End()
+	span.SetAttributes(attribute.String("post.id", id.String()), attribute.Int("tag.count", len(tagIDs)))
+
+	p, err := s.load(ctx, span, "blog.UpdateWithTags", id)
+	if err != nil {
+		return nil, err
+	}
+	if updErr := p.Update(title, slug, body, categoryID); updErr != nil {
+		span.RecordError(updErr)
+		return nil, updErr
+	}
+	p.SetTags(tagIDs)
+	return s.persist(ctx, span, "blog.UpdateWithTags", p, ifVersion)
 }
 
 // SetTags replaces the post's tag set.
@@ -87,11 +105,11 @@ func (s *Service) SetTags(ctx context.Context, id uuid.UUID, tagIDs []uuid.UUID)
 		return nil, err
 	}
 	p.SetTags(tagIDs)
-	return s.persist(ctx, span, "blog.SetTags", p)
+	return s.persist(ctx, span, "blog.SetTags", p, 0)
 }
 
-// Publish marks the post published, recording the first publication only once.
-func (s *Service) Publish(ctx context.Context, id uuid.UUID) (*Post, error) {
+// Publish marks the post published, recording the first publication once; ifVersion 0 writes unconditionally.
+func (s *Service) Publish(ctx context.Context, id uuid.UUID, ifVersion int) (*Post, error) {
 	ctx, span := tracer.Start(ctx, "blog.Publish")
 	defer span.End()
 	span.SetAttributes(attribute.String("post.id", id.String()))
@@ -101,11 +119,11 @@ func (s *Service) Publish(ctx context.Context, id uuid.UUID) (*Post, error) {
 		return nil, err
 	}
 	p.Publish()
-	return s.persist(ctx, span, "blog.Publish", p)
+	return s.persist(ctx, span, "blog.Publish", p, ifVersion)
 }
 
-// Unpublish returns the post to draft, retaining its first publication time.
-func (s *Service) Unpublish(ctx context.Context, id uuid.UUID) (*Post, error) {
+// Unpublish returns the post to draft, retaining its first publication time; ifVersion 0 writes unconditionally.
+func (s *Service) Unpublish(ctx context.Context, id uuid.UUID, ifVersion int) (*Post, error) {
 	ctx, span := tracer.Start(ctx, "blog.Unpublish")
 	defer span.End()
 	span.SetAttributes(attribute.String("post.id", id.String()))
@@ -115,7 +133,7 @@ func (s *Service) Unpublish(ctx context.Context, id uuid.UUID) (*Post, error) {
 		return nil, err
 	}
 	p.Unpublish()
-	return s.persist(ctx, span, "blog.Unpublish", p)
+	return s.persist(ctx, span, "blog.Unpublish", p, ifVersion)
 }
 
 // List returns the posts in the caller's tenant scope, filtered by opts.
@@ -150,15 +168,41 @@ func (s *Service) ByID(ctx context.Context, id uuid.UUID) (*Post, error) {
 	return s.load(ctx, span, "blog.ByID", id)
 }
 
-// Delete removes a post together with its tag links.
-func (s *Service) Delete(ctx context.Context, id uuid.UUID) error {
+// BySlug returns one post in the caller's tenant scope by its slug.
+func (s *Service) BySlug(ctx context.Context, slug string) (*Post, error) {
+	ctx, span := tracer.Start(ctx, "blog.BySlug")
+	defer span.End()
+
+	tc, err := tenant.From(ctx)
+	if err != nil {
+		return nil, err
+	}
+	span.SetAttributes(
+		attribute.String("org_id", tc.OrgID.String()),
+		attribute.String("project_id", tc.ProjectID.String()),
+	)
+
+	p, err := s.store.BySlug(ctx, tc.ProjectID, slug)
+	if err != nil {
+		span.RecordError(err)
+		if IsNotFoundError(err) {
+			return nil, err
+		}
+		return nil, s.unexpected(ctx, "blog.BySlug: load", err,
+			"project_id", tc.ProjectID, "slug", slug)
+	}
+	return p, nil
+}
+
+// Delete removes a post together with its tag links; ifVersion 0 writes unconditionally.
+func (s *Service) Delete(ctx context.Context, id uuid.UUID, ifVersion int) error {
 	ctx, span := tracer.Start(ctx, "blog.Delete")
 	defer span.End()
 	span.SetAttributes(attribute.String("post.id", id.String()))
 
-	if err := s.store.Delete(ctx, id); err != nil {
+	if err := s.store.Delete(ctx, id, ifVersion); err != nil {
 		span.RecordError(err)
-		if IsNotFoundError(err) {
+		if IsNotFoundError(err) || IsStaleVersionError(err) {
 			return err
 		}
 		return s.unexpected(ctx, "blog.Delete: delete", err, "post_id", id)
@@ -214,13 +258,14 @@ func (s *Service) load(ctx context.Context, span trace.Span, op string, id uuid.
 	return p, nil
 }
 
-func (s *Service) persist(ctx context.Context, span trace.Span, op string, p *Post) (*Post, error) {
-	if err := s.store.Save(ctx, p); err != nil {
+func (s *Service) persist(ctx context.Context, span trace.Span, op string, p *Post, ifVersion int) (*Post, error) {
+	if err := s.store.Save(ctx, p, ifVersion); err != nil {
 		span.RecordError(err)
-		if IsAlreadyExistsError(err) || IsNotFoundError(err) {
+		if IsAlreadyExistsError(err) || IsNotFoundError(err) || IsStaleVersionError(err) {
 			return nil, err
 		}
 		return nil, s.unexpected(ctx, op+": save", err, "post_id", p.ID)
 	}
+	p.Version++
 	return p, nil
 }

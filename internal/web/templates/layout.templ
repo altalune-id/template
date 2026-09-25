@@ -20,22 +20,11 @@ templ Layout(d web.LayoutData) {
 				<!-- SECURITY: whitelists the one extension we load, so a stray script cannot register another. -->
 				<meta name="htmx-config" content="extensions:&#34;hx-csp&#34;"/>
 			}
-			if d.UIMode == web.UIModeVendored {
-				<link rel="stylesheet" href={ d.Static("basecoat.css") }/>
-				<link rel="stylesheet" href={ d.Static("app.css") }/>
-				<script src={ d.Static("htmx.min.js") } nonce={ d.Nonce } defer></script>
-				if d.CSPEnforced {
-					<script src={ d.Static("hx-csp.min.js") } nonce={ d.Nonce } defer></script>
-				}
-			} else {
-				@tailwindThemeBridge(d.Nonce)
-				<!-- CDN mode is for local dev only; the Tailwind CDN prints a production warning. For prod deploys, vendor assets via `scripts/ui-vendor.sh` and set ALT_UI_MODE=vendored. -->
-				<script src="https://cdn.tailwindcss.com" nonce={ d.Nonce }></script>
-				<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/basecoat-css@latest/dist/basecoat.min.css"/>
-				<script src="https://unpkg.com/htmx.org@4.0.0" nonce={ d.Nonce } defer></script>
-				if d.CSPEnforced {
-					<script src="https://unpkg.com/htmx.org@4.0.0/dist/ext/hx-csp.min.js" nonce={ d.Nonce } defer></script>
-				}
+			<link rel="stylesheet" href={ d.Static("basecoat.css") }/>
+			<link rel="stylesheet" href={ d.Static("app.css") }/>
+			<script src={ d.Static("htmx.min.js") } nonce={ d.Nonce } defer></script>
+			if d.CSPEnforced {
+				<script src={ d.Static("hx-csp.min.js") } nonce={ d.Nonce } defer></script>
 			}
 			@htmxRequestHooks(d.Nonce)
 			<!-- themes.css MUST load AFTER basecoat so our per-theme HSL variables win the cascade. -->
@@ -242,54 +231,6 @@ templ sidebarFooterUtils(d web.LayoutData) {
 		}
 		@themeApplyScript(d.Nonce)
 	</div>
-}
-
-templ tailwindThemeBridge(nonce string) {
-	<script nonce={ nonce }>
-	window.tailwind = window.tailwind || {};
-	window.tailwind.config = {
-		darkMode: 'class',
-		theme: {
-			extend: {
-				colors: {
-					background: 'hsl(var(--background) / <alpha-value>)',
-					foreground: 'hsl(var(--foreground) / <alpha-value>)',
-					card: {
-						DEFAULT: 'hsl(var(--card) / <alpha-value>)',
-						foreground: 'hsl(var(--card-foreground) / <alpha-value>)'
-					},
-					popover: {
-						DEFAULT: 'hsl(var(--popover) / <alpha-value>)',
-						foreground: 'hsl(var(--popover-foreground) / <alpha-value>)'
-					},
-					primary: {
-						DEFAULT: 'hsl(var(--primary) / <alpha-value>)',
-						foreground: 'hsl(var(--primary-foreground) / <alpha-value>)'
-					},
-					secondary: {
-						DEFAULT: 'hsl(var(--secondary) / <alpha-value>)',
-						foreground: 'hsl(var(--secondary-foreground) / <alpha-value>)'
-					},
-					muted: {
-						DEFAULT: 'hsl(var(--muted) / <alpha-value>)',
-						foreground: 'hsl(var(--muted-foreground) / <alpha-value>)'
-					},
-					accent: {
-						DEFAULT: 'hsl(var(--accent) / <alpha-value>)',
-						foreground: 'hsl(var(--accent-foreground) / <alpha-value>)'
-					},
-					destructive: {
-						DEFAULT: 'hsl(var(--destructive) / <alpha-value>)',
-						foreground: 'hsl(var(--destructive-foreground) / <alpha-value>)'
-					},
-					border: 'hsl(var(--border) / <alpha-value>)',
-					input: 'hsl(var(--input) / <alpha-value>)',
-					ring: 'hsl(var(--ring) / <alpha-value>)'
-				}
-			}
-		}
-	};
-	</script>
 }
 
 // SECURITY: this replaces per-element hx-on handlers so script-src needs no 'unsafe-eval'.
@@ -529,6 +470,9 @@ templ projectMenu(d web.LayoutData, slug string) {
 		</a>
 		<a href={ templ.SafeURL(d.ProjectPath(slug, "/tags")) } class={ orgItemClass(d.ActiveNav.ProjectKey == "tags") }>
 			@icons.Icon("tags", "h-4 w-4 shrink-0") <span>{ d.Tr("nav.tags") }</span>
+		</a>
+		<a href={ templ.SafeURL(d.ProjectPath(slug, "/apikeys")) } class={ orgItemClass(d.ActiveNav.ProjectKey == "apikeys") }>
+			@icons.Icon("key", "h-4 w-4 shrink-0") <span>{ d.Tr("nav.apikeys") }</span>
 		</a>
 	</nav>
 }

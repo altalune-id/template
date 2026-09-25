@@ -179,8 +179,7 @@ func (h *BlogHandler) PostTagDelete(w http.ResponseWriter, r *http.Request) {
 	h.writeTagList(w, sc, "", uuid.Nil, "")
 }
 
-// PostTagQuick creates the named tag when the project has none with that slug, then returns the
-// refreshed fragment — the post form's tag picker when the caller sent picker=1, else the tag list.
+// PostTagQuick creates the named tag when the project has none with that slug, then returns the refreshed fragment.
 func (h *BlogHandler) PostTagQuick(w http.ResponseWriter, r *http.Request) {
 	sc, ok := h.RequireProject(w, r)
 	if !ok {
@@ -211,7 +210,6 @@ func (h *BlogHandler) PostTagQuick(w http.ResponseWriter, r *http.Request) {
 	h.writeTagList(w, sc, "", uuid.Nil, "")
 }
 
-// requireCategory resolves the project scope from the path, then the category inside it.
 func (h *BlogHandler) requireCategory(w http.ResponseWriter, r *http.Request) (ProjectScope, *category.Category, bool) {
 	sc, ok := h.RequireProject(w, r)
 	if !ok {
@@ -235,7 +233,6 @@ func (h *BlogHandler) requireCategory(w http.ResponseWriter, r *http.Request) (P
 	return sc, c, true
 }
 
-// requireTag resolves the project scope from the path, then the tag inside it.
 func (h *BlogHandler) requireTag(w http.ResponseWriter, r *http.Request) (ProjectScope, *tag.Tag, bool) {
 	sc, ok := h.RequireProject(w, r)
 	if !ok {
@@ -256,8 +253,7 @@ func (h *BlogHandler) requireTag(w http.ResponseWriter, r *http.Request) (Projec
 		h.ErrorPage(w, sc.req, http.StatusInternalServerError, "Lookup failed", "Could not load that tag.", err)
 		return ProjectScope{}, nil, false
 	}
-	// SECURITY: tag.ByID does not compare the row's scope to the caller's, so a tag from another
-	// project would otherwise be renamable through a guessed id. Same 404 as a missing row.
+	// SECURITY: tag.ByID does not compare the row's scope to the caller's; same 404 as a missing row.
 	if t.OrgID != sc.org.ID || t.ProjectID != sc.project.ID {
 		h.ErrorPage(w, sc.req, http.StatusNotFound, "Not found", "That tag no longer exists.")
 		return ProjectScope{}, nil, false
@@ -325,9 +321,7 @@ func (h *BlogHandler) tagsView(sc ProjectScope, errKind string, inUseID uuid.UUI
 	}, nil
 }
 
-// fragmentBase returns a chromeless LayoutData that still names the org, so d.ProjectPath inside a
-// swapped-in fragment resolves to the same URLs the full page rendered. Deps.Base alone leaves
-// ActiveOrg nil, which collapses every project path to /orgs.
+// NOTE: Deps.Base alone leaves ActiveOrg nil, which collapses every project path to /orgs.
 func (h *BlogHandler) fragmentBase(sc ProjectScope) web.LayoutData {
 	d := h.Base(sc.req, "")
 	d.ActiveOrg = &web.ActiveOrg{ID: sc.org.ID.String(), Slug: sc.org.Slug, Name: sc.org.Name}
@@ -380,7 +374,6 @@ func tagErrorKind(err error) string {
 	}
 }
 
-// postDraft is the editable state of a post form, read from an existing row or from a rejected submit.
 type postDraft struct {
 	id         string
 	title      string
@@ -521,13 +514,9 @@ func (h *BlogHandler) PostPostUpdate(w http.ResponseWriter, r *http.Request) {
 		h.writePostForm(w, sc, d, templates.PostErrorTag, "")
 		return
 	}
-	if _, err := h.Posts.Update(sc.req.Context(), p.ID, d.title, d.slug, d.body, parseUUID(d.categoryID)); err != nil {
+	// NOTE: 0 means unconditional — the console keeps today's last-write-wins semantics.
+	if _, err := h.Posts.UpdateWithTags(sc.req.Context(), p.ID, d.title, d.slug, d.body, parseUUID(d.categoryID), tagIDs, 0); err != nil {
 		h.LogErr("web blog: update post", err)
-		h.writePostForm(w, sc, d, postErrorKind(err), ErrorRef(err))
-		return
-	}
-	if _, err := h.Posts.SetTags(sc.req.Context(), p.ID, tagIDs); err != nil {
-		h.LogErr("web blog: set post tags", err)
 		h.writePostForm(w, sc, d, postErrorKind(err), ErrorRef(err))
 		return
 	}
@@ -540,7 +529,7 @@ func (h *BlogHandler) PostPostPublish(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if _, err := h.Posts.Publish(sc.req.Context(), p.ID); err != nil {
+	if _, err := h.Posts.Publish(sc.req.Context(), p.ID, 0); err != nil {
 		h.LogErr("web blog: publish post", err)
 		h.writePostList(w, sc, postErrorKind(err), ErrorRef(err))
 		return
@@ -554,7 +543,7 @@ func (h *BlogHandler) PostPostUnpublish(w http.ResponseWriter, r *http.Request) 
 	if !ok {
 		return
 	}
-	if _, err := h.Posts.Unpublish(sc.req.Context(), p.ID); err != nil {
+	if _, err := h.Posts.Unpublish(sc.req.Context(), p.ID, 0); err != nil {
 		h.LogErr("web blog: unpublish post", err)
 		h.writePostList(w, sc, postErrorKind(err), ErrorRef(err))
 		return
@@ -568,7 +557,7 @@ func (h *BlogHandler) PostPostDelete(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := h.Posts.Delete(sc.req.Context(), p.ID); err != nil && !blog.IsNotFoundError(err) {
+	if err := h.Posts.Delete(sc.req.Context(), p.ID, 0); err != nil && !blog.IsNotFoundError(err) {
 		h.LogErr("web blog: delete post", err)
 		h.writePostList(w, sc, postErrorKind(err), ErrorRef(err))
 		return
@@ -576,8 +565,7 @@ func (h *BlogHandler) PostPostDelete(w http.ResponseWriter, r *http.Request) {
 	h.writePostList(w, sc, "", "")
 }
 
-// PostPostPreview renders the submitted markdown body as the preview fragment.
-// NOTE: a POST, not a GET — a body can exceed a URL's practical length and must stay out of access logs.
+// PostPostPreview renders the submitted markdown body as the preview fragment. NOTE: a POST, not a GET — a body can exceed a URL's practical length and must stay out of access logs.
 func (h *BlogHandler) PostPostPreview(w http.ResponseWriter, r *http.Request) {
 	sc, ok := h.RequireProject(w, r)
 	if !ok {
@@ -587,12 +575,10 @@ func (h *BlogHandler) PostPostPreview(w http.ResponseWriter, r *http.Request) {
 		h.ErrorPage(w, sc.req, http.StatusBadRequest, "Bad request", "Could not parse form body.")
 		return
 	}
-	// SECURITY: blog.RenderHTML runs goldmark without WithUnsafe, so raw HTML in the body is dropped
-	// rather than emitted — templ.Raw in the fragment is therefore safe.
+	// SECURITY: blog.RenderHTML runs goldmark without WithUnsafe, so raw HTML in the body is dropped.
 	Render(w, sc.req, templates.PostPreviewFragment(h.fragmentBase(sc), blog.RenderHTML(r.PostForm.Get("body"))))
 }
 
-// requirePost resolves the project scope from the path, then the post inside it.
 func (h *BlogHandler) requirePost(w http.ResponseWriter, r *http.Request) (ProjectScope, *blog.Post, bool) {
 	sc, ok := h.RequireProject(w, r)
 	if !ok {
@@ -613,8 +599,7 @@ func (h *BlogHandler) requirePost(w http.ResponseWriter, r *http.Request) (Proje
 		h.ErrorPage(w, sc.req, http.StatusInternalServerError, "Lookup failed", "Could not load that post.", err)
 		return ProjectScope{}, nil, false
 	}
-	// SECURITY: blog.ByID scopes to the org but not the project, so a sibling project's post would
-	// otherwise be editable through a guessed id. Same 404 as a missing row.
+	// SECURITY: blog.ByID scopes to the org but not the project; same 404 as a missing row.
 	if p.OrgID != sc.org.ID || p.ProjectID != sc.project.ID {
 		h.ErrorPage(w, sc.req, http.StatusNotFound, "Not found", "That post no longer exists.")
 		return ProjectScope{}, nil, false
@@ -622,7 +607,6 @@ func (h *BlogHandler) requirePost(w http.ResponseWriter, r *http.Request) (Proje
 	return sc, p, true
 }
 
-// resolveTagIDs maps the submitted tag ids onto the project's tags, reporting false when one is unknown.
 // NOTE: blog has no TagNotFoundError, so an unknown id would otherwise surface as a wrapped FK failure.
 func (h *BlogHandler) resolveTagIDs(sc ProjectScope, raw []string) ([]uuid.UUID, bool, error) {
 	items, err := h.Tags.List(sc.req.Context())
@@ -635,8 +619,7 @@ func (h *BlogHandler) resolveTagIDs(sc ProjectScope, raw []string) ([]uuid.UUID,
 	}
 	out := make([]uuid.UUID, 0, len(raw))
 	for _, s := range raw {
-		// NOTE: parseUUID yields uuid.Nil for a malformed id, which is never a stored tag id, so a
-		// malformed and an unknown id take the same form-error path.
+		// NOTE: parseUUID yields uuid.Nil for a malformed id, so malformed and unknown take the same form-error path.
 		id := parseUUID(strings.TrimSpace(s))
 		if _, found := known[id]; !found {
 			return nil, false, nil

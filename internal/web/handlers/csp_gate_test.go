@@ -8,9 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// The hx-csp nonce gate reads the page nonce back from an enforcing Content-Security-Policy
-// response header. Report-Only emits a different header name and disabled emits none, so in
-// both cases the extension would strip every htmx attribute off swapped-in fragments.
+// TestBase_CSPEnforced guards the hx-csp nonce gate: without an enforcing CSP header the extension strips every htmx attribute off swapped-in fragments.
 func TestBase_CSPEnforced(t *testing.T) {
 	for _, tc := range []struct {
 		name       string

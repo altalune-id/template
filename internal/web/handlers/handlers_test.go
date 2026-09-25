@@ -359,8 +359,7 @@ func TestProjectHandler_GetList_UnauthRedirect(t *testing.T) {
 	assert.Equal(t, http.StatusSeeOther, rec.Code)
 }
 
-// TestProjectHandler_GetNew_UnknownOrgIs404 replaces the old active-org precondition: the org now comes
-// from the path, so an org the caller does not belong to is indistinguishable from one that does not exist.
+// TestProjectHandler_GetNew_UnknownOrgIs404 replaces the old active-org precondition: the org now comes from the path, so an org the caller does not belong to is indistinguishable from one that does not exist.
 func TestProjectHandler_GetNew_UnknownOrgIs404(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
@@ -1123,7 +1122,6 @@ type atomicBoolWrapper struct {
 	b atomic.Bool
 }
 
-// seedOrg creates an org and its owner membership, so path-scoped handlers can resolve it.
 func (f *handlerFixture) seedOrg(t *testing.T, slug string, owner uuid.UUID) *org.Org {
 	t.Helper()
 	o, err := f.Orgs.Create(context.Background(), org.CreateRequest{Slug: slug, Name: strings.ToUpper(slug), OwnerID: owner})

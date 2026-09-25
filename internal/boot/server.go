@@ -13,12 +13,13 @@ import (
 	"sync/atomic"
 
 	"altalune.id/template/authl"
-	"altalune.id/template/internal/api"
+	"altalune.id/template/internal/apikey"
 	"altalune.id/template/internal/apperror"
 	"altalune.id/template/internal/auth"
 	"altalune.id/template/internal/blog"
 	"altalune.id/template/internal/blog/category"
 	"altalune.id/template/internal/blog/tag"
+	"altalune.id/template/internal/controlplane"
 	"altalune.id/template/internal/invite"
 	"altalune.id/template/internal/onboard"
 	"altalune.id/template/internal/org"
@@ -27,6 +28,7 @@ import (
 	"altalune.id/template/internal/platform/config"
 	"altalune.id/template/internal/platform/db"
 	"altalune.id/template/internal/platform/notify"
+	"altalune.id/template/internal/platform/outbox"
 	"altalune.id/template/internal/platform/session"
 	"altalune.id/template/internal/platform/tenant"
 	"altalune.id/template/internal/platform/tokens"
@@ -35,6 +37,7 @@ import (
 	"altalune.id/template/internal/user"
 	"altalune.id/template/logger"
 	"altalune.id/template/mailer"
+	rootmcp "altalune.id/template/mcp"
 	"altalune.id/template/nanoid"
 	"altalune.id/template/scheduler"
 	"altalune.id/template/telemetry"
@@ -59,6 +62,7 @@ type Server struct {
 	Posts      *blog.Service
 	Categories *category.Service
 	Tags       *tag.Service
+	APIKeys    *apikey.Service
 
 	Onboard *user.OnboardWorkflow
 
@@ -70,7 +74,8 @@ type Server struct {
 	Web http.Handler
 	// Routes are the app-route patterns the web handlers registered, taken from the mux.
 	Routes     []string
-	API        *api.Server
+	API        *controlplane.Server
+	MCP        *rootmcp.Server
 	Scheduler  *scheduler.Runner
 	Health     *db.HealthMonitor
 	Supervisor *worker.Supervisor
@@ -152,6 +157,7 @@ func BootServer(ctx context.Context, cfg *config.Config, opts ...Option) (*Serve
 		Notify:   sinks,
 		Nano:     nanoid.New,
 		Caps:     caps,
+		Outbox:   outbox.NewStore(cfg.DB, pool, pgConn),
 	}
 	for _, s := range sinks {
 		if c, ok := s.(io.Closer); ok {
@@ -191,6 +197,10 @@ func BootServer(ctx context.Context, cfg *config.Config, opts ...Option) (*Serve
 
 	sup := worker.New(log)
 	sup.Register(health)
+	sup.Register(svcs.APIKeyUsage)
+	if o.deliverer != nil {
+		sup.Register(outbox.NewWorker(kernel.Outbox, o.deliverer, orgEnumerator(cfg, kernel, log), log, o.dispatch))
+	}
 	if cfg.Telemetry.Metrics.Prometheus.Enabled {
 		sup.Register(telemetry.PrometheusWorker(cfg.Telemetry.Metrics.Prometheus, log))
 	}
@@ -224,6 +234,14 @@ func BootServer(ctx context.Context, cfg *config.Config, opts ...Option) (*Serve
 	}
 
 	apiSrv, apiHandler := buildAPIHandler(cfg, kernel, svcs)
+	dataHandler := buildDataHandler(cfg, caps, log, svcs)
+
+	mcpSurf, err := buildMCPSurface(ctx, cfg, log, svcs, apiSrv)
+	if err != nil {
+		_ = pool.Close()
+		_ = shutdownOTel(context.Background())
+		return nil, err
+	}
 
 	bundle, defaultLoc, err := buildI18nBundle(cfg)
 	if err != nil {
@@ -251,7 +269,7 @@ func BootServer(ctx context.Context, cfg *config.Config, opts ...Option) (*Serve
 
 	webHandler, webRoutes := buildWebHandler(cfg, kernel, caps, log, reporter, healthOK,
 		svcs.Auth, svcs.Users, svcs.Orgs, svcs.Projects, svcs.Todos, svcs.Invites, svcs.Onboards,
-		svcs.Posts, svcs.Categories, svcs.Tags, required, setup, apiHandler, bundle, defaultLoc)
+		svcs.Posts, svcs.Categories, svcs.Tags, svcs.APIKeys, required, setup, apiHandler, dataHandler, mcpSurf, bundle, defaultLoc)
 
 	httpHandler := webHandler
 	if o.schedulerOnly {
@@ -273,12 +291,14 @@ func BootServer(ctx context.Context, cfg *config.Config, opts ...Option) (*Serve
 		Posts:        svcs.Posts,
 		Categories:   svcs.Categories,
 		Tags:         svcs.Tags,
+		APIKeys:      svcs.APIKeys,
 		Onboarded:    onboarded,
 		Routes:       webRoutes,
 		SetupToken:   setup,
 		Onboard:      svcs.Onboard,
 		Web:          webHandler,
 		API:          apiSrv,
+		MCP:          mcpSurf.Server,
 		Scheduler:    runner,
 		Health:       health,
 		Supervisor:   sup,
@@ -321,8 +341,7 @@ func logSetupToken(cfg *config.Config, log *slog.Logger, token string) {
 			slog.String("url", url))
 		return
 	}
-	// SECURITY: the token rides in the url value because logger.Redact masks any attr key matching /token/,
-	// which would otherwise leave a fresh deployment unable to reach its own setup page.
+	// SECURITY: the token rides in the url value because logger.Redact masks any attr key matching /token/.
 	log.Info("boot: setup required — open this one-time onboarding URL",
 		slog.String("url", url+"?token="+token),
 	)

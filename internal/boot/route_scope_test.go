@@ -32,7 +32,6 @@ type probeRoute struct {
 	form   url.Values
 }
 
-// probeRoutes is every path the web stack registers, with a body for the mutating ones.
 // NOTE: asserted complete against the registered mux in TestRoutes_ListMatchesTheMux.
 func probeRoutes() []probeRoute {
 	const (
@@ -66,6 +65,7 @@ func probeRoutes() []probeRoute {
 		{http.MethodGet, pbase + "/posts/" + id + "/edit", nil},
 		{http.MethodGet, pbase + "/categories", nil},
 		{http.MethodGet, pbase + "/tags", nil},
+		{http.MethodGet, pbase + "/apikeys", nil},
 		{http.MethodGet, "/signup/complete", nil},
 		{http.MethodGet, "/onboard", nil},
 		{http.MethodGet, "/onboard/oidc", nil},
@@ -103,6 +103,8 @@ func probeRoutes() []probeRoute {
 		{http.MethodPost, pbase + "/tags/quick", url.Values{"name": {"Probe Quick Tag"}}},
 		{http.MethodPost, pbase + "/tags/" + id + "/rename", url.Values{"name": {"Renamed"}}},
 		{http.MethodPost, pbase + "/tags/" + id + "/delete", url.Values{}},
+		{http.MethodPost, pbase + "/apikeys", url.Values{"name": {"Probe Key"}, "scopes": {"posts:read"}}},
+		{http.MethodPost, pbase + "/apikeys/" + id + "/revoke", url.Values{}},
 		{http.MethodPost, "/onboarding", url.Values{"name": {"Probe"}}},
 		{http.MethodPost, "/welcome", url.Values{"name": {"Probe"}}},
 		{http.MethodPost, "/signup/complete", url.Values{
@@ -127,7 +129,7 @@ func newScopeProbeServer(t *testing.T, mode config.Mode) (*boot.Server, *bytes.B
 	cfg := newSmokeCfg(t)
 	cfg.Mode = mode
 	if mode == config.ModeCloud {
-		// NOTE: org creation and the signup flow are cloud-only capabilities — the paths every tenant-scope bug so far landed on.
+		// NOTE: org creation and the signup flow are cloud-only capabilities.
 		cfg.OIDC = config.OIDCConfig{
 			Issuer:       stubIssuer(t),
 			ClientID:     "probe-client",
@@ -137,8 +139,7 @@ func newScopeProbeServer(t *testing.T, mode config.Mode) (*boot.Server, *bytes.B
 	var logBuf bytes.Buffer
 	log := boot.WithLogger(slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelDebug})))
 
-	// NOTE: OnboardingGate 303s every route to /onboard until the deployment is onboarded, which would
-	// make the walk below prove nothing — so mark it onboarded on a first boot, then boot the server under test.
+	// NOTE: OnboardingGate 303s every route to /onboard until the deployment is onboarded, so mark it onboarded first.
 	seed, err := boot.BootServer(context.Background(), cfg, log)
 	require.NoError(t, err)
 	seedUser, err := seed.Users.Create(context.Background(), user.CreateRequest{
@@ -168,7 +169,6 @@ func probeCookie(t *testing.T, srv *boot.Server, p session.Principal) *http.Cook
 	}
 }
 
-// walkRoutes drives every route as p and fails on any 5xx or any tenant-scope error.
 func walkRoutes(t *testing.T, srv *boot.Server, logBuf *bytes.Buffer, p session.Principal, label string) {
 	t.Helper()
 	cookie := probeCookie(t, srv, p)
@@ -255,7 +255,6 @@ func TestRoutes_ListMatchesTheMux(t *testing.T) {
 
 var reUUID = regexp.MustCompile(`[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}`)
 
-// templatize rewrites a concrete probe path back into the mux pattern it exercises.
 func templatize(path string) string {
 	path = reUUID.ReplaceAllString(path, "{id}")
 	path = strings.Replace(path, "/orgs/probe-org", "/orgs/{org}", 1)
@@ -269,7 +268,6 @@ func templatize(path string) string {
 	return path
 }
 
-// stubIssuer serves the discovery document boot needs so cloud mode can be exercised without network access.
 func stubIssuer(t *testing.T) string {
 	t.Helper()
 	mux := http.NewServeMux()
@@ -357,8 +355,7 @@ func TestRoutes_InlineFormErrorCarriesTheRequestID(t *testing.T) {
 	require.Contains(t, body, rid, "the id in the page must be the one in the header and the log")
 }
 
-// TestOrgSwitcher_PinnedOrgIsNotAlsoOfferedToSwitchTo covers the Members/Invites pages, where the
-// switcher pins to the org in the URL rather than the session's active org.
+// TestOrgSwitcher_PinnedOrgIsNotAlsoOfferedToSwitchTo covers the pages that pin the switcher to the org in the URL.
 func TestOrgSwitcher_PinnedOrgIsNotAlsoOfferedToSwitchTo(t *testing.T) {
 	srv, _ := newScopeProbeServer(t, config.ModeCloud)
 
@@ -391,8 +388,6 @@ func TestOrgSwitcher_PinnedOrgIsNotAlsoOfferedToSwitchTo(t *testing.T) {
 	}
 }
 
-// orgSwitcherPanel returns the org switcher's dropdown body, excluding the pill label that always
-// names the current org, so a count inside it reflects the Current and Switch entries alone.
 func orgSwitcherPanel(t *testing.T, body string) string {
 	t.Helper()
 	i := strings.Index(body, "data-switcher")
@@ -406,8 +401,7 @@ func orgSwitcherPanel(t *testing.T, body string) string {
 	return rest[:end]
 }
 
-// TestMembersPage_RemoveButtonMatchesTheServiceGate keeps the rendered button in step with org.RemovalRefusal:
-// a button the post would refuse is a dead end, and a missing button hides a legitimate action.
+// TestMembersPage_RemoveButtonMatchesTheServiceGate keeps the rendered button in step with org.RemovalRefusal.
 func TestMembersPage_RemoveButtonMatchesTheServiceGate(t *testing.T) {
 	srv, _ := newScopeProbeServer(t, config.ModeCloud)
 	ctx := context.Background()
@@ -448,7 +442,6 @@ func TestMembersPage_RemoveButtonMatchesTheServiceGate(t *testing.T) {
 	require.NotContains(t, body, removeForm(viewer.ID), "the signed-in member must not offer to remove themselves")
 	require.Contains(t, body, removeForm(coOwner.ID), "an owner viewing the page may remove a co-owner")
 
-	// The rendered gate must agree with the service for every row on the page.
 	for _, u := range []uuid.UUID{viewer.ID, coOwner.ID, plain.ID} {
 		m, mErr := srv.Orgs.MembershipOf(scoped, o.ID, u)
 		require.NoError(t, mErr)

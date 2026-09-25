@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
+	"altalune.id/template/internal/apikey"
 	"altalune.id/template/internal/auth"
 	"altalune.id/template/internal/blog"
 	"altalune.id/template/internal/blog/category"
@@ -14,12 +16,16 @@ import (
 	"altalune.id/template/internal/org"
 	"altalune.id/template/internal/password"
 	"altalune.id/template/internal/platform"
+	"altalune.id/template/internal/platform/authn"
 	"altalune.id/template/internal/platform/capabilities"
 	"altalune.id/template/internal/platform/config"
+	"altalune.id/template/internal/platform/tokens"
 	"altalune.id/template/internal/project"
 	"altalune.id/template/internal/todo"
 	"altalune.id/template/internal/user"
 )
+
+const apiKeyUsageFlushInterval = 30 * time.Second
 
 // Services is every domain store, service and workflow the composition root wires.
 type Services struct {
@@ -42,6 +48,11 @@ type Services struct {
 	Tags       *tag.Service
 
 	Onboard *user.OnboardWorkflow
+
+	Authn       authn.Chain
+	KeyAuthn    *apikey.Authenticator
+	APIKeys     *apikey.Service
+	APIKeyUsage *apikey.UsageWorker
 }
 
 func buildServices(cfg *config.Config, k *platform.Kernel, caps capabilities.Capabilities) (*Services, error) {
@@ -151,6 +162,18 @@ func buildServices(cfg *config.Config, k *platform.Kernel, caps capabilities.Cap
 
 	auths := auth.NewService(local, oidcLogin, log, reporter.Unexpected)
 
+	keyStore := apikey.NewStore(cfg.DB, pool, pgConn)
+	keyUsage := apikey.NewUsageWorker(keyStore, apiKeyUsageFlushInterval, log)
+	keyScheme := apikey.NewScheme(cfg.API.KeyPrefix)
+	keyAuthn := apikey.NewAuthenticator(keyStore, keyUsage, keyScheme)
+	keys := apikey.NewService(keyStore, keyScheme, log, reporter.Unexpected)
+	// SECURITY: key first, so its shape gate rejects a non-key credential without a DB call.
+	tenantResolution := user.WithTenantResolution(
+		orgStoreForOnboard{store: orgStore},
+		projectStoreForOnboard{store: projectStore},
+	)
+	chain := authn.Chain{keyAuthn, user.NewAuthenticator(tokens.NewAuthenticator(k.Verifier), userStore, tenantResolution)}
+
 	return &Services{
 		UserStore:    userStore,
 		OrgStore:     orgStore,
@@ -169,6 +192,10 @@ func buildServices(cfg *config.Config, k *platform.Kernel, caps capabilities.Cap
 		Categories:   categories,
 		Tags:         tags,
 		Onboard:      onboardWorkflow,
+		Authn:        chain,
+		KeyAuthn:     keyAuthn,
+		APIKeys:      keys,
+		APIKeyUsage:  keyUsage,
 	}, nil
 }
 

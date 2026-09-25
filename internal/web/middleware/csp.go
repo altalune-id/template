@@ -25,9 +25,7 @@ type CSPOptions struct {
 	ExtraConnectSrc []string
 }
 
-// CSP sets a nonce-based Content-Security-Policy and exposes the nonce on the request context.
-// SECURITY: script-src carries a nonce rather than 'unsafe-inline', so markup injected into user content does not execute.
-// NOTE: style-src keeps 'unsafe-inline' because the layout sets style="" attributes, which a nonce cannot cover.
+// CSP sets a nonce-based Content-Security-Policy and exposes the nonce on the request context. SECURITY: script-src carries a nonce rather than 'unsafe-inline'; style-src keeps 'unsafe-inline' because the layout sets style="" attributes a nonce cannot cover.
 func CSP(opts CSPOptions) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

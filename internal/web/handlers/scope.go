@@ -27,8 +27,7 @@ type ProjectScope struct {
 	req       *http.Request
 }
 
-// RequireOrg resolves the org the path names, gating membership before anything reads its rows.
-// SECURITY: the slug is attacker-supplied and RLS cannot gate it, so this membership check is the only thing separating one org's members from another's rows.
+// RequireOrg resolves the org the path names, gating membership before anything reads its rows. SECURITY: the slug is attacker-supplied and RLS cannot gate it, so this membership check is the only thing separating one org's members from another's rows.
 func (d Deps) RequireOrg(w http.ResponseWriter, r *http.Request) (OrgScope, bool) {
 	p, sid, ok := d.LoadSession(r)
 	if !ok || p.UserID == uuid.Nil {
@@ -42,7 +41,7 @@ func (d Deps) RequireOrg(w http.ResponseWriter, r *http.Request) (OrgScope, bool
 	return OrgScope{principal: p, sid: sid, org: o, req: r}, true
 }
 
-// RequireProject resolves the org and project the path names, gating org membership before the project is looked up.
+// RequireProject resolves the org and project the path names, gating org membership before the project is looked up. SECURITY: membership is org-level by design, so this admits ANY project in an org the caller belongs to — see ../../../docs/multitenancy/request-scope.md.
 func (d Deps) RequireProject(w http.ResponseWriter, r *http.Request) (ProjectScope, bool) {
 	sc, ok := d.RequireOrg(w, r)
 	if !ok {

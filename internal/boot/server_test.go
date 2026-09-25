@@ -82,6 +82,9 @@ func TestBootServer_SQLite_WiresEveryService(t *testing.T) {
 	if srv.API == nil {
 		t.Fatal("API server must be wired")
 	}
+	if srv.API.APIKeys == nil {
+		t.Fatal("apikey.Service must be wired onto controlplane.Server, or apikey.v1.APIKeyService calls a nil service")
+	}
 }
 
 func TestBootServer_WebHandlerServesLogin(t *testing.T) {

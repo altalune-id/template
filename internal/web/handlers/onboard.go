@@ -415,8 +415,7 @@ func (h *OnboardHandler) defaultView() templates.OnboardView {
 	}
 }
 
-// localOnboardAllowed reports whether the /onboard form should offer the local admin path.
-// Selfhosted: always. Cloud: only when genesis.breakGlass=true is explicitly opted in.
+// SECURITY: cloud mode offers the local admin path only when genesis.breakGlass=true is explicitly opted in.
 func (h *OnboardHandler) localOnboardAllowed() bool {
 	if h.Cfg.Mode != config.ModeCloud {
 		return true

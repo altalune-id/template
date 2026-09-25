@@ -38,7 +38,6 @@ func (h *HomeHandler) GetRoot(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, web.Path(h.Cfg.HTTP.BasePath, h.landingPath(r, p)), http.StatusSeeOther) //nolint:gosec // G710: the slug comes from the store and passed org.validateSlug on creation
 }
 
-// landingPath prefers the last-used org, then any org the user belongs to, then the create form.
 func (h *HomeHandler) landingPath(r *http.Request, p session.Principal) string {
 	if h.Orgs == nil {
 		return "/orgs"
@@ -90,7 +89,6 @@ func (h *HomeHandler) GetOverview(w http.ResponseWriter, r *http.Request) {
 	Render(w, r, templates.DashboardLayout(h.LayoutForOrg(r, "Overview · "+o.Name, o.Slug, "overview"), view))
 }
 
-// remember records the org the path named as the session's last-used one, which only GetRoot reads.
 func (h *HomeHandler) remember(r *http.Request, sid string, p session.Principal, orgID uuid.UUID) {
 	if p.ActiveOrgID == orgID {
 		return
