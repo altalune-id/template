@@ -16,7 +16,6 @@ var (
 	reDoc   = regexp.MustCompile(`(?m)^\|\s*` + "`" + `([A-Z]{3}[0-9]{3})` + "`" + `\s*\|`)
 )
 
-// registry parses codes.go so the assertions below have a single source of truth that cannot drift.
 func registry(t *testing.T) map[string]string {
 	t.Helper()
 	b, err := os.ReadFile("codes.go")
@@ -59,8 +58,8 @@ func TestCodes_UnexpectedFailuresUseTheReservedBlock(t *testing.T) {
 }
 
 func TestCodes_EveryRefIsDocumented(t *testing.T) {
-	b, err := os.ReadFile("../../docs/ERROR_CODES.md")
-	require.NoError(t, err, "docs/ERROR_CODES.md is the table users are pointed at")
+	b, err := os.ReadFile("../../docs/errors/README.md")
+	require.NoError(t, err, "../../docs/errors/README.md is the table users are pointed at")
 	documented := map[string]bool{}
 	for _, m := range reDoc.FindAllStringSubmatch(string(b), -1) {
 		documented[m[1]] = true
@@ -73,13 +72,13 @@ func TestCodes_EveryRefIsDocumented(t *testing.T) {
 		}
 	}
 	sort.Strings(missing)
-	require.Empty(t, missing, "add these to docs/ERROR_CODES.md:\n%s", strings.Join(missing, "\n"))
+	require.Empty(t, missing, "add these to ../../docs/errors/README.md:\n%s", strings.Join(missing, "\n"))
 
 	refs := map[string]bool{}
 	for _, ref := range reg {
 		refs[ref] = true
 	}
 	for ref := range documented {
-		require.True(t, refs[ref], "docs/ERROR_CODES.md lists %s, which no code defines", ref)
+		require.True(t, refs[ref], "../../docs/errors/README.md lists %s, which no code defines", ref)
 	}
 }

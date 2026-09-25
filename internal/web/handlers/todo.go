@@ -31,7 +31,6 @@ func (h *TodoHandler) fragmentBase(sc ProjectScope) web.LayoutData {
 	return d
 }
 
-// remember stores the org and project as the session's last-used pair, which only /  reads.
 func (h *TodoHandler) remember(sc ProjectScope) {
 	if sc.principal.ActiveOrgID == sc.org.ID && sc.principal.ActiveProjectID == sc.project.ID {
 		return
@@ -165,7 +164,6 @@ func (h *TodoHandler) PostClear(w http.ResponseWriter, r *http.Request) {
 	h.writeListFragment(w, sc)
 }
 
-// requireTodo resolves the project scope from the path, then the todo inside it.
 func (h *TodoHandler) requireTodo(w http.ResponseWriter, r *http.Request) (ProjectScope, *todo.Todo, bool) {
 	sc, ok := h.RequireProject(w, r)
 	if !ok {

@@ -30,7 +30,6 @@ func NewService(store Store, caps capabilities.Capabilities, log *slog.Logger, u
 }
 
 // BootstrapSingleton idempotently ensures the fixed selfhosted org exists and carries an owner membership for ownerID.
-// The org and owner membership are stamped System=true so they cannot be renamed or removed.
 func (s *Service) BootstrapSingleton(ctx context.Context, slug, name string, ownerID uuid.UUID) (*Org, error) {
 	ctx, span := tracer.Start(ctx, "org.BootstrapSingleton")
 	defer span.End()
@@ -304,7 +303,6 @@ func (s *Service) ListMemberProfiles(ctx context.Context, orgID uuid.UUID) ([]*M
 	return ps, nil
 }
 
-// scopeForBootstrap returns ctx carrying a tenant scope and the org id that scope names, minting both when absent.
 func scopeForBootstrap(ctx context.Context, ownerID uuid.UUID) (context.Context, uuid.UUID) {
 	if tc, err := tenant.From(ctx); err == nil && tc.OrgID != uuid.Nil {
 		return ctx, tc.OrgID

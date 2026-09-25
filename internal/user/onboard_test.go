@@ -14,11 +14,12 @@ import (
 )
 
 type fakeOrgs struct {
-	mu          sync.Mutex
-	bySlug      map[string]*user.OrgRef
-	byID        map[uuid.UUID]*user.OrgRef
-	memberships map[[2]uuid.UUID]*user.MembershipRef
-	userToOrgs  map[uuid.UUID][]uuid.UUID
+	mu             sync.Mutex
+	bySlug         map[string]*user.OrgRef
+	byID           map[uuid.UUID]*user.OrgRef
+	memberships    map[[2]uuid.UUID]*user.MembershipRef
+	userToOrgs     map[uuid.UUID][]uuid.UUID
+	ListForUserErr error
 }
 
 func newFakeOrgs() *fakeOrgs {
@@ -52,6 +53,9 @@ func (f *fakeOrgs) Save(_ context.Context, o *user.OrgRef) error {
 func (f *fakeOrgs) ListForUser(_ context.Context, userID uuid.UUID) ([]*user.OrgRef, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.ListForUserErr != nil {
+		return nil, f.ListForUserErr
+	}
 	ids := f.userToOrgs[userID]
 	out := make([]*user.OrgRef, 0, len(ids))
 	for _, id := range ids {

@@ -15,9 +15,12 @@ type Capabilities struct {
 	OrgCreation        bool
 	InvitesEnabled     bool
 	APIEnabled         bool
+	DataPlaneEnabled   bool
+	MCPEnabled         bool
 	TokenAuth          bool
 	MailEnabled        bool
 	OnboardingRequired bool
+	PublicReads        bool
 	IsProduction       bool
 	BasePath           string
 	BaseURL            string
@@ -34,6 +37,9 @@ func From(c *config.Config) Capabilities {
 		OIDCButtonLabel:   c.OIDC.ButtonLabel,
 		OIDCButtonLogoURL: c.OIDC.ButtonLogoURL,
 		APIEnabled:        c.API.Enabled,
+		DataPlaneEnabled:  c.DataPlane.Enabled,
+		MCPEnabled:        c.MCP.Enabled,
+		PublicReads:       c.Blog.PublicReads,
 		TokenAuth:         c.Tokens.Issuer != "",
 		MailEnabled:       c.Mail.Driver != "" && (c.Mail.Driver != "console" || c.Mail.SMTP.Host != ""),
 		IsProduction:      c.Mode.IsProduction(),

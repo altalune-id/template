@@ -268,8 +268,6 @@ func sortedOrgIDs(t *testing.T, n int, extra ...uuid.UUID) []uuid.UUID {
 	return ids
 }
 
-// seedTiedOrgs inserts orgs and memberships sharing the fixture's byte-identical created_at, in
-// descending id order so heap order is the opposite of the order the wrapper must return.
 func (f *definerFixture) seedTiedOrgs(t *testing.T, ids []uuid.UUID) {
 	t.Helper()
 	for i := len(ids) - 1; i >= 0; i-- {

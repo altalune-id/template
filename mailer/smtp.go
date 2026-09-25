@@ -31,7 +31,6 @@ func (s *SMTP) Send(_ context.Context, m Message) error {
 	return smtp.SendMail(addr, auth, from, []string{m.To}, []byte(body))
 }
 
-// stripCRLF removes any CR or LF from v.
 func stripCRLF(v string) string {
 	if !strings.ContainsAny(v, "\r\n") {
 		return v

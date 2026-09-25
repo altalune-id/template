@@ -13,6 +13,7 @@ import (
 
 	apperrorv1 "altalune.id/template/gen/go/apperror/v1"
 	"altalune.id/template/internal/apperror"
+	"altalune.id/template/internal/platform/session"
 	"altalune.id/template/internal/platform/tenant"
 	"altalune.id/template/internal/testutil/fakes"
 	"altalune.id/template/internal/todo"
@@ -81,6 +82,49 @@ func TestService_Create(t *testing.T) {
 		}
 		if *unexCalls != 1 {
 			t.Errorf("unexpected() calls=%d want 1", *unexCalls)
+		}
+	})
+}
+
+func TestService_Create_SetsAuthorFromPrincipal(t *testing.T) {
+	t.Run("key principal sets Author.KeyID, not UserID", func(t *testing.T) {
+		svc, _ := newSvc(t, fakes.NewTodo())
+		ctx, _ := tenantCtx(t)
+		keyID := uuid.New()
+		ctx = session.PrincipalInto(ctx, session.Principal{KeyID: keyID, Source: session.SourceAPIKey})
+
+		got, err := svc.Create(ctx, "milk")
+		if err != nil {
+			t.Fatalf("Create err: %v", err)
+		}
+		if got.Author.KeyID != keyID {
+			t.Errorf("Author.KeyID=%v want %v", got.Author.KeyID, keyID)
+		}
+		if got.Author.UserID != uuid.Nil {
+			t.Errorf("Author.UserID=%v want nil for a key principal", got.Author.UserID)
+		}
+		if !got.Author.IsKey() {
+			t.Error("Author.IsKey() should be true for a key principal")
+		}
+	})
+	t.Run("user principal sets Author.UserID, not KeyID", func(t *testing.T) {
+		svc, _ := newSvc(t, fakes.NewTodo())
+		ctx, _ := tenantCtx(t)
+		userID := uuid.New()
+		ctx = session.PrincipalInto(ctx, session.Principal{UserID: userID, Source: session.SourceOIDC})
+
+		got, err := svc.Create(ctx, "milk")
+		if err != nil {
+			t.Fatalf("Create err: %v", err)
+		}
+		if got.Author.UserID != userID {
+			t.Errorf("Author.UserID=%v want %v", got.Author.UserID, userID)
+		}
+		if got.Author.KeyID != uuid.Nil {
+			t.Errorf("Author.KeyID=%v want nil for a user principal", got.Author.KeyID)
+		}
+		if got.Author.IsKey() {
+			t.Error("Author.IsKey() should be false for a user principal")
 		}
 	})
 }

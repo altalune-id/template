@@ -6,6 +6,8 @@ import (
 	"github.com/google/uuid"
 
 	"altalune.id/template/internal/auth"
+	"altalune.id/template/internal/blog"
+	"altalune.id/template/internal/dataplane"
 	"altalune.id/template/internal/invite"
 	"altalune.id/template/internal/org"
 	"altalune.id/template/internal/project"
@@ -190,4 +192,100 @@ func toUserInvites(invs []*invite.Invite) []*user.InviteRef {
 		})
 	}
 	return out
+}
+
+type orgServiceForDataplane struct{ svc *org.Service }
+
+func (s orgServiceForDataplane) BySlug(ctx context.Context, slug string) (dataplane.OrgRef, error) {
+	o, err := s.svc.BySlug(ctx, slug)
+	if err != nil {
+		return dataplane.OrgRef{}, err
+	}
+	return dataplane.OrgRef{ID: o.ID}, nil
+}
+
+type projectServiceForDataplane struct{ svc *project.Service }
+
+func (s projectServiceForDataplane) BySlug(ctx context.Context, orgID uuid.UUID, slug string) (dataplane.ProjectRef, error) {
+	p, err := s.svc.BySlug(ctx, orgID, slug)
+	if err != nil {
+		return dataplane.ProjectRef{}, err
+	}
+	return dataplane.ProjectRef{ID: p.ID}, nil
+}
+
+type blogServiceForDataplane struct{ svc *blog.Service }
+
+// NOTE: the tenant scope on ctx is authoritative here, so the ids the port passes are not re-supplied.
+func (s blogServiceForDataplane) BySlug(ctx context.Context, _ uuid.UUID, slug string) (dataplane.PostRef, error) {
+	p, err := s.svc.BySlug(ctx, slug)
+	if err != nil {
+		return dataplane.PostRef{}, err
+	}
+	return postRefOf(p), nil
+}
+
+func (s blogServiceForDataplane) List(ctx context.Context, _, _ uuid.UUID, opts dataplane.ListOpts) ([]dataplane.PostRef, error) {
+	var listOpts blog.ListOpts
+	if opts.PublishedOnly {
+		published := blog.StatusPublished
+		listOpts.Status = &published
+	}
+	posts, err := s.svc.List(ctx, listOpts)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]dataplane.PostRef, 0, len(posts))
+	for _, p := range posts {
+		out = append(out, postRefOf(p))
+	}
+	return out, nil
+}
+
+func (s blogServiceForDataplane) Create(ctx context.Context, categoryID uuid.UUID, title, slug, body string) (dataplane.PostRef, error) {
+	p, err := s.svc.Create(ctx, categoryID, title, slug, body)
+	if err != nil {
+		return dataplane.PostRef{}, err
+	}
+	return postRefOf(p), nil
+}
+
+func (s blogServiceForDataplane) Update(ctx context.Context, id uuid.UUID, title, slug, body string, categoryID uuid.UUID, ifVersion int) (dataplane.PostRef, error) {
+	p, err := s.svc.Update(ctx, id, title, slug, body, categoryID, ifVersion)
+	if err != nil {
+		return dataplane.PostRef{}, err
+	}
+	return postRefOf(p), nil
+}
+
+func (s blogServiceForDataplane) Delete(ctx context.Context, id uuid.UUID, ifVersion int) error {
+	return s.svc.Delete(ctx, id, ifVersion)
+}
+
+func (s blogServiceForDataplane) Publish(ctx context.Context, id uuid.UUID, ifVersion int) (dataplane.PostRef, error) {
+	p, err := s.svc.Publish(ctx, id, ifVersion)
+	if err != nil {
+		return dataplane.PostRef{}, err
+	}
+	return postRefOf(p), nil
+}
+
+func (s blogServiceForDataplane) Unpublish(ctx context.Context, id uuid.UUID, ifVersion int) (dataplane.PostRef, error) {
+	p, err := s.svc.Unpublish(ctx, id, ifVersion)
+	if err != nil {
+		return dataplane.PostRef{}, err
+	}
+	return postRefOf(p), nil
+}
+
+func postRefOf(p *blog.Post) dataplane.PostRef {
+	return dataplane.PostRef{
+		ID:         p.ID,
+		CategoryID: p.CategoryID,
+		Title:      p.Title,
+		Slug:       p.Slug,
+		Body:       p.BodyMarkdown,
+		Published:  p.Status == blog.StatusPublished,
+		Version:    p.Version,
+	}
 }

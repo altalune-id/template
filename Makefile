@@ -1,4 +1,4 @@
-.PHONY: help build test test-race test-cover vet fmt check generate templ-normalize templ-normalize-check ui-vendor buf migrate docker clean install-tools lint dev test-integration test-all
+.PHONY: help build test test-race test-cover vet fmt check generate templ-normalize templ-normalize-check buf migrate docker clean install-tools lint dev test-integration test-all comment-check comment-list ui-vendor ui-verify ui-vendor-check mcp-ui-vendor
 
 GO      ?= go
 BIN     := bin/altempl
@@ -63,8 +63,26 @@ templ-normalize: ## Pin generated templ FileName paths to repo-root-relative for
 templ-normalize-check: ## Fail if any generated templ FileName is not root-relative (CI check)
 	@bash scripts/templ-normalize.sh --check
 
-ui-vendor: ## Download pinned static assets into internal/web/static
-	@if [ -x scripts/ui-vendor.sh ]; then bash scripts/ui-vendor.sh; else echo "(scripts/ui-vendor.sh missing — skipping)"; fi
+UI_TEMPL_SRC := $(shell find internal/web -name '*.templ')
+
+internal/web/static/.vendor-stamp: scripts/ui-vendor.sh
+	bash scripts/ui-vendor.sh
+	@touch $@
+
+internal/web/static/app.css: internal/web/static/.vendor-stamp internal/web/static/app.tailwind.css $(UI_TEMPL_SRC)
+	bash scripts/ui-vendor.sh --css-only
+
+ui-vendor: internal/web/static/app.css ## Download the SHA-256 pinned static assets and compile app.css
+
+ui-verify: ## Check the committed static assets against their pinned digests (no network)
+	bash scripts/ui-vendor.sh --verify
+
+ui-vendor-check: ## Fail if the committed static assets drift from the pinned sources (CI check)
+	bash scripts/ui-vendor.sh --force
+	@git diff --exit-code -- internal/web/static/ || { echo "internal/web/static/ is stale — run \`make ui-vendor\` and commit the result."; exit 1; }
+
+mcp-ui-vendor: ## Re-download the SHA-256 pinned MCP Apps assets into internal/mcp/ui/assets and mcp/testdata
+	bash scripts/mcp-ui-vendor.sh
 
 config-examples: ## Regenerate .env.example and config.example.yaml from config struct tags
 	$(GO) tool gen-config-example
@@ -76,6 +94,12 @@ config-examples-check: ## Fail if .env.example or config.example.yaml is stale (
 
 tenant-tables: ## Regenerate schema/tenant_tables_gen.go from RLS migrations
 	$(GO) tool gen-tenant-tables
+
+comment-check: ## Fail on any comment that breaks the repo comment discipline (CI check)
+	$(GO) tool comment-lint .
+
+comment-list: ## List comment-discipline violations without failing
+	@$(GO) tool comment-lint -list .
 
 i18n-check: ## Verify every d.Tr key in .templ files has a translation in every locale (CI check)
 	$(GO) tool i18n-lint -check
@@ -127,7 +151,7 @@ lint: ## Run golangci-lint if present; else fall back to go vet
 	@if command -v golangci-lint >/dev/null 2>&1; then golangci-lint run ./...; \
 	else echo "golangci-lint not installed; running go vet instead"; $(GO) vet ./...; fi
 
-dev: build ## Rebuild + run the server (defaults to serve)
+dev: ui-vendor build ## Rebuild + run the server (defaults to serve)
 	$(BIN) serve
 
 clean: ## Remove build artifacts + generated code

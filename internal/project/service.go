@@ -69,7 +69,6 @@ func (s *Service) Create(ctx context.Context, orgID uuid.UUID, slug, name string
 }
 
 // BootstrapSystem idempotently ensures a project with the given slug exists inside orgID and is stamped System=true.
-// If the project exists but is not yet flagged system, it is promoted.
 func (s *Service) BootstrapSystem(ctx context.Context, orgID uuid.UUID, slug, name string) (*Project, error) {
 	ctx, span := tracer.Start(ctx, "project.BootstrapSystem",
 		trace.WithAttributes(

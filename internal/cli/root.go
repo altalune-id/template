@@ -29,6 +29,7 @@ const (
 func NewRootCmd(bootServer ServerBootFn, bootClient ClientBootFn) *cobra.Command {
 	var (
 		configPath    string
+		url           string
 		token         string
 		tokenFile     string
 		output        string
@@ -50,6 +51,7 @@ func NewRootCmd(bootServer ServerBootFn, bootClient ClientBootFn) *cobra.Command
 
 	p := root.PersistentFlags()
 	p.StringVarP(&configPath, "config", "c", "", "config file (yaml). Env (ALT_*) still applies; -c makes yaml explicit.")
+	p.StringVar(&url, "url", "", "base URL of the altempl instance to talk to (also: ALT_URL)")
 	p.StringVar(&token, "token", "", "bearer token (also: ALT_TOKEN)")
 	p.StringVar(&tokenFile, "token-file", "", "path to file containing the bearer token (0600) (also: ALT_TOKEN_FILE)")
 	p.StringVar(&output, "output", "", "output format: text|json|ndjson (also: ALT_OUTPUT)")
@@ -91,10 +93,12 @@ func NewRootCmd(bootServer ServerBootFn, bootClient ClientBootFn) *cobra.Command
 		newProjectCmd(bootServer, bootClient),
 		newInviteCmd(bootServer, bootClient),
 		newTodoCmd(bootServer, bootClient),
+		newBlogCmd(),
 		newVersionCmd(),
 		newHealthzCmd(),
 		newCompletionCmd(),
 	)
+	registerURLFlagCompletion(root)
 	return root
 }
 

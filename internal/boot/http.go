@@ -6,16 +6,20 @@ import (
 	stdlog "log"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strings"
 	"sync/atomic"
 
-	"altalune.id/template/internal/api"
+	"altalune.id/template/internal/apikey"
 	"altalune.id/template/internal/apperror"
 	"altalune.id/template/internal/auth"
 	"altalune.id/template/internal/blog"
 	"altalune.id/template/internal/blog/category"
 	blogtag "altalune.id/template/internal/blog/tag"
+	"altalune.id/template/internal/controlplane"
+	"altalune.id/template/internal/dataplane"
 	i18npkg "altalune.id/template/internal/i18n"
+	"altalune.id/template/internal/ingest"
 	"altalune.id/template/internal/invite"
 	"altalune.id/template/internal/onboard"
 	"altalune.id/template/internal/org"
@@ -31,13 +35,39 @@ import (
 	webmw "altalune.id/template/internal/web/middleware"
 )
 
-func buildAPIHandler(cfg *config.Config, k *platform.Kernel, s *Services) (*api.Server, http.Handler) {
-	srv := api.New(cfg, k, s.Auth, s.Users, s.Orgs, s.Projects, s.Todos, s.Invites, s.TodoStore, s.Posts, s.Categories, s.Tags)
+func buildAPIHandler(cfg *config.Config, k *platform.Kernel, s *Services) (*controlplane.Server, http.Handler) {
+	srv := controlplane.New(cfg, k, s.Auth, s.Users, s.Orgs, s.Projects, s.Todos, s.Invites, s.TodoStore, s.Posts, s.Categories, s.Tags)
+	srv.Authn = s.Authn
+	srv.KeyPrefix = s.KeyAuthn.Scheme().Prefix()
+	srv.APIKeys = s.APIKeys
 	if !cfg.API.Enabled {
 		return srv, nil
 	}
 	h := srv.Handler(cfg.HTTP.BasePath)
 	return srv, h
+}
+
+func buildDataHandler(cfg *config.Config, caps capabilities.Capabilities, slogger *slog.Logger, s *Services) http.Handler {
+	if !caps.DataPlaneEnabled {
+		return nil
+	}
+	return dataplane.NewHandler(dataplane.HandlerParams{
+		BasePath: web.Path(cfg.HTTP.BasePath, "/api") + "/v1",
+		Orgs:     orgServiceForDataplane{svc: s.Orgs},
+		Projects: projectServiceForDataplane{svc: s.Projects},
+		Posts:    blogServiceForDataplane{svc: s.Posts},
+		Authz:    s.KeyAuthn,
+		Caps:     caps,
+		Log:      slogger,
+	})
+}
+
+// NOTE: always mounted, so /hooks/ is reserved rather than reaching the console chain.
+func buildIngestHandler(cfg *config.Config, log *slog.Logger) http.Handler {
+	return ingest.NewHandler(ingest.HandlerParams{
+		BasePath: web.Path(cfg.HTTP.BasePath, "/hooks"),
+		Log:      log,
+	})
 }
 
 func buildWebHandler(
@@ -57,9 +87,12 @@ func buildWebHandler(
 	posts *blog.Service,
 	cats *category.Service,
 	tags *blogtag.Service,
+	apiKeys *apikey.Service,
 	required *atomic.Bool,
 	setupToken string,
 	apiHandler http.Handler,
+	dataHandler http.Handler,
+	mcp mcpSurface,
 	bundle *i18npkg.Bundle,
 	defaultLoc i18npkg.Locale,
 ) (handler http.Handler, routes []string) { //nolint:nonamedreturns // two return values differ in role
@@ -76,6 +109,7 @@ func buildWebHandler(
 	projectHandler := webhandlers.NewProjectHandler(deps, projects)
 	todoHandler := webhandlers.NewTodoHandler(deps, projects, todos)
 	blogHandler := webhandlers.NewBlogHandler(deps, projects, posts, cats, tags)
+	apiKeyHandler := webhandlers.NewAPIKeyHandler(deps, projects, apiKeys)
 	inviteHandler := webhandlers.NewInviteHandler(deps, orgs, invites)
 	localeHandler := webhandlers.NewLocaleHandler(deps, users)
 	welcomeHandler := webhandlers.NewWelcomeHandler(deps, users)
@@ -88,15 +122,41 @@ func buildWebHandler(
 		BasePath: cfg.HTTP.BasePath,
 		HealthOK: healthOK,
 		AppHandlers: []web.Register{
-			authHandler, onboardingHandler, onboardHandler, homeHandler, orgHandler, projectHandler, todoHandler, blogHandler, inviteHandler, localeHandler, welcomeHandler, signupHandler, legalHandler,
+			authHandler, onboardingHandler, onboardHandler, homeHandler, orgHandler, projectHandler, todoHandler, blogHandler, apiKeyHandler, inviteHandler, localeHandler, welcomeHandler, signupHandler, legalHandler,
 		},
-		APIHandler: apiHandler,
-		RobotsCfg:  &struct{ RobotsTxt string }{RobotsTxt: cfg.HTTP.RobotsTxt},
-		Middlewares: []web.Middleware{
-			webmw.RequestID,
-			webmw.CSP(cspOptions(web.ResolveUIMode(), cfg.HTTP.CSP)),
-			webmw.RequestLog(slogger),
-			webmw.OTel,
+		APIHandler:         apiHandler,
+		DataHandler:        dataHandler,
+		IngestHandler:      buildIngestHandler(cfg, slogger),
+		MCPHandler:         mcp.Handler,
+		MCPMetadataHandler: mcp.Metadata,
+		MCPMetadataPath:    mcp.MetadataPath,
+		MCPChallengeRoutes: mcp.ChallengeRoutes,
+		RobotsCfg:          &struct{ RobotsTxt string }{RobotsTxt: cfg.HTTP.RobotsTxt},
+		Chains:             surfaceChains(cfg, kernel, slogger, reporter, errTmpl, bundle, defaultLoc, required),
+	})
+}
+
+func surfaceChains(
+	cfg *config.Config,
+	kernel *platform.Kernel,
+	slogger *slog.Logger,
+	reporter *apperror.Reporter,
+	errTmpl webmw.ErrorTemplate,
+	bundle *i18npkg.Bundle,
+	defaultLoc i18npkg.Locale,
+	required *atomic.Bool,
+) web.SurfaceChains {
+	edge := []web.Middleware{
+		webmw.RequestID,
+		webmw.RequestLog(slogger),
+		webmw.OTel,
+	}
+	return web.SurfaceChains{
+		Probes: slices.Concat(edge, []web.Middleware{
+			webmw.Recover(reporter.Unexpected, nil),
+		}),
+		Console: slices.Concat(edge, []web.Middleware{
+			webmw.CSP(cspOptions(cfg.HTTP.CSP)),
 			webmw.Recover(reporter.Unexpected, errTmpl),
 			webmw.Session(webmw.SessionConfig{
 				Store:  kernel.Sessions,
@@ -110,8 +170,18 @@ func buildWebHandler(
 			}),
 			webhandlers.OnboardingGate(cfg.HTTP.BasePath, required),
 			webhandlers.WelcomeGate(cfg.HTTP.BasePath, cfg.Compliance.RequireAcceptance),
-		},
-	})
+		}),
+		Control: edge,
+		Data: slices.Concat(edge, []web.Middleware{
+			webmw.RecoverJSON(reporter.Unexpected),
+		}),
+		Ingest: slices.Concat(edge, []web.Middleware{
+			webmw.RecoverJSON(reporter.Unexpected),
+		}),
+		MCP: slices.Concat(edge, []web.Middleware{
+			webmw.RecoverJSON(reporter.Unexpected),
+		}),
+	}
 }
 
 func healthOnlyHandler(cfg *config.Config, healthOK func() bool) http.Handler {
@@ -157,15 +227,10 @@ func (w logSlogWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-func cspOptions(mode web.UIMode, cfg config.CSPConfig) webmw.CSPOptions {
-	opts := webmw.CSPOptions{
+func cspOptions(cfg config.CSPConfig) webmw.CSPOptions {
+	return webmw.CSPOptions{
 		Enabled:    cfg.Enabled,
 		ReportOnly: cfg.ReportOnly,
 		ReportURI:  cfg.ReportURI,
 	}
-	if mode == web.UIModeCDN {
-		opts.ExtraScriptSrc = []string{"https://cdn.tailwindcss.com", "https://unpkg.com", "https://cdn.jsdelivr.net"}
-		opts.ExtraStyleSrc = []string{"https://cdn.jsdelivr.net"}
-	}
-	return opts
 }

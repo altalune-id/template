@@ -16,7 +16,6 @@ import (
 	"altalune.id/template/internal/web/middleware"
 )
 
-// stubReporter counts calls and returns a fixed AppError.
 type stubReporter struct{ calls int }
 
 func (s *stubReporter) Unexpected(_ context.Context, message string, _ error, _ ...any) *apperror.AppError {

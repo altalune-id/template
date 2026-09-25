@@ -237,9 +237,7 @@ func (e *SystemProtectedError) ToAppError() *apperror.AppError {
 	)
 }
 
-// RemovalRefusal reports why actor may not remove the target membership, or nil when removal is allowed.
-// SECURITY: the service gate and the members view both consult this, so a hidden button and a refused post cannot drift apart.
-// Refusing self-removal is also what keeps an org from losing its last owner: only an owner can remove an owner.
+// RemovalRefusal reports why actor may not remove the target membership, or nil when removal is allowed. SECURITY: the service gate and the members view both consult this, so a hidden button and a refused post cannot drift apart.
 func RemovalRefusal(orgID, actor, target uuid.UUID, actorRole, targetRole Role, system bool) error {
 	switch {
 	case system:

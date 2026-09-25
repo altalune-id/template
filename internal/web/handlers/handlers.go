@@ -57,7 +57,6 @@ func (d Deps) Base(r *http.Request, title string) web.LayoutData {
 		BasePath:      d.Cfg.HTTP.BasePath,
 		BaseURL:       d.Cfg.HTTP.BaseURL,
 		Version:       version.Default(),
-		UIMode:        web.ResolveUIMode(),
 		Caps:          d.Caps,
 		Principal:     pp,
 		Locale:        loc,
@@ -78,8 +77,6 @@ func (d Deps) Layout(r *http.Request, title string, nav web.ActiveNav) web.Layou
 	return d.layout(r, title, nav, uuid.Nil, uuid.Nil)
 }
 
-// layout builds a LayoutData for a signed-in page. Both switchers are keyed on pinnedOrg — the org named
-// by the path — falling back to the session's last-used org only on pages that name none.
 // NOTE: the pinned org must be known before the list is split, or it lands in both Current and Switch.
 func (d Deps) layout(r *http.Request, title string, nav web.ActiveNav, pinnedOrg, pinnedProject uuid.UUID) web.LayoutData {
 	base := d.Base(r, title)
@@ -145,8 +142,7 @@ func (d Deps) LayoutForProject(r *http.Request, title, orgSlug string, proj *pro
 	return l
 }
 
-// ProjectScopeFor resolves the project named by slug inside orgID and returns a request scoped to both.
-// SECURITY: r must already carry the org scope from OrgScopeFor, whose membership check gates this lookup.
+// ProjectScopeFor resolves the project named by slug inside orgID and returns a request scoped to both. SECURITY: r must already carry the org scope from OrgScopeFor, whose membership check gates this lookup.
 func (d Deps) ProjectScopeFor(w http.ResponseWriter, r *http.Request, orgID uuid.UUID, slug string) (*project.Project, *http.Request, bool) {
 	proj, err := d.Projects.BySlug(r.Context(), orgID, slug)
 	if err != nil {
@@ -264,9 +260,7 @@ func ErrorRef(errs ...error) string {
 	return ""
 }
 
-// OrgScopeFor resolves the org named by slug and returns a context scoped to it, refusing callers who are not members.
-// SECURITY: the slug is attacker-supplied and the handler — not RLS — picks the org, so membership is verified here.
-// A non-member gets the same 404 as a bad slug so org slugs cannot be enumerated.
+// OrgScopeFor resolves the org named by slug and returns a context scoped to it, refusing callers who are not members. SECURITY: the handler, not RLS, picks the org, so membership is verified here and a non-member gets the same 404 as a bad slug.
 func (d Deps) OrgScopeFor(w http.ResponseWriter, r *http.Request, p session.Principal, slug string) (*org.Org, *http.Request, bool) {
 	o, err := d.Orgs.BySlug(r.Context(), slug)
 	if err != nil {

@@ -109,7 +109,6 @@ func (h *ProjectHandler) PostRename(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, ResolveReturnTo(h.Cfg.HTTP.BasePath, "/orgs/"+o.Slug+"/projects"), http.StatusSeeOther) //nolint:gosec // G710: destination sanitized via ResolveReturnTo → SanitizeReturnTo
 }
 
-// projectPath builds a path under an org's project, so the shape lives in one place.
 func projectPath(orgSlug, projectSlug, suffix string) string {
 	return "/orgs/" + orgSlug + "/projects/" + projectSlug + suffix
 }

@@ -5,9 +5,6 @@ import (
 	"altalune.id/template/internal/web/icons"
 )
 
-// easyMDEVersion pins the markdown editor loaded on the post form. Keep in step with scripts/ui-vendor.sh.
-const easyMDEVersion = "2.21.0"
-
 type PostTagOption struct {
 	ID       string
 	Name     string
@@ -106,13 +103,8 @@ templ postQuickTag(d web.LayoutData, v PostFormView) {
 }
 
 templ postEditorAssets(d web.LayoutData) {
-	if d.UIMode == web.UIModeVendored {
-		<link rel="stylesheet" href={ d.Static("easymde.min.css") }/>
-		<script src={ d.Static("easymde.min.js") } nonce={ d.Nonce }></script>
-	} else {
-		<link rel="stylesheet" href={ "https://cdn.jsdelivr.net/npm/easymde@" + easyMDEVersion + "/dist/easymde.min.css" }/>
-		<script src={ "https://cdn.jsdelivr.net/npm/easymde@" + easyMDEVersion + "/dist/easymde.min.js" } nonce={ d.Nonce }></script>
-	}
+	<link rel="stylesheet" href={ d.Static("easymde.min.css") }/>
+	<script src={ d.Static("easymde.min.js") } nonce={ d.Nonce }></script>
 	<style>
 		/* NOTE: EasyMDE labels its toolbar with Font Awesome classes; that font is not vendored, so show the aria-label instead. */
 		.editor-toolbar button > i { display: none; }

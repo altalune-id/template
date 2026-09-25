@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 
 	"altalune.id/template/internal/apperror"
+	"altalune.id/template/internal/platform/session"
 	"altalune.id/template/internal/platform/tenant"
 )
 
@@ -49,6 +50,7 @@ func (s *Service) Create(ctx context.Context, title string) (*Todo, error) {
 		span.RecordError(err)
 		return nil, err
 	}
+	t.Author = authorFromContext(ctx)
 	if err := s.store.Save(ctx, t); err != nil {
 		span.RecordError(err)
 		return nil, s.unexpected(ctx, "todo.Create: save", err,
@@ -186,6 +188,14 @@ func (s *Service) ClearDone(ctx context.Context) (int, error) {
 	}
 	span.SetAttributes(attribute.Int("todo.cleared", n))
 	return n, nil
+}
+
+func authorFromContext(ctx context.Context) Author {
+	p := session.PrincipalFrom(ctx)
+	if p.KeyID != uuid.Nil {
+		return AuthorKey(p.KeyID)
+	}
+	return AuthorUser(p.UserID)
 }
 
 // AutoCompleteStale marks every open todo older than olderThan as done in the caller's org scope.

@@ -5,7 +5,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"altalune.id/template/internal/api"
+	"altalune.id/template/internal/controlplane"
 	"altalune.id/template/internal/platform/config"
 )
 
@@ -35,7 +35,7 @@ func withPrincipal(cmd *cobra.Command, bootClient ClientBootFn, requireAuth bool
 }
 
 // TODO(future-tokens): fall back to a token minted from the session file once tokens.Issuer.Mint lands.
-func connFromCmd(cmd *cobra.Command, bootClient ClientBootFn) (*api.Client, error) {
+func connFromCmd(cmd *cobra.Command, bootClient ClientBootFn) (*controlplane.Client, error) {
 	cfg, err := withCfg(cmd)
 	if err != nil {
 		return nil, err

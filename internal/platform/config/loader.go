@@ -43,7 +43,7 @@ func Load(path string, opts ...Option) (*Config, error) {
 	if path != "" {
 		v.SetConfigFile(path)
 	} else {
-		v.SetConfigType("yaml")
+		// NOTE: no SetConfigType on purpose, or viper matches the extensionless compiled binary and parses it as YAML.
 		v.SetConfigName("altempl")
 		v.AddConfigPath(".")
 		if home, err := os.UserHomeDir(); err == nil {
@@ -101,8 +101,11 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("scheduler.shutdownGrace", "30s")
 
 	v.SetDefault("api.enabled", true)
+	v.SetDefault("api.keyPrefix", "key_")
 	v.SetDefault("api.openapi.enabled", true)
 	v.SetDefault("api.openapi.requireBasicAuth", true)
+
+	v.SetDefault("dataplane.enabled", true)
 
 	v.SetDefault("session.path", filepath.Join(homeDir(), ".altempl", "session.json"))
 

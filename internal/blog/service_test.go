@@ -98,7 +98,7 @@ func TestService_Create(t *testing.T) {
 
 	t.Run("store failure is reported as unexpected", func(t *testing.T) {
 		store := fakes.NewBlog()
-		store.SaveFn = func(context.Context, *blog.Post) error { return errors.New("boom") }
+		store.SaveFn = func(context.Context, *blog.Post, int) error { return errors.New("boom") }
 		svc, unex := newSvc(t, store)
 		ctx, _ := tenantCtx(t)
 
@@ -125,7 +125,7 @@ func TestService_Update(t *testing.T) {
 		created, err := svc.Create(ctx, cat, "Hello World", "", "body")
 		require.NoError(t, err)
 
-		got, err := svc.Update(ctx, created.ID, "Goodbye", "custom-slug", "new body", newCat)
+		got, err := svc.Update(ctx, created.ID, "Goodbye", "custom-slug", "new body", newCat, 0)
 		require.NoError(t, err)
 		assert.Equal(t, "Goodbye", got.Title)
 		assert.Equal(t, "custom-slug", got.Slug)
@@ -142,10 +142,10 @@ func TestService_Update(t *testing.T) {
 
 		created, err := svc.Create(ctx, cat, "Hello", "", "body")
 		require.NoError(t, err)
-		published, err := svc.Publish(ctx, created.ID)
+		published, err := svc.Publish(ctx, created.ID, 0)
 		require.NoError(t, err)
 
-		got, err := svc.Update(ctx, created.ID, "Edited", "", "body", cat)
+		got, err := svc.Update(ctx, created.ID, "Edited", "", "body", cat, 0)
 		require.NoError(t, err)
 		assert.Equal(t, blog.StatusPublished, got.Status)
 		require.NotNil(t, got.FirstPublishedAt)
@@ -157,7 +157,7 @@ func TestService_Update(t *testing.T) {
 		svc, unex := newSvc(t, fakes.NewBlog())
 		ctx, _ := tenantCtx(t)
 
-		_, err := svc.Update(ctx, uuid.New(), "Title", "", "body", uuid.New())
+		_, err := svc.Update(ctx, uuid.New(), "Title", "", "body", uuid.New(), 0)
 		assert.True(t, blog.IsNotFoundError(err), "got %T: %v", err, err)
 		assert.Zero(t, *unex)
 	})
@@ -169,7 +169,7 @@ func TestService_Update(t *testing.T) {
 		created, err := svc.Create(ctx, uuid.New(), "Hello", "", "body")
 		require.NoError(t, err)
 
-		_, err = svc.Update(ctx, created.ID, "  ", "", "body", uuid.New())
+		_, err = svc.Update(ctx, created.ID, "  ", "", "body", uuid.New(), 0)
 		assert.True(t, blog.IsInvalidTitleError(err), "got %T: %v", err, err)
 		assert.Zero(t, *unex)
 	})
@@ -184,7 +184,7 @@ func TestService_Update(t *testing.T) {
 		second, err := svc.Create(ctx, cat, "Free", "", "body")
 		require.NoError(t, err)
 
-		_, err = svc.Update(ctx, second.ID, "Free", first.Slug, "body", cat)
+		_, err = svc.Update(ctx, second.ID, "Free", first.Slug, "body", cat, 0)
 		assert.True(t, blog.IsAlreadyExistsError(err), "got %T: %v", err, err)
 		assert.Zero(t, *unex)
 	})
@@ -232,18 +232,18 @@ func TestService_PublishAndUnpublish(t *testing.T) {
 		require.NoError(t, err)
 		require.Nil(t, created.FirstPublishedAt)
 
-		first, err := svc.Publish(ctx, created.ID)
+		first, err := svc.Publish(ctx, created.ID, 0)
 		require.NoError(t, err)
 		assert.Equal(t, blog.StatusPublished, first.Status)
 		require.NotNil(t, first.FirstPublishedAt)
 		firstAt := *first.FirstPublishedAt
 
-		drafted, err := svc.Unpublish(ctx, created.ID)
+		drafted, err := svc.Unpublish(ctx, created.ID, 0)
 		require.NoError(t, err)
 		assert.Equal(t, blog.StatusDraft, drafted.Status)
 		require.NotNil(t, drafted.FirstPublishedAt, "unpublishing retains the first publication")
 
-		again, err := svc.Publish(ctx, created.ID)
+		again, err := svc.Publish(ctx, created.ID, 0)
 		require.NoError(t, err)
 		assert.True(t, again.FirstPublishedAt.Equal(firstAt), "republishing must not move FirstPublishedAt")
 		assert.Zero(t, *unex)
@@ -253,10 +253,10 @@ func TestService_PublishAndUnpublish(t *testing.T) {
 		svc, unex := newSvc(t, fakes.NewBlog())
 		ctx, _ := tenantCtx(t)
 
-		_, err := svc.Publish(ctx, uuid.New())
+		_, err := svc.Publish(ctx, uuid.New(), 0)
 		assert.True(t, blog.IsNotFoundError(err), "got %T: %v", err, err)
 
-		_, err = svc.Unpublish(ctx, uuid.New())
+		_, err = svc.Unpublish(ctx, uuid.New(), 0)
 		assert.True(t, blog.IsNotFoundError(err), "got %T: %v", err, err)
 		assert.Zero(t, *unex)
 	})
@@ -272,7 +272,7 @@ func TestService_ListAndByID(t *testing.T) {
 	require.NoError(t, err)
 	pub, err := svc.Create(ctx, cat, "Published", "", "body")
 	require.NoError(t, err)
-	_, err = svc.Publish(ctx, pub.ID)
+	_, err = svc.Publish(ctx, pub.ID, 0)
 	require.NoError(t, err)
 	elsewhere, err := svc.Create(ctx, otherCat, "Elsewhere", "", "body")
 	require.NoError(t, err)
@@ -328,7 +328,7 @@ func TestService_Delete(t *testing.T) {
 
 		created, err := svc.Create(ctx, uuid.New(), "Gone", "", "body")
 		require.NoError(t, err)
-		require.NoError(t, svc.Delete(ctx, created.ID))
+		require.NoError(t, svc.Delete(ctx, created.ID, 0))
 		assert.Zero(t, store.Len())
 		assert.Zero(t, *unex)
 	})
@@ -337,17 +337,17 @@ func TestService_Delete(t *testing.T) {
 		svc, unex := newSvc(t, fakes.NewBlog())
 		ctx, _ := tenantCtx(t)
 
-		assert.True(t, blog.IsNotFoundError(svc.Delete(ctx, uuid.New())), "unknown id must be NotFoundError")
+		assert.True(t, blog.IsNotFoundError(svc.Delete(ctx, uuid.New(), 0)), "unknown id must be NotFoundError")
 		assert.Zero(t, *unex)
 	})
 
 	t.Run("store failure is reported as unexpected", func(t *testing.T) {
 		store := fakes.NewBlog()
-		store.DeleteFn = func(context.Context, uuid.UUID) error { return errors.New("boom") }
+		store.DeleteFn = func(context.Context, uuid.UUID, int) error { return errors.New("boom") }
 		svc, unex := newSvc(t, store)
 		ctx, _ := tenantCtx(t)
 
-		require.Error(t, svc.Delete(ctx, uuid.New()))
+		require.Error(t, svc.Delete(ctx, uuid.New(), 0))
 		assert.Equal(t, 1, *unex)
 	})
 }
