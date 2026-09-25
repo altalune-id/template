@@ -31,6 +31,7 @@ func (s *SMTP) Send(_ context.Context, m Message) error {
 	return smtp.SendMail(addr, auth, from, []string{m.To}, []byte(body))
 }
 
+// SECURITY: strips CR/LF so a header value cannot inject headers or split the body (RFC 5322 2.2.3).
 func stripCRLF(v string) string {
 	if !strings.ContainsAny(v, "\r\n") {
 		return v
