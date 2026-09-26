@@ -3,9 +3,17 @@ package authn
 import "errors"
 
 // UnauthorizedError is the single opaque authentication failure.
-type UnauthorizedError struct{}
+type UnauthorizedError struct{ causes error }
 
 func (*UnauthorizedError) Error() string { return "authn: unauthorized" }
+
+// Causes returns why each authenticator refused, for server-side logging only. SECURITY: never reachable through Error or Unwrap, so a cause cannot reach a caller by being formatted or matched.
+func (e *UnauthorizedError) Causes() error {
+	if e == nil {
+		return nil
+	}
+	return e.causes
+}
 
 // IsUnauthorizedError reports whether err is an *UnauthorizedError.
 func IsUnauthorizedError(err error) bool {

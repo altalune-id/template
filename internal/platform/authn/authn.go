@@ -3,6 +3,7 @@ package authn
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 
@@ -46,13 +47,15 @@ type Chain []Authenticator
 
 // Authenticate implements Authenticator. SECURITY: every failure collapses to one opaque error, whatever the cause.
 func (c Chain) Authenticate(ctx context.Context, raw string) (session.Principal, error) {
+	var causes []error
 	for _, a := range c {
 		p, err := a.Authenticate(ctx, raw)
 		if err == nil {
 			return p, nil
 		}
+		causes = append(causes, err)
 	}
-	return session.Principal{}, &UnauthorizedError{}
+	return session.Principal{}, &UnauthorizedError{causes: errors.Join(causes...)}
 }
 
 // CredentialFrom extracts a raw credential from the request's Authorization or X-API-Key header.
