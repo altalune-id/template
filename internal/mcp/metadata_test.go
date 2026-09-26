@@ -244,7 +244,7 @@ func TestMetadataChallengeAndVerifierAudienceAgree(t *testing.T) {
 				t.Fatalf("document resource %q != mounted endpoint %q", doc.Resource, wantResource)
 			}
 
-			guarded := mcpinternal.Authenticate(nil, authn.Scheme{Prefix: "key_"}, surface.MetadataURL)(
+			guarded := mcpinternal.Authenticate(nil, authn.Scheme{Prefix: "key_"}, surface.MetadataURL, nil)(
 				http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }),
 			)
 			denied := httptest.NewRecorder()

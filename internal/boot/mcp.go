@@ -91,7 +91,7 @@ func buildMCPSurface(ctx context.Context, cfg *config.Config, log *slog.Logger, 
 		slog.Int("tools", len(registry.Names())),
 		slog.Bool("ui", cfg.MCP.AppsUI))
 
-	guard := mcpinternal.Authenticate(chain, s.KeyAuthn.Scheme().Authn(), surface.MetadataURL)
+	guard := mcpinternal.Authenticate(chain, s.KeyAuthn.Scheme().Authn(), surface.MetadataURL, log)
 	return mcpSurface{
 		Handler:         guard(srv.Handler()),
 		Metadata:        mcpinternal.MetadataHandler(surface.Resource, []string{cfg.Tokens.Issuer}, registeredScopes(registry)),

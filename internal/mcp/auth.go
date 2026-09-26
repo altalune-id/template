@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"slices"
 
@@ -30,12 +31,16 @@ func WWWAuthenticate(resourceMetadataURL string) string {
 }
 
 // Authenticate authenticates every request reaching the MCP surface and puts the resulting principal in the request context, where ScopesFromContext reads it. SECURITY: a nil authenticator, an absent credential, a credential of an unrecognized shape and a rejected credential all answer the same masked 401, so a caller learns nothing about why.
-func Authenticate(a authn.Authenticator, scheme authn.Scheme, resourceMetadataURL string) func(http.Handler) http.Handler {
+func Authenticate(a authn.Authenticator, scheme authn.Scheme, resourceMetadataURL string, log *slog.Logger) func(http.Handler) http.Handler {
 	challenge := WWWAuthenticate(resourceMetadataURL)
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			p, ok := principalFor(r, a, scheme)
+			p, reason, ok := principalFor(r, a, scheme)
 			if !ok {
+				// SECURITY: the reason is logged, never returned — the response stays one masked 401 whatever the cause.
+				if log != nil {
+					log.WarnContext(r.Context(), "mcp: credential rejected", slog.String("reason", reason))
+				}
 				writeUnauthorized(r.Context(), w, challenge)
 				return
 			}
@@ -58,19 +63,22 @@ func TranslateError(err error) error {
 	return err
 }
 
-func principalFor(r *http.Request, a authn.Authenticator, scheme authn.Scheme) (session.Principal, bool) {
+func principalFor(r *http.Request, a authn.Authenticator, scheme authn.Scheme) (session.Principal, string, bool) {
 	if a == nil {
-		return session.Principal{}, false
+		return session.Principal{}, "no authenticator configured", false
 	}
 	raw := authn.CredentialFrom(r)
-	if raw == "" || scheme.Looks(raw) == authn.ShapeUnknown {
-		return session.Principal{}, false
+	if raw == "" {
+		return session.Principal{}, "no bearer credential on the request", false
+	}
+	if scheme.Looks(raw) == authn.ShapeUnknown {
+		return session.Principal{}, "credential matched neither the api key prefix nor the JWT shape", false
 	}
 	p, err := a.Authenticate(r.Context(), raw)
 	if err != nil {
-		return session.Principal{}, false
+		return session.Principal{}, "every authenticator in the chain rejected the credential: " + err.Error(), false
 	}
-	return p, true
+	return p, "", true
 }
 
 func appError(code, message string, grpcCode codes.Code, cause error) error {
