@@ -4,10 +4,12 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"slices"
+	"strings"
 
 	"google.golang.org/grpc/codes"
 
@@ -76,9 +78,20 @@ func principalFor(r *http.Request, a authn.Authenticator, scheme authn.Scheme) (
 	}
 	p, err := a.Authenticate(r.Context(), raw)
 	if err != nil {
-		return session.Principal{}, "every authenticator in the chain rejected the credential: " + err.Error(), false
+		return session.Principal{}, "every authenticator rejected the credential: " + chainCauses(err), false
 	}
 	return p, "", true
+}
+
+// chainCauses renders why each authenticator refused. SECURITY: logged only — the caller still receives one masked 401.
+func chainCauses(err error) string {
+	var u *authn.UnauthorizedError
+	if errors.As(err, &u) {
+		if c := u.Causes(); c != nil {
+			return strings.ReplaceAll(c.Error(), "\n", "; ")
+		}
+	}
+	return err.Error()
 }
 
 func appError(code, message string, grpcCode codes.Code, cause error) error {
