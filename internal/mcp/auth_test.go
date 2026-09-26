@@ -251,7 +251,7 @@ func TestUnauthorizedCarriesTheRequestID(t *testing.T) {
 	const id = "mcp-unauthorized-probe-0123456789"
 
 	h := newHarness(t)
-	guarded := mcpinternal.Authenticate(nil, authScheme(), authMetadataURL)(h.mcp)
+	guarded := mcpinternal.Authenticate(nil, authScheme(), authMetadataURL, nil)(h.mcp)
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		guarded.ServeHTTP(w, r.WithContext(reqid.WithContext(r.Context(), id)))
 	}))
@@ -325,7 +325,7 @@ func TestNilAuthenticatorDeniesEveryRequest(t *testing.T) {
 	t.Parallel()
 
 	h := newHarness(t)
-	ts := httptest.NewServer(mcpinternal.Authenticate(nil, authScheme(), authMetadataURL)(h.mcp))
+	ts := httptest.NewServer(mcpinternal.Authenticate(nil, authScheme(), authMetadataURL, nil)(h.mcp))
 	t.Cleanup(ts.Close)
 
 	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, ts.URL, strings.NewReader("{}"))
@@ -450,7 +450,7 @@ func newHarness(t *testing.T) *harness {
 		tokens.NewAuthenticator(verifier),
 	}
 
-	h.ts = httptest.NewServer(mcpinternal.Authenticate(chain, authScheme(), authMetadataURL)(h.mcp))
+	h.ts = httptest.NewServer(mcpinternal.Authenticate(chain, authScheme(), authMetadataURL, nil)(h.mcp))
 	t.Cleanup(h.ts.Close)
 	return h
 }
