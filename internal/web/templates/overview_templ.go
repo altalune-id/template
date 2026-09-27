@@ -320,7 +320,7 @@ func copyScript(nonce string) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "\">\n\tdocument.addEventListener('click', function(e) {\n\t\tif (!e.target || !e.target.closest) return;\n\t\tvar btn = e.target.closest('[data-copy]');\n\t\tif (!btn) return;\n\t\tvar text = btn.getAttribute('data-copy');\n\t\tvar done = function() {\n\t\t\tbtn.textContent = btn.getAttribute('data-copied-label');\n\t\t\tbtn.setAttribute('aria-label', btn.getAttribute('data-copied-label'));\n\t\t\tsetTimeout(function() {\n\t\t\t\tbtn.textContent = text;\n\t\t\t\tbtn.setAttribute('aria-label', btn.getAttribute('data-copy-label'));\n\t\t\t}, 1500);\n\t\t};\n\t\tif (navigator.clipboard && navigator.clipboard.writeText) {\n\t\t\tnavigator.clipboard.writeText(text).then(done, function() {});\n\t\t\treturn;\n\t\t}\n\t\tvar ta = document.createElement('textarea');\n\t\tta.value = text;\n\t\tta.setAttribute('readonly', '');\n\t\tta.style.position = 'fixed';\n\t\tta.style.opacity = '0';\n\t\tdocument.body.appendChild(ta);\n\t\tta.select();\n\t\ttry { document.execCommand('copy'); done(); } catch (err) {}\n\t\tdocument.body.removeChild(ta);\n\t});\n\t</script>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "\">\n\tif (!window.altemplCopyBound) {\n\twindow.altemplCopyBound = true;\n\tdocument.addEventListener('click', function(e) {\n\t\tif (!e.target || !e.target.closest) return;\n\t\tvar btn = e.target.closest('[data-copy]');\n\t\tif (!btn) return;\n\t\tvar text = btn.getAttribute('data-copy');\n\t\tvar done = function() {\n\t\t\tbtn.textContent = btn.getAttribute('data-copied-label');\n\t\t\tbtn.setAttribute('aria-label', btn.getAttribute('data-copied-label'));\n\t\t\tsetTimeout(function() {\n\t\t\t\tbtn.textContent = text;\n\t\t\t\tbtn.setAttribute('aria-label', btn.getAttribute('data-copy-label'));\n\t\t\t}, 1500);\n\t\t};\n\t\tif (navigator.clipboard && navigator.clipboard.writeText) {\n\t\t\tnavigator.clipboard.writeText(text).then(done, function() {});\n\t\t\treturn;\n\t\t}\n\t\tvar ta = document.createElement('textarea');\n\t\tta.value = text;\n\t\tta.setAttribute('readonly', '');\n\t\tta.style.position = 'fixed';\n\t\tta.style.opacity = '0';\n\t\tdocument.body.appendChild(ta);\n\t\tta.select();\n\t\ttry { document.execCommand('copy'); done(); } catch (err) {}\n\t\tdocument.body.removeChild(ta);\n\t});\n\t}\n\t</script>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -356,7 +356,7 @@ func statCard(label, value string) templ.Component {
 		var templ_7745c5c3_Var18 string
 		templ_7745c5c3_Var18, templ_7745c5c3_Err = templ.JoinStringErrs(label)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/overview.templ`, Line: 103, Col: 91}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/overview.templ`, Line: 106, Col: 91}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var18))
 		if templ_7745c5c3_Err != nil {
@@ -369,7 +369,7 @@ func statCard(label, value string) templ.Component {
 		var templ_7745c5c3_Var19 string
 		templ_7745c5c3_Var19, templ_7745c5c3_Err = templ.JoinStringErrs(value)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/overview.templ`, Line: 104, Col: 64}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/overview.templ`, Line: 107, Col: 64}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var19))
 		if templ_7745c5c3_Err != nil {

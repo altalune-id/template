@@ -82,3 +82,15 @@ func TestFrom_APIEnabled(t *testing.T) {
 		t.Error("APIEnabled should reflect config")
 	}
 }
+
+func TestFrom_EphemeralEncryptionKey(t *testing.T) {
+	c := config.Defaults()
+	c.Security.EncryptionKey = ""
+	if !From(c).EphemeralEncryptionKey {
+		t.Error("an empty security.encryptionKey must report an ephemeral key")
+	}
+	c.Security.EncryptionKey = "configured"
+	if From(c).EphemeralEncryptionKey {
+		t.Error("a configured security.encryptionKey must not report an ephemeral key")
+	}
+}

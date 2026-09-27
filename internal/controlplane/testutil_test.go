@@ -72,7 +72,7 @@ func newHarnessOpts(t *testing.T, p session.Principal, verr error) *harness {
 	orgSvc := org.NewService(orgs, capabilities.Capabilities{OrgCreation: true}, log, reporter.Unexpected)
 	projectSvc := project.NewService(projs, log, reporter.Unexpected)
 	todoSvc := todo.NewService(tds, log, reporter.Unexpected)
-	postSvc := blog.NewService(posts, log, reporter.Unexpected)
+	postSvc := blog.NewService(posts, log, reporter.Unexpected, fakes.UnitOfWork, &fakes.Webhooks{})
 	catSvc := category.NewService(cats, log, reporter.Unexpected)
 	tagSvc := tag.NewService(tags, log, reporter.Unexpected)
 

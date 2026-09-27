@@ -25,7 +25,7 @@ outside world on a tenant's behalf. Seven, on two axes.
 | S2  | **control plane** | `internal/controlplane/`        | `/api/`              | ingress    | the CLI; integrator automation           |
 | S3  | **data plane**    | `internal/dataplane/`           | `/api/v1/`           | ingress    | an integrator's running product          |
 | S4  | **ingest**        | `internal/ingest/`              | `/hooks/{provider}/` | ingress    | a third party pushing to us              |
-| S5  | **dispatch**      | `internal/platform/outbox/`     | —                    | **egress** | us, calling the tenant                   |
+| S5  | **dispatch**      | `internal/webhook/` + outbox    | —                    | **egress** | us, calling the tenant                   |
 | S6  | **cli**           | `internal/cli/`                 | —                    | dual-mode  | an operator, at a terminal               |
 | S7  | **mcp**           | `internal/mcp/` + `mcp/` (root) | `/mcp`               | ingress    | an MCP host acting for a person or agent |
 
@@ -114,7 +114,7 @@ Each linked number opens the rule in full.
 | S2 control plane | shipped — gated by `api.enabled`                                                                 |
 | S3 data plane    | shipped — `internal/dataplane/`, blog example, gated by `dataplane.enabled`                      |
 | S4 ingest        | seam shipped — mount, chain and `Verifier`; no provider registered, so every delivery is refused |
-| S5 dispatch      | primitive shipped — `internal/platform/outbox/`; no sender registered                            |
+| S5 dispatch      | shipped — webhook endpoints, blog events; see [`webhooks`](../webhooks/README.md)                |
 | S6 cli           | shipped                                                                                          |
 | S7 mcp           | shipped — `internal/mcp/` + `mcp/`, gated by `mcp.enabled`; see [`mcp`](../mcp/README.md)        |
 

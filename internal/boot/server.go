@@ -11,8 +11,10 @@ import (
 	"net/http"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"altalune.id/template/authl"
+	"altalune.id/template/httpclient"
 	"altalune.id/template/internal/apikey"
 	"altalune.id/template/internal/apperror"
 	"altalune.id/template/internal/auth"
@@ -35,6 +37,7 @@ import (
 	"altalune.id/template/internal/project"
 	"altalune.id/template/internal/todo"
 	"altalune.id/template/internal/user"
+	"altalune.id/template/internal/webhook"
 	"altalune.id/template/logger"
 	"altalune.id/template/mailer"
 	rootmcp "altalune.id/template/mcp"
@@ -45,6 +48,11 @@ import (
 )
 
 const setupTokenLen = 32
+
+const (
+	webhookTimeout       = 10 * time.Second
+	webhookResponseLimit = 64 << 10
+)
 
 // Server is the fully-wired dependency graph produced by BootServer.
 type Server struct {
@@ -63,6 +71,7 @@ type Server struct {
 	Categories *category.Service
 	Tags       *tag.Service
 	APIKeys    *apikey.Service
+	Webhooks   *webhook.Service
 
 	Onboard *user.OnboardWorkflow
 
@@ -198,9 +207,7 @@ func BootServer(ctx context.Context, cfg *config.Config, opts ...Option) (*Serve
 	sup := worker.New(log)
 	sup.Register(health)
 	sup.Register(svcs.APIKeyUsage)
-	if o.deliverer != nil {
-		sup.Register(outbox.NewWorker(kernel.Outbox, o.deliverer, orgEnumerator(cfg, kernel, log), log, o.dispatch))
-	}
+	sup.Register(outbox.NewWorker(kernel.Outbox, dispatchDeliverer(o, kernel, svcs, log), orgEnumerator(cfg, kernel, log), log, o.dispatch))
 	if cfg.Telemetry.Metrics.Prometheus.Enabled {
 		sup.Register(telemetry.PrometheusWorker(cfg.Telemetry.Metrics.Prometheus, log))
 	}
@@ -269,7 +276,7 @@ func BootServer(ctx context.Context, cfg *config.Config, opts ...Option) (*Serve
 
 	webHandler, webRoutes := buildWebHandler(cfg, kernel, caps, log, reporter, healthOK,
 		svcs.Auth, svcs.Users, svcs.Orgs, svcs.Projects, svcs.Todos, svcs.Invites, svcs.Onboards,
-		svcs.Posts, svcs.Categories, svcs.Tags, svcs.APIKeys, required, setup, apiHandler, dataHandler, mcpSurf, bundle, defaultLoc)
+		svcs.Posts, svcs.Categories, svcs.Tags, svcs.APIKeys, svcs.Webhooks, required, setup, apiHandler, dataHandler, mcpSurf, bundle, defaultLoc)
 
 	httpHandler := webHandler
 	if o.schedulerOnly {
@@ -292,6 +299,7 @@ func BootServer(ctx context.Context, cfg *config.Config, opts ...Option) (*Serve
 		Categories:   svcs.Categories,
 		Tags:         svcs.Tags,
 		APIKeys:      svcs.APIKeys,
+		Webhooks:     svcs.Webhooks,
 		Onboarded:    onboarded,
 		Routes:       webRoutes,
 		SetupToken:   setup,
@@ -325,6 +333,22 @@ func (s *Server) Close() error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+func dispatchDeliverer(o *options, k *platform.Kernel, svcs *Services, log *slog.Logger) outbox.Deliverer {
+	if o.deliverer != nil {
+		return o.deliverer
+	}
+	return webhook.NewDeliverer(svcs.WebhookStore, k.Sealer, webhookHTTPClient(), log)
+}
+
+// SECURITY: otel stays off — otelhttp records url.full including the query string, and webhook.Deliver's own span is the only trace a delivery should leave.
+func webhookHTTPClient() *http.Client {
+	return httpclient.New(
+		httpclient.WithTimeout(webhookTimeout),
+		httpclient.WithResponseBodyLimit(webhookResponseLimit),
+		httpclient.WithOtel(false),
+	)
 }
 
 func setupToken(cfg *config.Config) (string, error) {

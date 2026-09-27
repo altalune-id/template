@@ -13,6 +13,8 @@ factory, one field on `Kernel`.
   `internal/platform/{tenant,capabilities,sealer,authn}`.
 - **Long-running loop** — `worker/` (the Supervisor), `scheduler/`, `outbox.Worker`,
   `db.HealthMonitor`.
+- **Public contract** — `internal/platform/events`: the webhook event catalog and payloads.
+  Stdlib and uuid only; additive within a version ([`webhooks`](../webhooks/README.md#versioning)).
 - **Not one** — domain logic (`internal/<name>/`), a surface
   (`internal/{web,controlplane,dataplane,ingest,mcp,cli}/`), a helper with one caller.
 
@@ -129,13 +131,13 @@ One port, several backends, one factory. Reference: `internal/platform/session/`
 
 ## Shape variants
 
-| Variant             | Reference impl                                  | What differs                                                           |
-| ------------------- | ----------------------------------------------- | ---------------------------------------------------------------------- |
-| Single primitive    | `reqid/`                                        | One file + test. No config, no I/O, no `Close`                         |
-| Adapter             | `internal/platform/session/`                    | `factory.go` + the contract suite above                                |
-| Worker              | `internal/platform/outbox/`, `db.HealthMonitor` | Implements `worker.Worker`; `sup.Register` in boot                     |
-| Worker owning jobs  | `scheduler/`                                    | Many `Job`s; per-job config under `config.SchedulerConfig.Jobs`        |
-| Producer + consumer | `internal/platform/outbox/`                     | Producer is a `Store` registered as a Closer; consumer is the `Worker` |
+| Variant             | Reference impl                                  | What differs                                                                                                   |
+| ------------------- | ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| Single primitive    | `reqid/`                                        | One file + test. No config, no I/O, no `Close`                                                                 |
+| Adapter             | `internal/platform/session/`                    | `factory.go` + the contract suite above                                                                        |
+| Worker              | `internal/platform/outbox/`, `db.HealthMonitor` | Implements `worker.Worker`; `sup.Register` in boot                                                             |
+| Worker owning jobs  | `scheduler/`                                    | Many `Job`s; per-job config under `config.SchedulerConfig.Jobs`                                                |
+| Producer + consumer | `internal/platform/outbox/`                     | Producer is a `Store` registered as a Closer; consumer is the `Worker`, delivering through `webhook.Deliverer` |
 
 ## Boot — the Kernel
 

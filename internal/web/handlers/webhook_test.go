@@ -1,0 +1,523 @@
+package handlers_test
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"io"
+	"log"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"regexp"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"altalune.id/template/internal/apperror"
+	"altalune.id/template/internal/platform/events"
+	"altalune.id/template/internal/platform/outbox"
+	"altalune.id/template/internal/platform/sealer"
+	"altalune.id/template/internal/platform/session"
+	"altalune.id/template/internal/project"
+	"altalune.id/template/internal/testutil/fakes"
+	"altalune.id/template/internal/web"
+	"altalune.id/template/internal/web/handlers"
+	"altalune.id/template/internal/web/templates"
+	"altalune.id/template/internal/webhook"
+)
+
+const webhookBase = "/orgs/acme/projects/alpha/webhooks"
+
+type slugOf struct{}
+
+func (slugOf) SlugOf(context.Context, uuid.UUID) (string, error) { return "alpha", nil }
+
+type webhookFixture struct {
+	*handlerFixture
+	Hooks  *webhook.Service
+	Store  *fakes.WebhookStore
+	Sealer sealer.Sealer
+	Outbox *fakes.Outbox
+	Mux    *http.ServeMux
+
+	uid     uuid.UUID
+	org     uuid.UUID
+	project *project.Project
+}
+
+func newWebhookFixture(t *testing.T, ephemeral bool) *webhookFixture {
+	t.Helper()
+	f := newFixture(t)
+	f.Deps.Caps.EphemeralEncryptionKey = ephemeral
+
+	key, err := sealer.GenerateKey()
+	require.NoError(t, err)
+	sl, err := sealer.New(key)
+	require.NoError(t, err)
+	ob := fakes.NewOutbox()
+	store := fakes.NewWebhookStore()
+	hooks := webhook.NewService(store, discardLogger(), passthroughUnexpected(), sl, ob, slugOf{})
+
+	uid := uuid.New()
+	o := f.seedOrg(t, "acme", uid)
+	proj, err := f.Projects.Create(setTenant(context.Background(), o.ID, uid), o.ID, "alpha", "Alpha")
+	require.NoError(t, err)
+
+	mux := http.NewServeMux()
+	handlers.NewWebhookHandler(f.Deps, f.Projects, hooks).Register(mux)
+	return &webhookFixture{handlerFixture: f, Hooks: hooks, Store: store, Sealer: sl, Outbox: ob, Mux: mux, uid: uid, org: o.ID, project: proj}
+}
+
+func (x *webhookFixture) do(t *testing.T, method, target string, form url.Values) *httptest.ResponseRecorder {
+	t.Helper()
+	return x.doAs(t, method, target, form, session.Principal{UserID: x.uid, ActiveOrgID: x.org})
+}
+
+func (x *webhookFixture) doAs(t *testing.T, method, target string, form url.Values, p session.Principal) *httptest.ResponseRecorder {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	x.Mux.ServeHTTP(rec, x.authedRequest(t, method, target, form.Encode(), p))
+	return rec
+}
+
+func (x *webhookFixture) doHX(t *testing.T, method, target string, form url.Values) *httptest.ResponseRecorder {
+	t.Helper()
+	r := x.authedRequest(t, method, target, form.Encode(), session.Principal{UserID: x.uid, ActiveOrgID: x.org})
+	r.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	x.Mux.ServeHTTP(rec, r)
+	return rec
+}
+
+func (x *webhookFixture) ctx() context.Context {
+	return setTenantProject(context.Background(), x.org, x.project.ID, x.uid)
+}
+
+func (x *webhookFixture) create(t *testing.T) *webhook.Endpoint {
+	t.Helper()
+	e, _, err := x.Hooks.Create(x.ctx(), "https://example.com/hook", "orders", []events.Type{events.PostPublished})
+	require.NoError(t, err)
+	return e
+}
+
+func (x *webhookFixture) settle(t *testing.T, fail bool) {
+	t.Helper()
+	for range outbox.MaxAttempts {
+		claimed, err := x.Outbox.ClaimDue(x.ctx(), time.Now().Add(365*24*time.Hour), outbox.MaxClaimLimit)
+		require.NoError(t, err)
+		for _, c := range claimed {
+			if fail {
+				require.NoError(t, x.Outbox.Fail(x.ctx(), c, time.Now(), "dial tcp: connection refused"))
+				continue
+			}
+			require.NoError(t, x.Outbox.Succeed(x.ctx(), c, time.Now()))
+		}
+	}
+}
+
+func endpointForm(rawURL string, types ...string) url.Values {
+	return url.Values{"url": {rawURL}, "description": {"orders"}, "event_types": types}
+}
+
+var reSecret = regexp.MustCompile(`whsec_[A-Za-z0-9_-]{20,}`)
+
+// TestWebhookHandler_CreateShowsTheSecretOnce pins the one-time reveal: the create response carries it, a later GET never does.
+func TestWebhookHandler_CreateShowsTheSecretOnce(t *testing.T) {
+	t.Parallel()
+	x := newWebhookFixture(t, false)
+
+	rec := x.do(t, http.MethodPost, webhookBase, endpointForm("https://example.com/hook", string(events.PostPublished)))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	secret := reSecret.FindString(rec.Body.String())
+	require.NotEmpty(t, secret, "the create response must reveal the new secret")
+	assert.Contains(t, rec.Body.String(), "data-webhook-secret")
+	assert.Contains(t, rec.Body.String(), "data-copy=", "the reveal carries the copy button")
+
+	items, err := x.Hooks.List(x.ctx())
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+
+	rec = x.do(t, http.MethodGet, webhookBase+"/"+items[0].ID.String(), nil)
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.NotContains(t, rec.Body.String(), secret, "a later GET must never contain the secret")
+	assert.NotContains(t, rec.Body.String(), "data-webhook-secret")
+	assert.Contains(t, rec.Body.String(), templates.WebhookSecretMask)
+}
+
+// TestWebhookHandler_RotateShowsTheNewSecretOnceAndTheRotationState covers rotate, the secondary state and retire.
+func TestWebhookHandler_RotateShowsTheNewSecretOnceAndTheRotationState(t *testing.T) {
+	t.Parallel()
+	x := newWebhookFixture(t, false)
+	e := x.create(t)
+	detail := webhookBase + "/" + e.ID.String()
+
+	rec := x.do(t, http.MethodPost, detail+"/rotate", nil)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	secret := reSecret.FindString(rec.Body.String())
+	require.NotEmpty(t, secret)
+	assert.Contains(t, rec.Body.String(), "webhooks.rotating")
+	assert.Contains(t, rec.Body.String(), detail+"/retire")
+
+	rec = x.do(t, http.MethodGet, detail, nil)
+	assert.NotContains(t, rec.Body.String(), secret)
+
+	rec = x.do(t, http.MethodPost, detail+"/retire", nil)
+	require.Equal(t, http.StatusSeeOther, rec.Code)
+	assert.Equal(t, detail, rec.Header().Get("Location"))
+	got, err := x.Hooks.ByID(x.ctx(), e.ID)
+	require.NoError(t, err)
+	assert.Nil(t, got.Secrets.Secondary)
+}
+
+// TestWebhookHandler_EphemeralKeyBanner renders the restart warning only when boot reports the key ephemeral.
+func TestWebhookHandler_EphemeralKeyBanner(t *testing.T) {
+	t.Parallel()
+	for _, ephemeral := range []bool{true, false} {
+		x := newWebhookFixture(t, ephemeral)
+		e := x.create(t)
+		for _, path := range []string{webhookBase, webhookBase + "/new", webhookBase + "/" + e.ID.String()} {
+			rec := x.do(t, http.MethodGet, path, nil)
+			require.Equal(t, http.StatusOK, rec.Code)
+			assert.Equal(t, ephemeral, strings.Contains(rec.Body.String(), "data-ephemeral-key"), "%s ephemeral=%v", path, ephemeral)
+		}
+	}
+}
+
+// TestWebhookHandler_EventPickerListsOnlySubscribableTypes keeps webhook.ping out of the subscription form.
+func TestWebhookHandler_EventPickerListsOnlySubscribableTypes(t *testing.T) {
+	t.Parallel()
+	x := newWebhookFixture(t, false)
+
+	rec := x.do(t, http.MethodGet, webhookBase+"/new", nil)
+	require.Equal(t, http.StatusOK, rec.Code)
+	body := rec.Body.String()
+	for _, s := range events.All() {
+		want := `name="event_types" value="` + string(s.Type) + `"`
+		assert.Equal(t, s.Subscribable, strings.Contains(body, want), "%s subscribable=%v", s.Type, s.Subscribable)
+	}
+	assert.Contains(t, body, `maxlength="2048"`)
+	assert.Contains(t, body, `maxlength="200"`)
+}
+
+// TestWebhookHandler_CreateErrorsRenderTheirCode shows a WHK code in the form banner and keeps the input.
+func TestWebhookHandler_CreateErrorsRenderTheirCode(t *testing.T) {
+	t.Parallel()
+	x := newWebhookFixture(t, false)
+
+	rec := x.do(t, http.MethodPost, webhookBase, endpointForm("http://example.com/hook", string(events.PostPublished)))
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Contains(t, rec.Body.String(), "webhooks.error.invalid_url")
+	assert.Contains(t, rec.Body.String(), apperror.CodeWebhookInvalidURL)
+	assert.Contains(t, rec.Body.String(), `value="http://example.com/hook"`)
+
+	rec = x.do(t, http.MethodPost, webhookBase, endpointForm("https://example.com/hook", "webhook.ping"))
+	assert.Contains(t, rec.Body.String(), apperror.CodeWebhookInvalidEventTypes, "an unsubscribable type is dropped, leaving none")
+	assert.NotContains(t, rec.Body.String(), "data-webhook-secret")
+}
+
+// TestWebhookHandler_UpdateAndDelete covers the edit round trip and the delete redirect.
+func TestWebhookHandler_UpdateAndDelete(t *testing.T) {
+	t.Parallel()
+	x := newWebhookFixture(t, false)
+	e := x.create(t)
+	detail := webhookBase + "/" + e.ID.String()
+
+	form := endpointForm("https://example.com/other", string(events.PostDeleted), string(events.PostPublished))
+	rec := x.do(t, http.MethodPost, detail, form)
+	require.Equal(t, http.StatusSeeOther, rec.Code, rec.Body.String())
+	got, err := x.Hooks.ByID(x.ctx(), e.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "https://example.com/other", got.URL)
+	assert.Equal(t, []events.Type{events.PostPublished, events.PostDeleted}, got.EventTypes)
+	assert.False(t, got.Active, "an unchecked active box deactivates")
+
+	rec = x.do(t, http.MethodPost, detail+"/delete", nil)
+	require.Equal(t, http.StatusSeeOther, rec.Code)
+	assert.Equal(t, webhookBase, rec.Header().Get("Location"))
+	_, err = x.Hooks.ByID(x.ctx(), e.ID)
+	require.True(t, webhook.IsNotFoundError(err))
+}
+
+// TestWebhookHandler_DeliveriesTestRetryAndAttempts drives send test, the delivery row, retry one and retry all.
+func TestWebhookHandler_DeliveriesTestRetryAndAttempts(t *testing.T) {
+	t.Parallel()
+	x := newWebhookFixture(t, false)
+	e := x.create(t)
+	detail := webhookBase + "/" + e.ID.String()
+
+	rec := x.do(t, http.MethodPost, detail+"/test", nil)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Contains(t, rec.Body.String(), `id="webhook-deliveries"`)
+	assert.Contains(t, rec.Body.String(), "webhooks.test_queued")
+	assert.Contains(t, rec.Body.String(), "webhooks.event.webhook_ping")
+	assert.Contains(t, rec.Body.String(), "webhooks.status.pending")
+
+	x.settle(t, true)
+	entries := x.Outbox.Entries()
+	require.Len(t, entries, 1)
+	did := entries[0].ID.String()
+
+	rec = x.do(t, http.MethodGet, detail, nil)
+	body := rec.Body.String()
+	assert.Contains(t, body, "webhooks.status.failed")
+	assert.Contains(t, body, "8/8", "attempt n/MaxAttempts")
+	assert.Contains(t, body, "dial tcp: connection refused")
+	assert.Contains(t, body, "webhooks.retry_all")
+	assert.Contains(t, body, detail+"/deliveries/"+did+"/retry")
+
+	rec = x.do(t, http.MethodGet, detail+"/deliveries/"+did, nil)
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Contains(t, rec.Body.String(), "webhooks.attempts_empty")
+
+	rec = x.do(t, http.MethodPost, detail+"/deliveries/"+did+"/retry", nil)
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Contains(t, rec.Body.String(), `id="delivery-`+did+`"`)
+	assert.Contains(t, rec.Body.String(), "webhooks.status.pending")
+	assert.Contains(t, rec.Body.String(), `hx-target="#webhook-retry-all"`)
+
+	x.settle(t, true)
+	rec = x.do(t, http.MethodPost, detail+"/retry-failed", nil)
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Contains(t, rec.Body.String(), "webhooks.retried")
+	got, ok := x.Outbox.ByID(entries[0].ID)
+	require.True(t, ok)
+	assert.Equal(t, outbox.StatusPending, got.Status)
+}
+
+// TestWebhookHandler_RetryOnADeliveredRowShowsWHK005 renders the not-retryable code in the row fragment.
+func TestWebhookHandler_RetryOnADeliveredRowShowsWHK005(t *testing.T) {
+	t.Parallel()
+	x := newWebhookFixture(t, false)
+	e := x.create(t)
+	require.NoError(t, x.Hooks.SendTest(x.ctx(), e.ID))
+	x.settle(t, false)
+	did := x.Outbox.Entries()[0].ID.String()
+
+	rec := x.do(t, http.MethodPost, webhookBase+"/"+e.ID.String()+"/deliveries/"+did+"/retry", nil)
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Contains(t, rec.Body.String(), "webhooks.error.not_retryable")
+	assert.Contains(t, rec.Body.String(), apperror.CodeWebhookDeliveryNotRetryable)
+	assert.Equal(t, "WHK005", apperror.CodeWebhookDeliveryNotRetryable)
+}
+
+func webhookRoutes(id, did string) []struct{ method, path string } {
+	d := webhookBase + "/" + id
+	return []struct{ method, path string }{
+		{http.MethodGet, webhookBase},
+		{http.MethodGet, webhookBase + "/new"},
+		{http.MethodPost, webhookBase},
+		{http.MethodGet, d},
+		{http.MethodPost, d},
+		{http.MethodPost, d + "/delete"},
+		{http.MethodPost, d + "/rotate"},
+		{http.MethodPost, d + "/retire"},
+		{http.MethodPost, d + "/test"},
+		{http.MethodGet, d + "/deliveries/" + did},
+		{http.MethodPost, d + "/deliveries/" + did + "/retry"},
+		{http.MethodPost, d + "/retry-failed"},
+	}
+}
+
+// TestWebhookHandler_EveryRouteGatesOnRequireProject: no session redirects to login, and a member of another org gets 404 with no endpoint data.
+func TestWebhookHandler_EveryRouteGatesOnRequireProject(t *testing.T) {
+	t.Parallel()
+	x := newWebhookFixture(t, false)
+	e := x.create(t)
+	require.NoError(t, x.Hooks.SendTest(x.ctx(), e.ID))
+	did := x.Outbox.Entries()[0].ID.String()
+
+	outsider := uuid.New()
+	other := x.seedOrg(t, "other", outsider)
+	stranger := session.Principal{UserID: outsider, ActiveOrgID: other.ID}
+
+	for _, rt := range webhookRoutes(e.ID.String(), did) {
+		rec := httptest.NewRecorder()
+		x.Mux.ServeHTTP(rec, httptest.NewRequest(rt.method, rt.path, nil))
+		assert.Equal(t, http.StatusSeeOther, rec.Code, "anonymous %s %s", rt.method, rt.path)
+		assert.Equal(t, "/login", rec.Header().Get("Location"))
+
+		rec = x.doAs(t, rt.method, rt.path, endpointForm("https://evil.example/hook", string(events.PostPublished)), stranger)
+		assert.Equal(t, http.StatusNotFound, rec.Code, "outsider %s %s", rt.method, rt.path)
+		assert.NotContains(t, rec.Body.String(), "https://example.com/hook")
+	}
+
+	items, err := x.Hooks.List(x.ctx())
+	require.NoError(t, err)
+	require.Len(t, items, 1, "no outsider request may create, update or delete")
+	assert.Equal(t, "https://example.com/hook", items[0].URL)
+}
+
+// TestWebhookHandler_ASiblingProjectsEndpointIs404 pins the service's project check behind the console.
+func TestWebhookHandler_ASiblingProjectsEndpointIs404(t *testing.T) {
+	t.Parallel()
+	x := newWebhookFixture(t, false)
+	e := x.create(t)
+	_, err := x.Projects.Create(setTenant(context.Background(), x.org, x.uid), x.org, "beta", "Beta")
+	require.NoError(t, err)
+
+	rec := x.do(t, http.MethodGet, "/orgs/acme/projects/beta/webhooks/"+e.ID.String(), nil)
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+}
+
+// TestWebhookHandler_HTMXCreatePushesTheDetailURL swaps the detail in with the secret and pushes its URL, so a reload is a GET.
+func TestWebhookHandler_HTMXCreatePushesTheDetailURL(t *testing.T) {
+	t.Parallel()
+	x := newWebhookFixture(t, false)
+	x.Cfg.HTTP.BasePath = "/app"
+
+	rec := x.doHX(t, http.MethodPost, webhookBase, endpointForm("https://example.com/hook", string(events.PostPublished)))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	items, err := x.Hooks.List(x.ctx())
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+	detail := webhookBase + "/" + items[0].ID.String()
+	assert.Equal(t, "/app"+detail, rec.Header().Get(web.HeaderPushURL))
+	body := rec.Body.String()
+	secret := reSecret.FindString(body)
+	require.NotEmpty(t, secret)
+	assert.NotContains(t, body, "<html", "an htmx create answers with the page fragment")
+	assert.Contains(t, body, `id="webhook-page"`)
+
+	rec = x.do(t, http.MethodGet, detail, nil)
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.NotContains(t, rec.Body.String(), secret)
+	assert.Contains(t, rec.Body.String(), templates.WebhookSecretMask)
+}
+
+// TestWebhookHandler_HTMXCreateErrorRendersTheNewPageFragment keeps the URL and shows the code.
+func TestWebhookHandler_HTMXCreateErrorRendersTheNewPageFragment(t *testing.T) {
+	t.Parallel()
+	x := newWebhookFixture(t, false)
+
+	rec := x.doHX(t, http.MethodPost, webhookBase, endpointForm("http://example.com/hook", string(events.PostPublished)))
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Empty(t, rec.Header().Get(web.HeaderPushURL))
+	body := rec.Body.String()
+	assert.NotContains(t, body, "<html")
+	assert.Contains(t, body, `id="webhook-page"`)
+	assert.Contains(t, body, apperror.CodeWebhookInvalidURL)
+	assert.Equal(t, "WHK002", apperror.CodeWebhookInvalidURL)
+	assert.Contains(t, body, `name="event_types"`, "the fragment is the new page with its form")
+}
+
+// TestWebhookHandler_HTMXRotateRotatesOnce swaps the detail in with the new secret, pushes nothing, and leaves the original secret as the one secondary.
+func TestWebhookHandler_HTMXRotateRotatesOnce(t *testing.T) {
+	t.Parallel()
+	x := newWebhookFixture(t, false)
+	var got http.Header
+	var body []byte
+	rcv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Clone()
+		body, _ = io.ReadAll(r.Body)
+	}))
+	t.Cleanup(rcv.Close)
+	e, original, err := x.Hooks.Create(x.ctx(), rcv.URL+"/hook", "", []events.Type{events.PostPublished})
+	require.NoError(t, err)
+
+	rec := x.doHX(t, http.MethodPost, webhookBase+"/"+e.ID.String()+"/rotate", nil)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Empty(t, rec.Header().Get(web.HeaderPushURL))
+	assert.NotContains(t, rec.Body.String(), "<html")
+	rotated := reSecret.FindString(rec.Body.String())
+	require.NotEmpty(t, rotated)
+	require.NotEqual(t, original, rotated)
+
+	require.NoError(t, x.Hooks.SendTest(x.ctx(), e.ID))
+	claimed, err := x.Outbox.ClaimDue(x.ctx(), time.Now(), 1)
+	require.NoError(t, err)
+	require.Len(t, claimed, 1)
+	d := webhook.NewDeliverer(x.Store, x.Sealer, rcv.Client(), discardLogger())
+	require.NoError(t, d.Deliver(setTenant(context.Background(), x.org, x.uid), claimed[0]))
+
+	ts := got.Get("X-Altempl-Timestamp")
+	want := []string{webhook.Sign(rotated, ts, body), webhook.Sign(original, ts, body)}
+	assert.ElementsMatch(t, want, strings.Fields(got.Get("X-Altempl-Signature")),
+		"exactly one rotation: the new primary plus the original secret as the secondary")
+}
+
+// TestWebhookHandler_AttemptCopy covers "not attempted yet" and the separator between runs after a Retry.
+func TestWebhookHandler_AttemptCopy(t *testing.T) {
+	t.Parallel()
+	x := newWebhookFixture(t, false)
+	e := x.create(t)
+	require.NoError(t, x.Hooks.SendTest(x.ctx(), e.ID))
+	entry := x.Outbox.Entries()[0]
+	detail := webhookBase + "/" + e.ID.String()
+
+	rec := x.do(t, http.MethodGet, detail, nil)
+	assert.Contains(t, rec.Body.String(), "webhooks.not_attempted")
+	assert.NotContains(t, rec.Body.String(), "0/8")
+
+	base := time.Now().Add(-time.Hour)
+	for i, n := range []int{1, 2, 1} {
+		require.NoError(t, x.Store.SaveAttempt(x.ctx(), webhook.Attempt{
+			OrgID: x.org, ProjectID: x.project.ID, EndpointID: e.ID, DeliveryID: entry.ID, EventID: entry.EventID,
+			EventType: events.WebhookPing, Attempt: n, StatusCode: 500, CreatedAt: base.Add(time.Duration(i) * time.Minute),
+		}))
+	}
+	rec = x.do(t, http.MethodGet, detail+"/deliveries/"+entry.ID.String(), nil)
+	body := rec.Body.String()
+	assert.Equal(t, 1, strings.Count(body, "data-attempt-run-break"), body)
+	assert.Less(t, strings.Index(body, "data-attempt-run-break"), strings.LastIndex(body, "2/8"))
+}
+
+// TestWebhookHandler_RetryOfAnUnlistedRowRetargetsTheDeliveries avoids swapping a bare row for one the page does not show.
+func TestWebhookHandler_RetryOfAnUnlistedRowRetargetsTheDeliveries(t *testing.T) {
+	t.Parallel()
+	x := newWebhookFixture(t, false)
+	e := x.create(t)
+	for range webhook.MaxDeliveriesListed + 1 {
+		require.NoError(t, x.Hooks.SendTest(x.ctx(), e.ID))
+	}
+	x.settle(t, true)
+	all, err := x.Outbox.ListByTarget(x.ctx(), e.ID.String(), outbox.MaxListLimit)
+	require.NoError(t, err)
+	oldest := all[len(all)-1].ID.String()
+
+	rec := x.doHX(t, http.MethodPost, webhookBase+"/"+e.ID.String()+"/deliveries/"+oldest+"/retry", nil)
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "#webhook-deliveries", rec.Header().Get(web.HeaderRetarget))
+	assert.Equal(t, "outerHTML", rec.Header().Get(web.HeaderReswap))
+	assert.Contains(t, rec.Body.String(), `id="webhook-deliveries"`)
+}
+
+// TestWebhookHandler_ActionFailuresUseTheActionCopy keeps "could not save" off a failed send.
+func TestWebhookHandler_ActionFailuresUseTheActionCopy(t *testing.T) {
+	t.Parallel()
+	x := newWebhookFixture(t, false)
+	e := x.create(t)
+	x.Outbox.EnqueueErr = errors.New("outbox down")
+
+	rec := x.do(t, http.MethodPost, webhookBase+"/"+e.ID.String()+"/test", nil)
+	assert.Contains(t, rec.Body.String(), "webhooks.error.action_failed")
+	assert.NotContains(t, rec.Body.String(), "webhooks.error.failed")
+}
+
+// TestWebhookHandler_RefusalsAreNotLoggedAsErrors logs only failures that are ours.
+func TestWebhookHandler_RefusalsAreNotLoggedAsErrors(t *testing.T) {
+	t.Parallel()
+	x := newWebhookFixture(t, false)
+	var buf bytes.Buffer
+	x.Deps.Logger = log.New(&buf, "", 0)
+	x.Mux = http.NewServeMux()
+	handlers.NewWebhookHandler(x.Deps, x.Projects, x.Hooks).Register(x.Mux)
+	e := x.create(t)
+
+	x.do(t, http.MethodPost, webhookBase, endpointForm("http://example.com/hook", string(events.PostPublished)))
+	x.do(t, http.MethodPost, webhookBase, endpointForm("https://example.com/hook"))
+	_, err := x.Hooks.Update(x.ctx(), e.ID, e.URL, "", e.EventTypes, false)
+	require.NoError(t, err)
+	x.do(t, http.MethodPost, webhookBase+"/"+e.ID.String()+"/test", nil)
+	assert.Empty(t, buf.String(), "a rejected input or a refused action is not an error log")
+
+	_, err = x.Hooks.Update(x.ctx(), e.ID, e.URL, "", e.EventTypes, true)
+	require.NoError(t, err)
+	x.Outbox.EnqueueErr = errors.New("outbox down")
+	x.do(t, http.MethodPost, webhookBase+"/"+e.ID.String()+"/test", nil)
+	assert.Contains(t, buf.String(), "web webhook: send test")
+}

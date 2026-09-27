@@ -18,8 +18,8 @@ import (
 	"altalune.id/template/internal/testutil/fakes"
 )
 
-// NOTE: the sum of 2^(k-1) seconds over k = 2..MaxAttempts.
-const minTotalBackoff = 1022 * time.Second
+// NOTE: 0.9 * sum of Backoff's base durations over attempts 2..8 (30s+5m+30m+2h+5h+10h+10h).
+const minTotalBackoff = 89397 * time.Second
 
 func workerScope() tenant.Context {
 	return tenant.Context{OrgID: uuid.New(), ProjectID: uuid.New(), UserID: uuid.New()}
@@ -102,10 +102,10 @@ func TestWorkerRetriesWithBackoffThenSettlesTerminally(t *testing.T) {
 
 		d := newRecordingDeliverer(errors.New("endpoint refused"))
 		w := outbox.NewWorker(store, d, singleTenant{tc: tc}, slog.New(slog.DiscardHandler),
-			outbox.WorkerOpts{Tick: time.Second, Batch: 10, Concurrency: 2})
+			outbox.WorkerOpts{Tick: time.Minute, Batch: 10, Concurrency: 2})
 
 		cancel, done := runWorker(t, w)
-		time.Sleep(time.Hour)
+		time.Sleep(34 * time.Hour)
 		cancel()
 		require.NoError(t, <-done)
 

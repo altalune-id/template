@@ -264,3 +264,148 @@ func TestPostgresEnqueueRejectsAnotherProjectsEntry(t *testing.T) {
 	require.Error(t, err)
 	assert.True(t, outbox.IsInvalidEntryError(err), "got %v", err)
 }
+
+func TestPostgresRequeueResetsAFailedEntry(t *testing.T) {
+	s, ctx, tc := newPostgresStore(t)
+	e := entry(tc, uuid.New())
+	require.NoError(t, s.Enqueue(ctx, e))
+	failToTerminal(ctx, t, s, e)
+
+	require.NoError(t, s.Requeue(ctx, e.ID, e.Target))
+
+	listed, err := s.ListByTarget(ctx, e.Target, outbox.MaxListLimit)
+	require.NoError(t, err)
+	require.Len(t, listed, 1)
+	assert.Equal(t, outbox.StatusPending, listed[0].Status)
+	assert.Equal(t, 0, listed[0].Attempt)
+	assert.Empty(t, listed[0].LastError)
+
+	claimed, err := s.ClaimDue(ctx, time.Now(), 10)
+	require.NoError(t, err)
+	require.Len(t, claimed, 1, "a requeued entry was not claimable")
+	assert.Equal(t, e.ID, claimed[0].ID)
+}
+
+func TestPostgresRequeueWithTheWrongTargetIsNotFound(t *testing.T) {
+	s, ctx, tc := newPostgresStore(t)
+	e := entry(tc, uuid.New())
+	require.NoError(t, s.Enqueue(ctx, e))
+	failToTerminal(ctx, t, s, e)
+
+	err := s.Requeue(ctx, e.ID, "another-endpoint")
+	require.Error(t, err)
+	assert.True(t, outbox.IsNotFoundError(err), "got %v", err)
+}
+
+func TestPostgresRequeueOnANonFailedRowIsRefused(t *testing.T) {
+	t.Run("pending", func(t *testing.T) {
+		s, ctx, tc := newPostgresStore(t)
+		e := entry(tc, uuid.New())
+		require.NoError(t, s.Enqueue(ctx, e))
+
+		err := s.Requeue(ctx, e.ID, e.Target)
+		require.Error(t, err)
+		assert.True(t, outbox.IsNotFailedError(err), "got %v", err)
+	})
+
+	t.Run("delivered", func(t *testing.T) {
+		s, ctx, tc := newPostgresStore(t)
+		e := entry(tc, uuid.New())
+		require.NoError(t, s.Enqueue(ctx, e))
+		claimed, err := s.ClaimDue(ctx, time.Now(), 10)
+		require.NoError(t, err)
+		require.Len(t, claimed, 1)
+		require.NoError(t, s.Succeed(ctx, claimed[0], time.Now()))
+
+		err = s.Requeue(ctx, e.ID, e.Target)
+		require.Error(t, err)
+		assert.True(t, outbox.IsNotFailedError(err), "got %v", err)
+	})
+}
+
+// TestPostgresRequeueIgnoresAnotherOrgsEntry proves RLS plus the explicit org predicate keep a failed entry invisible outside the org that owns it.
+func TestPostgresRequeueIgnoresAnotherOrgsEntry(t *testing.T) {
+	s, ctx, tc := newPostgresStore(t)
+	e := entry(tc, uuid.New())
+	require.NoError(t, s.Enqueue(ctx, e))
+	failToTerminal(ctx, t, s, e)
+
+	other := tenant.Into(t.Context(), tenant.Context{OrgID: uuid.New(), ProjectID: uuid.New()})
+	err := s.Requeue(other, e.ID, e.Target)
+	require.Error(t, err)
+	assert.True(t, outbox.IsNotFoundError(err), "an entry was requeued across the tenant boundary")
+}
+
+func TestPostgresRequeueFailedRequeuesOnlyFailedRowsOfOneTargetInOneOrg(t *testing.T) {
+	s, ctx, tc := newPostgresStore(t)
+
+	failedA := entry(tc, uuid.New())
+	require.NoError(t, s.Enqueue(ctx, failedA))
+	failToTerminal(ctx, t, s, failedA)
+
+	failedB := entry(tc, uuid.New())
+	require.NoError(t, s.Enqueue(ctx, failedB))
+	failToTerminal(ctx, t, s, failedB)
+
+	otherTarget := entry(tc, uuid.New())
+	otherTarget.Target = "another-endpoint"
+	require.NoError(t, s.Enqueue(ctx, otherTarget))
+	failToTerminal(ctx, t, s, otherTarget)
+
+	stillPending := entry(tc, uuid.New())
+	require.NoError(t, s.Enqueue(ctx, stillPending))
+
+	n, err := s.RequeueFailed(ctx, failedA.Target)
+	require.NoError(t, err)
+	assert.Equal(t, 2, n)
+
+	claimed, err := s.ClaimDue(ctx, time.Now(), 10)
+	require.NoError(t, err)
+	ids := map[uuid.UUID]bool{}
+	for _, c := range claimed {
+		ids[c.ID] = true
+	}
+	assert.True(t, ids[failedA.ID])
+	assert.True(t, ids[failedB.ID])
+	assert.True(t, ids[stillPending.ID])
+	assert.False(t, ids[otherTarget.ID], "RequeueFailed touched another target's row")
+
+	other := tenant.Into(t.Context(), tenant.Context{OrgID: uuid.New(), ProjectID: uuid.New()})
+	n, err = s.RequeueFailed(other, otherTarget.Target)
+	require.NoError(t, err)
+	assert.Equal(t, 0, n, "RequeueFailed touched another org's row")
+}
+
+func TestPostgresListByTargetOrdersNewestFirstAndIsOrgScoped(t *testing.T) {
+	s, ctx, tc := newPostgresStore(t)
+	ids := make([]uuid.UUID, 0, 5)
+	for range 5 {
+		e := entry(tc, uuid.New())
+		require.NoError(t, s.Enqueue(ctx, e))
+		ids = append(ids, e.ID)
+		time.Sleep(time.Millisecond)
+	}
+
+	list, err := s.ListByTarget(ctx, "delivery-endpoint", outbox.MaxListLimit)
+	require.NoError(t, err)
+	require.Len(t, list, 5)
+	for i := range list {
+		assert.Equal(t, ids[len(ids)-1-i], list[i].ID, "position %d not newest-first", i)
+		assert.False(t, list[i].CreatedAt.IsZero(), "CreatedAt was not filled")
+	}
+
+	limited, err := s.ListByTarget(ctx, "delivery-endpoint", 2)
+	require.NoError(t, err)
+	require.Len(t, limited, 2)
+	assert.Equal(t, ids[4], limited[0].ID)
+	assert.Equal(t, ids[3], limited[1].ID)
+
+	overLimit, err := s.ListByTarget(ctx, "delivery-endpoint", 1000)
+	require.NoError(t, err)
+	assert.Len(t, overLimit, 5, "a limit above MaxListLimit must still be accepted, just clamped")
+
+	other := tenant.Into(t.Context(), tenant.Context{OrgID: uuid.New(), ProjectID: uuid.New()})
+	leaked, err := s.ListByTarget(other, "delivery-endpoint", outbox.MaxListLimit)
+	require.NoError(t, err)
+	assert.Empty(t, leaked, "ListByTarget leaked another org's rows")
+}

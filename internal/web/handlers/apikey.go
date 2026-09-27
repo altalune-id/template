@@ -119,14 +119,7 @@ func (h *APIKeyHandler) writeKeyList(w http.ResponseWriter, sc ProjectScope, min
 		h.ErrorPage(w, sc.req, http.StatusInternalServerError, "List failed", "Could not load API keys.", err)
 		return
 	}
-	Render(w, sc.req, templates.APIKeyList(h.fragmentBase(sc), v))
-}
-
-// NOTE: Deps.Base alone leaves ActiveOrg nil, which collapses every project path to /orgs.
-func (h *APIKeyHandler) fragmentBase(sc ProjectScope) web.LayoutData {
-	d := h.Base(sc.req, "")
-	d.ActiveOrg = &web.ActiveOrg{ID: sc.org.ID.String(), Slug: sc.org.Slug, Name: sc.org.Name}
-	return d
+	Render(w, sc.req, templates.APIKeyList(h.ProjectFragmentBase(sc), v))
 }
 
 // Register wires the API key routes onto mux.

@@ -278,6 +278,16 @@ func (s blogServiceForDataplane) Unpublish(ctx context.Context, id uuid.UUID, if
 	return postRefOf(p), nil
 }
 
+type projectSlugs struct{ svc *project.Service }
+
+func (s projectSlugs) SlugOf(ctx context.Context, projectID uuid.UUID) (string, error) {
+	p, err := s.svc.ByID(ctx, projectID)
+	if err != nil {
+		return "", err
+	}
+	return p.Slug, nil
+}
+
 func postRefOf(p *blog.Post) dataplane.PostRef {
 	return dataplane.PostRef{
 		ID:         p.ID,

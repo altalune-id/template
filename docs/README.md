@@ -28,12 +28,13 @@ When the two disagree, the contract wins and the recipe is a bug.
 
 ## Interfaces
 
-| Doc                                   | Owns                                              |
-| ------------------------------------- | ------------------------------------------------- |
-| [`mcp`](mcp/README.md)                | the MCP surface — mount, auth, tools, the Apps UI |
-| [`cli`](cli/README.md)                | command tree, exit codes, output envelopes        |
-| [`cli commands`](cli/commands.md)     | per-command reference and payload fields          |
-| [`cli resolution`](cli/resolution.md) | global flags, credential and URL precedence       |
+| Doc                                   | Owns                                                          |
+| ------------------------------------- | ------------------------------------------------------------- |
+| [`mcp`](mcp/README.md)                | the MCP surface — mount, auth, tools, the Apps UI             |
+| [`webhooks`](webhooks/README.md)      | the receiver contract — envelope, headers, signature, retries |
+| [`cli`](cli/README.md)                | command tree, exit codes, output envelopes                    |
+| [`cli commands`](cli/commands.md)     | per-command reference and payload fields                      |
+| [`cli resolution`](cli/resolution.md) | global flags, credential and URL precedence                   |
 
 ## Running it
 

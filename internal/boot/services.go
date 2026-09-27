@@ -19,10 +19,12 @@ import (
 	"altalune.id/template/internal/platform/authn"
 	"altalune.id/template/internal/platform/capabilities"
 	"altalune.id/template/internal/platform/config"
+	"altalune.id/template/internal/platform/tenant"
 	"altalune.id/template/internal/platform/tokens"
 	"altalune.id/template/internal/project"
 	"altalune.id/template/internal/todo"
 	"altalune.id/template/internal/user"
+	"altalune.id/template/internal/webhook"
 )
 
 const apiKeyUsageFlushInterval = 30 * time.Second
@@ -35,6 +37,7 @@ type Services struct {
 	TodoStore    todo.Store
 	InviteStore  invite.Store
 	OnboardStore onboard.Store
+	WebhookStore webhook.Store
 
 	Auth       *auth.Service
 	Users      *user.Service
@@ -46,6 +49,7 @@ type Services struct {
 	Posts      *blog.Service
 	Categories *category.Service
 	Tags       *tag.Service
+	Webhooks   *webhook.Service
 
 	Onboard *user.OnboardWorkflow
 
@@ -73,7 +77,10 @@ func buildServices(cfg *config.Config, k *platform.Kernel, caps capabilities.Cap
 	projects := project.NewService(projectStore, log, reporter.Unexpected)
 	todos := todo.NewService(todoStore, log, reporter.Unexpected)
 	onboards := onboard.NewService(onboardStore, log, reporter.Unexpected)
-	posts := blog.NewService(blog.NewStore(cfg.DB, pool, pgConn), log, reporter.Unexpected)
+	uow := tenant.NewUnitOfWork(cfg.DB, pool, pgConn)
+	webhookStore := webhook.NewStore(cfg.DB, pool, pgConn)
+	webhooks := webhook.NewService(webhookStore, log, reporter.Unexpected, k.Sealer, k.Outbox, projectSlugs{svc: projects})
+	posts := blog.NewService(blog.NewStore(cfg.DB, pool, pgConn), log, reporter.Unexpected, uow, webhooks)
 	categories := category.NewService(category.NewStore(cfg.DB, pool, pgConn), log, reporter.Unexpected)
 	tags := tag.NewService(tag.NewStore(cfg.DB, pool, pgConn), log, reporter.Unexpected)
 
@@ -181,6 +188,7 @@ func buildServices(cfg *config.Config, k *platform.Kernel, caps capabilities.Cap
 		TodoStore:    todoStore,
 		InviteStore:  inviteStore,
 		OnboardStore: onboardStore,
+		WebhookStore: webhookStore,
 		Auth:         auths,
 		Users:        users,
 		Orgs:         orgs,
@@ -191,6 +199,7 @@ func buildServices(cfg *config.Config, k *platform.Kernel, caps capabilities.Cap
 		Posts:        posts,
 		Categories:   categories,
 		Tags:         tags,
+		Webhooks:     webhooks,
 		Onboard:      onboardWorkflow,
 		Authn:        chain,
 		KeyAuthn:     keyAuthn,

@@ -234,12 +234,9 @@ func (s *BlogService) scopeToPost(ctx context.Context, postIDRaw string) (contex
 		return nil, nil, err
 	}
 	orgCtx := tenant.Into(ctx, tenant.Context{OrgID: pr.ActiveOrgID, UserID: pr.UserID})
-	post, err := s.posts.ByID(orgCtx, pid)
+	post, err := s.posts.Locate(orgCtx, pid)
 	if err != nil {
 		return nil, nil, err
-	}
-	if post.OrgID != pr.ActiveOrgID {
-		return nil, nil, forbiddenErr("post belongs to another org", "post_id", pid.String())
 	}
 	return tenant.Into(ctx, tenant.Context{
 		OrgID:     post.OrgID,

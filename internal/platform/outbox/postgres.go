@@ -36,6 +36,7 @@ type pgEntryRow struct {
 	NextAttemptAt time.Time `alias:"outbox_entries.next_attempt_at"`
 	Status        string    `alias:"outbox_entries.status"`
 	LastError     string    `alias:"outbox_entries.last_error"`
+	CreatedAt     time.Time `alias:"outbox_entries.created_at"`
 }
 
 func (r *pgEntryRow) toEntry() Entry {
@@ -50,6 +51,7 @@ func (r *pgEntryRow) toEntry() Entry {
 		NextAttemptAt: r.NextAttemptAt.UTC(),
 		Status:        Status(r.Status),
 		LastError:     r.LastError,
+		CreatedAt:     r.CreatedAt.UTC(),
 	}
 }
 
@@ -254,4 +256,115 @@ func (s *postgresStore) refuseReason(ctx context.Context, tx *sql.Tx, tc tenant.
 		return &StaleClaimError{ID: e.ID.String(), Claimed: e.Attempt, Current: int(row.Attempt)}
 	}
 	return &TerminalStateError{ID: e.ID.String(), Status: Status(row.Status)}
+}
+
+func (s *postgresStore) Requeue(ctx context.Context, id uuid.UUID, target string) error {
+	tx, owned, tc, err := s.txAcquire(ctx)
+	if err != nil {
+		return err
+	}
+	return s.endTx(tx, owned, s.requeue(ctx, tx, tc, id, target))
+}
+
+func (s *postgresStore) requeue(ctx context.Context, tx *sql.Tx, tc tenant.Context, id uuid.UUID, target string) error {
+	stmt := s.entries.UPDATE(s.entries.Status, s.entries.Attempt, s.entries.NextAttemptAt, s.entries.LastError).
+		SET(postgres.String(string(StatusPending)), postgres.Int(0), postgres.TimestampzT(time.Now().UTC()), postgres.String("")).
+		WHERE(s.failedRow(tc, id, target))
+	res, err := stmt.ExecContext(ctx, tx)
+	if err != nil {
+		return fmt.Errorf("outbox.postgres.Requeue: %w", err)
+	}
+	n, raErr := res.RowsAffected()
+	if raErr != nil {
+		return fmt.Errorf("outbox.postgres.Requeue: rows affected: %w", raErr)
+	}
+	if n > 0 {
+		return nil
+	}
+	return s.refuseRequeue(ctx, tx, tc, id, target)
+}
+
+func (s *postgresStore) failedRow(tc tenant.Context, id uuid.UUID, target string) postgres.BoolExpression {
+	return s.entries.OrgID.EQ(postgres.UUID(tc.OrgID)).
+		AND(s.entries.ID.EQ(postgres.UUID(id))).
+		AND(s.entries.Target.EQ(postgres.String(target))).
+		AND(s.entries.Status.EQ(postgres.String(string(StatusFailed))))
+}
+
+func (s *postgresStore) refuseRequeue(ctx context.Context, tx *sql.Tx, tc tenant.Context, id uuid.UUID, target string) error {
+	stmt := postgres.SELECT(s.entries.Status).
+		FROM(s.entries).
+		WHERE(s.entries.OrgID.EQ(postgres.UUID(tc.OrgID)).
+			AND(s.entries.ID.EQ(postgres.UUID(id))).
+			AND(s.entries.Target.EQ(postgres.String(target))))
+	var row struct {
+		Status string `alias:"outbox_entries.status"`
+	}
+	if err := stmt.QueryContext(ctx, tx, &row); err != nil {
+		if errorIsNoRows(err) {
+			return &NotFoundError{ID: id.String()}
+		}
+		return fmt.Errorf("outbox.postgres.Requeue: read status: %w", err)
+	}
+	return &NotFailedError{ID: id.String(), Status: Status(row.Status)}
+}
+
+func (s *postgresStore) RequeueFailed(ctx context.Context, target string) (int, error) {
+	tx, owned, tc, err := s.txAcquire(ctx)
+	if err != nil {
+		return 0, err
+	}
+	n, reqErr := s.requeueFailed(ctx, tx, tc, target)
+	if txErr := s.endTx(tx, owned, reqErr); txErr != nil {
+		return 0, txErr
+	}
+	return n, nil
+}
+
+func (s *postgresStore) requeueFailed(ctx context.Context, tx *sql.Tx, tc tenant.Context, target string) (int, error) {
+	stmt := s.entries.UPDATE(s.entries.Status, s.entries.Attempt, s.entries.NextAttemptAt, s.entries.LastError).
+		SET(postgres.String(string(StatusPending)), postgres.Int(0), postgres.TimestampzT(time.Now().UTC()), postgres.String("")).
+		WHERE(s.entries.OrgID.EQ(postgres.UUID(tc.OrgID)).
+			AND(s.entries.Target.EQ(postgres.String(target))).
+			AND(s.entries.Status.EQ(postgres.String(string(StatusFailed)))))
+	res, err := stmt.ExecContext(ctx, tx)
+	if err != nil {
+		return 0, fmt.Errorf("outbox.postgres.RequeueFailed: %w", err)
+	}
+	n, raErr := res.RowsAffected()
+	if raErr != nil {
+		return 0, fmt.Errorf("outbox.postgres.RequeueFailed: rows affected: %w", raErr)
+	}
+	return int(n), nil
+}
+
+func (s *postgresStore) ListByTarget(ctx context.Context, target string, limit int) ([]Entry, error) {
+	tx, owned, tc, err := s.txAcquire(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out, listErr := s.listByTarget(ctx, tx, tc, target, limit)
+	if txErr := s.endTx(tx, owned, listErr); txErr != nil {
+		return nil, txErr
+	}
+	return out, nil
+}
+
+func (s *postgresStore) listByTarget(ctx context.Context, tx *sql.Tx, tc tenant.Context, target string, limit int) ([]Entry, error) {
+	stmt := postgres.SELECT(s.entries.AllColumns).
+		FROM(s.entries).
+		WHERE(s.entries.OrgID.EQ(postgres.UUID(tc.OrgID)).
+			AND(s.entries.Target.EQ(postgres.String(target)))).
+		ORDER_BY(s.entries.CreatedAt.DESC(), s.entries.ID.DESC()).
+		LIMIT(listBatch(limit))
+
+	var rows []pgEntryRow
+	if err := stmt.QueryContext(ctx, tx, &rows); err != nil && !errorIsNoRows(err) {
+		return nil, fmt.Errorf("outbox.postgres.ListByTarget: %w", err)
+	}
+	out := make([]Entry, 0, len(rows))
+	for i := range rows {
+		out = append(out, rows[i].toEntry())
+	}
+	return out, nil
 }

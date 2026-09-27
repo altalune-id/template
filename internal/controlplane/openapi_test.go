@@ -47,7 +47,7 @@ func openAPIServer(t *testing.T, enabled bool, auth *controlplane.BasicAuth) *ht
 		todo.NewService(tds, log, reporter.Unexpected),
 		nil,
 		tds,
-		blog.NewService(posts, log, reporter.Unexpected),
+		blog.NewService(posts, log, reporter.Unexpected, fakes.UnitOfWork, &fakes.Webhooks{}),
 		category.NewService(cats, log, reporter.Unexpected),
 		tag.NewService(tags, log, reporter.Unexpected),
 	)

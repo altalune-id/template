@@ -23,7 +23,7 @@ type taggedFixture struct {
 func newTaggedFixture(t *testing.T) taggedFixture {
 	t.Helper()
 	store, sqlDB, tc, cat := newBlogStoreForTest(t)
-	svc, _ := newSvc(t, store)
+	svc, _, _ := newHooked(t, store, sqliteUnitOfWork(sqlDB))
 	return taggedFixture{
 		svc:  svc,
 		ctx:  tenant.Into(t.Context(), tc),

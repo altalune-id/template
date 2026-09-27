@@ -22,7 +22,7 @@ const (
 	defaultSettleGrace = 5 * time.Second
 )
 
-// Deliverer hands one claimed entry to the outbound transport; the template ships no implementation.
+// Deliverer hands one claimed entry to the outbound transport; internal/webhook.Deliverer is the shipped implementation.
 type Deliverer interface {
 	Deliver(ctx context.Context, e Entry) error
 }

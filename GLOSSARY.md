@@ -10,15 +10,15 @@ A **surface** is one way the outside world reaches the app, or one way the app r
 outside world on a tenant's behalf. There are seven. Rules and mount contracts live in
 [`surfaces`](docs/surfaces/README.md); this table is the naming authority.
 
-| Term            | Where                                                              | Mount                | What it is                                                            |
-| --------------- | ------------------------------------------------------------------ | -------------------- | --------------------------------------------------------------------- |
-| `console`       | `internal/web/handlers/`                                           | `/`                  | Browser surface: templ + HTMX, session-cookie auth, i18n, `/static/`. |
-| `control plane` | `internal/controlplane/`                                           | `/api/`              | Connect-RPC, contracts in `api/*/v1/*.proto`. Gated by `api.enabled`. |
-| `data plane`    | `internal/dataplane/`                                              | `/api/v1/`           | REST for integrators, API-key auth. Gated by `dataplane.enabled`.     |
-| `ingest`        | `internal/ingest/` — seam only, no provider registered             | `/hooks/{provider}/` | Inbound third-party pushes, verified by provider signature.           |
-| `dispatch`      | `internal/platform/outbox/` — primitive only, no sender registered | — (egress)           | Outbound tenant deliveries, durable and retried.                      |
-| `cli`           | `internal/cli/`                                                    | — (dual-mode)        | Operator surface. Contract in [`cli`](docs/cli/README.md).            |
-| `mcp`           | `internal/mcp/` + `mcp/` (root)                                    | `/mcp`               | Tools for an MCP host. See [`mcp`](docs/mcp/README.md).               |
+| Term            | Where                                                  | Mount                | What it is                                                                                  |
+| --------------- | ------------------------------------------------------ | -------------------- | ------------------------------------------------------------------------------------------- |
+| `console`       | `internal/web/handlers/`                               | `/`                  | Browser surface: templ + HTMX, session-cookie auth, i18n, `/static/`.                       |
+| `control plane` | `internal/controlplane/`                               | `/api/`              | Connect-RPC, contracts in `api/*/v1/*.proto`. Gated by `api.enabled`.                       |
+| `data plane`    | `internal/dataplane/`                                  | `/api/v1/`           | REST for integrators, API-key auth. Gated by `dataplane.enabled`.                           |
+| `ingest`        | `internal/ingest/` — seam only, no provider registered | `/hooks/{provider}/` | Inbound third-party pushes, verified by provider signature.                                 |
+| `dispatch`      | `internal/webhook/` on `internal/platform/outbox/`     | — (egress)           | Outbound tenant deliveries, durable and retried. See [`webhooks`](docs/webhooks/README.md). |
+| `cli`           | `internal/cli/`                                        | — (dual-mode)        | Operator surface. Contract in [`cli`](docs/cli/README.md).                                  |
+| `mcp`           | `internal/mcp/` + `mcp/` (root)                        | `/mcp`               | Tools for an MCP host. See [`mcp`](docs/mcp/README.md).                                     |
 
 NOTE: five of the seven speak HTTP and share one listener: console, control plane, data
 plane, ingest and mcp. `web.NewServer` owns the outer mux — it mounts `/healthz`, `/readyz`
@@ -57,7 +57,7 @@ Four names S7 introduces, all detailed in [`mcp`](docs/mcp/README.md):
 | `StaleVersionError` | `internal/blog/errors.go:145`                              | The refusal a non-zero `ifVersion` returns when the row moved underneath the caller. Carries `Want` (asked for) and `Got` (stored).                          |
 
 NOTE: "platform package" is a **category, not a directory**. Some live under
-`internal/platform/<name>/` (`authn`, `capabilities`, `config`, `db`, `notify`,
+`internal/platform/<name>/` (`authn`, `capabilities`, `config`, `db`, `events`, `notify`,
 `outbox`, `sealer`, `session`, `surfaces`, `tenant`, `tokens`); others are exported
 roots (`worker/`, `scheduler/`, `logger/`, `telemetry/`, `mailer/`, `nanoid/`,
 `reqid/`, `authl/`, `httpclient/`, `mcp/`).
@@ -119,6 +119,22 @@ still exercised by tests (8 references in
 `internal/web/handlers/handlers_test.go`) — so it is unreachable, not dead
 code. **Canonical name for the per-user flow is `welcome`.** The duplicate is
 left in place deliberately — removing it touches auth flows.
+
+## Webhooks
+
+Receiver contract: [`webhooks`](docs/webhooks/README.md).
+
+| Term           | Where                                      | What it is                                                                                                                    |
+| -------------- | ------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
+| event          | `events.Type` (`internal/platform/events`) | A **webhook** event sent to tenants, e.g. `blog.post.published`. Never an internal queue job; the two never share a type.     |
+| catalog        | `internal/platform/events/catalog.go`      | The hardcoded list of event types, payload versions and which are subscribable. A public contract; additive within a version. |
+| endpoint       | `webhook.Endpoint`, `webhook_endpoints`    | A tenant's HTTPS URL on one project, subscribed to a set of event types. At most 10 per project.                              |
+| delivery       | `outbox.Entry`, `webhook.Delivery`         | One event bound for one endpoint: `dlv_<outbox entry id>`. The unit receivers dedupe on and the console retries.              |
+| attempt        | `webhook.Attempt`, `webhook_deliveries`    | One POST of a delivery, with status code, error and duration. Up to `outbox.MaxAttempts` (8) per delivery.                    |
+| signing secret | `whsec_…`, sealed in `secret_primary`      | The HMAC key for `X-Altempl-Signature`. Shown once; a rotation keeps the old one as secondary until retired.                  |
+
+NOTE: the table `webhook_deliveries` holds **attempts**, one row per POST. "Delivery" always
+means the outbox row.
 
 ## Scheduling
 

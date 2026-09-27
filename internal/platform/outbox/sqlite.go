@@ -47,6 +47,7 @@ func claimReturning() []sqlite.Projection {
 		sqlite.StringColumn("next_attempt_at").AS("outbox_entries.next_attempt_at"),
 		sqlite.StringColumn("status").AS("outbox_entries.status"),
 		sqlite.StringColumn("last_error").AS("outbox_entries.last_error"),
+		sqlite.StringColumn("created_at").AS("outbox_entries.created_at"),
 	}
 }
 
@@ -73,6 +74,7 @@ type sqliteEntryRow struct {
 	NextAttemptAt string `alias:"outbox_entries.next_attempt_at"`
 	Status        string `alias:"outbox_entries.status"`
 	LastError     string `alias:"outbox_entries.last_error"`
+	CreatedAt     string `alias:"outbox_entries.created_at"`
 }
 
 func (r *sqliteEntryRow) toEntry() (Entry, error) {
@@ -96,6 +98,10 @@ func (r *sqliteEntryRow) toEntry() (Entry, error) {
 	if err != nil {
 		return Entry{}, fmt.Errorf("outbox.sqlite: parse next_attempt_at: %w", err)
 	}
+	createdAt, err := time.Parse(time.RFC3339Nano, r.CreatedAt)
+	if err != nil {
+		return Entry{}, fmt.Errorf("outbox.sqlite: parse created_at: %w", err)
+	}
 	return Entry{
 		ID:            id,
 		EventID:       eventID,
@@ -107,6 +113,7 @@ func (r *sqliteEntryRow) toEntry() (Entry, error) {
 		NextAttemptAt: due.UTC(),
 		Status:        Status(r.Status),
 		LastError:     r.LastError,
+		CreatedAt:     createdAt.UTC(),
 	}, nil
 }
 
@@ -274,4 +281,99 @@ func (s *sqliteStore) refuseReason(ctx context.Context, conn sqliteConn, tc tena
 		return &StaleClaimError{ID: e.ID.String(), Claimed: e.Attempt, Current: int(row.Attempt)}
 	}
 	return &TerminalStateError{ID: e.ID.String(), Status: Status(row.Status)}
+}
+
+func (s *sqliteStore) Requeue(ctx context.Context, id uuid.UUID, target string) error {
+	conn, tc, err := s.conn(ctx)
+	if err != nil {
+		return err
+	}
+	stmt := s.entries.UPDATE(s.entries.Status, s.entries.Attempt, s.entries.NextAttemptAt, s.entries.LastError).
+		SET(sqlite.String(string(StatusPending)), sqlite.Int(0), sqlite.String(sqliteent.SQLiteTime(time.Now())), sqlite.String("")).
+		WHERE(s.failedRow(tc, id, target))
+	res, execErr := stmt.ExecContext(ctx, conn)
+	if execErr != nil {
+		return fmt.Errorf("outbox.sqlite.Requeue: %w", execErr)
+	}
+	n, raErr := res.RowsAffected()
+	if raErr != nil {
+		return fmt.Errorf("outbox.sqlite.Requeue: rows affected: %w", raErr)
+	}
+	if n > 0 {
+		return nil
+	}
+	return s.refuseRequeue(ctx, conn, tc, id, target)
+}
+
+func (s *sqliteStore) failedRow(tc tenant.Context, id uuid.UUID, target string) sqlite.BoolExpression {
+	return s.entries.OrgID.EQ(sqlite.String(tc.OrgID.String())).
+		AND(s.entries.ID.EQ(sqlite.String(id.String()))).
+		AND(s.entries.Target.EQ(sqlite.String(target))).
+		AND(s.entries.Status.EQ(sqlite.String(string(StatusFailed))))
+}
+
+func (s *sqliteStore) refuseRequeue(ctx context.Context, conn sqliteConn, tc tenant.Context, id uuid.UUID, target string) error {
+	stmt := sqlite.SELECT(s.entries.Status).
+		FROM(s.entries).
+		WHERE(s.entries.OrgID.EQ(sqlite.String(tc.OrgID.String())).
+			AND(s.entries.ID.EQ(sqlite.String(id.String()))).
+			AND(s.entries.Target.EQ(sqlite.String(target))))
+	var row struct {
+		Status string `alias:"outbox_entries.status"`
+	}
+	if err := stmt.QueryContext(ctx, conn, &row); err != nil {
+		if errorIsNoRows(err) {
+			return &NotFoundError{ID: id.String()}
+		}
+		return fmt.Errorf("outbox.sqlite.Requeue: read status: %w", err)
+	}
+	return &NotFailedError{ID: id.String(), Status: Status(row.Status)}
+}
+
+func (s *sqliteStore) RequeueFailed(ctx context.Context, target string) (int, error) {
+	conn, tc, err := s.conn(ctx)
+	if err != nil {
+		return 0, err
+	}
+	stmt := s.entries.UPDATE(s.entries.Status, s.entries.Attempt, s.entries.NextAttemptAt, s.entries.LastError).
+		SET(sqlite.String(string(StatusPending)), sqlite.Int(0), sqlite.String(sqliteent.SQLiteTime(time.Now())), sqlite.String("")).
+		WHERE(s.entries.OrgID.EQ(sqlite.String(tc.OrgID.String())).
+			AND(s.entries.Target.EQ(sqlite.String(target))).
+			AND(s.entries.Status.EQ(sqlite.String(string(StatusFailed)))))
+	res, execErr := stmt.ExecContext(ctx, conn)
+	if execErr != nil {
+		return 0, fmt.Errorf("outbox.sqlite.RequeueFailed: %w", execErr)
+	}
+	n, raErr := res.RowsAffected()
+	if raErr != nil {
+		return 0, fmt.Errorf("outbox.sqlite.RequeueFailed: rows affected: %w", raErr)
+	}
+	return int(n), nil
+}
+
+func (s *sqliteStore) ListByTarget(ctx context.Context, target string, limit int) ([]Entry, error) {
+	conn, tc, err := s.conn(ctx)
+	if err != nil {
+		return nil, err
+	}
+	stmt := sqlite.SELECT(s.entries.AllColumns).
+		FROM(s.entries).
+		WHERE(s.entries.OrgID.EQ(sqlite.String(tc.OrgID.String())).
+			AND(s.entries.Target.EQ(sqlite.String(target)))).
+		ORDER_BY(s.entries.CreatedAt.DESC(), s.entries.ID.DESC()).
+		LIMIT(listBatch(limit))
+
+	var rows []sqliteEntryRow
+	if qErr := stmt.QueryContext(ctx, conn, &rows); qErr != nil && !errorIsNoRows(qErr) {
+		return nil, fmt.Errorf("outbox.sqlite.ListByTarget: %w", qErr)
+	}
+	out := make([]Entry, 0, len(rows))
+	for i := range rows {
+		e, cErr := rows[i].toEntry()
+		if cErr != nil {
+			return nil, cErr
+		}
+		out = append(out, e)
+	}
+	return out, nil
 }

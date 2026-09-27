@@ -474,6 +474,9 @@ templ projectMenu(d web.LayoutData, slug string) {
 		<a href={ templ.SafeURL(d.ProjectPath(slug, "/apikeys")) } class={ orgItemClass(d.ActiveNav.ProjectKey == "apikeys") }>
 			@icons.Icon("key", "h-4 w-4 shrink-0") <span>{ d.Tr("nav.apikeys") }</span>
 		</a>
+		<a href={ templ.SafeURL(d.ProjectPath(slug, "/webhooks")) } class={ orgItemClass(d.ActiveNav.ProjectKey == "webhooks") }>
+			@icons.Icon("send", "h-4 w-4 shrink-0") <span>{ d.Tr("nav.webhooks") }</span>
+		</a>
 	</nav>
 }
 

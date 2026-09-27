@@ -14,8 +14,10 @@ it is a delivery mechanism, so the transport rule comes first. Procedure:
 `http.Client`. The package installs `rejectPrivate` as the dialer's `ControlContext`
 (`httpclient/httpclient.go:45`, `httpclient/safe.go:48`), which refuses loopback, link-local,
 private and CGNAT ranges at **connect** time — so it also defeats DNS rebinding, because the
-check runs on the resolved address rather than the hostname. Redirects are refused outright
-unless `AllowRedirects` is set (`httpclient/resty.go:43-44`); S5 does not set it.
+check runs on the resolved address rather than the hostname. `httpclient.New` follows
+redirects, and the dial guard runs on every hop; the webhook deliverer refuses them anyway —
+`webhook.NewDeliverer` sets `CheckRedirect` to `http.ErrUseLastResponse`, so a 3xx is a failed
+delivery. (`httpclient.NewResty` refuses redirects unless `AllowRedirects`; S5 does not use it.)
 
 **Private endpoints in self-hosted forks.** Self-hosted tenants do legitimately run receivers
 on internal networks, and `httpclient.WithAllowPrivateHosts(true)` opens this up. The template
@@ -35,8 +37,9 @@ X-Altempl-Signature: v1=<hex-primary> v1=<hex-secondary>   # during rotation onl
 ```
 
 Space-separated, **primary first**; a verifier accepts the delivery if any listed signature
-matches. Guidance published to tenants: compare with `hmac.Equal`, never `==` or `bytes.Equal`
-on a decoded value; reject a timestamp outside a **±5 minute** window.
+matches. Guidance published to tenants ([`webhooks`](../webhooks/README.md#signature)): compare
+with `hmac.Equal`, never `==` or `bytes.Equal` on a decoded value; reject a timestamp outside a
+**±5 minute** window.
 
 **Rotation.** An endpoint holds up to two active secrets. Dispatch signs with the primary and
 emits both during the rotation window so a tenant can roll without dropping deliveries;
@@ -46,13 +49,14 @@ retiring the old secret is an explicit action.
 primitive is `internal/platform/outbox/`: a tenant-scoped table holding
 `{id, event_id, org_id, project_id, target, payload, attempt, next_attempt_at, status, last_error}`;
 `outbox.Worker`, which claims due rows per tenant — safe against two replicas — delivers
-through a `Deliverer` and records the outcome; and `outbox.Backoff`, jittered exponential and
-bounded by `outbox.MaxAttempts`, with terminal rows retained as the delivery log. Its tenant
+through a `Deliverer` and records the outcome; and `outbox.Backoff`, a fixed step table with
+±10% jitter and bounded by `outbox.MaxAttempts`, with terminal rows retained as the delivery log. Its tenant
 fan-out is the same `tenant.Enumerator` the scheduler uses
-([`request scope`](../multitenancy/request-scope.md)). What is **not** shipped is a sender: no
-`Deliverer` is registered, so nothing is delivered until a fork registers one. Tenants treat
-deliveries as idempotent and dedupe on `event_id`, which is `UNIQUE (org_id, event_id, target)`.
-Attempt count, lease and retention values: [`howto/webhook-out.md`](../howto/webhook-out.md).
+([`request scope`](../multitenancy/request-scope.md)). The sender is `internal/webhook`: boot
+always registers the worker with `webhook.NewDeliverer`. `UNIQUE (org_id, event_id, target)`
+makes a repeat enqueue a no-op; tenants treat deliveries as idempotent and dedupe on the
+delivery id (`X-Altempl-Delivery-Id`). Receiver contract — envelope, headers, retry schedule:
+[`webhooks`](../webhooks/README.md). Adding an event: [`howto/webhook-out.md`](../howto/webhook-out.md).
 
 ### R11 — the CLI is a client, not a plane
 
@@ -95,9 +99,9 @@ the flags, the precedence, the `healthz` carve-out and that SECURITY note are
 
 ### What a fork implementing S4 or S5 must reuse
 
-Both are seams, not finished surfaces. A fork registers providers and a sender
-([`howto/webhook-in.md`](../howto/webhook-in.md), [`howto/webhook-out.md`](../howto/webhook-out.md));
-it does not re-decide the shape. **Delivery** goes through `internal/platform/outbox`, not a
+S4 is a seam; S5 ships with the blog events. A fork registers providers
+([`howto/webhook-in.md`](../howto/webhook-in.md)) and adds events
+([`howto/webhook-out.md`](../howto/webhook-out.md)); it does not re-decide the shape. **Delivery** goes through `internal/platform/outbox`, not a
 second queue and never inline from a request handler; **transport** is `httpclient.New(...)`,
 never a bare `http.Client`; **private endpoints** are an operator decision, never settable by a
 tenant; **signature** is the pinned grammar — do not invent a header. All four are R10 above.

@@ -29,3 +29,8 @@ func NullUUID() postgres.StringExpression {
 func NullJSONB() postgres.StringExpression {
 	return postgres.StringExp(postgres.CAST(postgres.NULL).AS("jsonb"))
 }
+
+// NullBytea returns a fresh SQL NULL typed as bytea.
+func NullBytea() postgres.ByteaExpression {
+	return postgres.ByteaExp(postgres.CAST(postgres.NULL).AS("bytea"))
+}

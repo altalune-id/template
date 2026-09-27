@@ -76,4 +76,12 @@ const (
 	CodeTagInUse         = "TAG004"
 
 	CodeMCPUnauthenticated = "MCP001"
+
+	CodeWebhookEndpointNotFound     = "WHK001"
+	CodeWebhookInvalidURL           = "WHK002"
+	CodeWebhookInvalidEventTypes    = "WHK003"
+	CodeWebhookEndpointLimit        = "WHK004"
+	CodeWebhookDeliveryNotRetryable = "WHK005"
+	CodeWebhookDeliveryNotFound     = "WHK006"
+	CodeWebhookEndpointInactive     = "WHK007"
 )

@@ -11,6 +11,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	blogv1 "altalune.id/template/gen/go/blog/v1"
+	"altalune.id/template/internal/blog"
 	"altalune.id/template/internal/blog/category"
 	"altalune.id/template/internal/blog/tag"
 	"altalune.id/template/internal/platform/session"
@@ -242,6 +243,29 @@ func TestBlog_CreatePost_CrossTenantProjectIsDenied(t *testing.T) {
 	_, err = f.h.blogClient().CreatePost(context.Background(), req)
 	require.Error(t, err)
 	require.Equal(t, connect.CodePermissionDenied, connectCode(err))
+}
+
+// SECURITY: another org's post must read as absent, never forbidden, or the answer confirms the id exists.
+func TestBlog_OtherOrgPostIsNotFound(t *testing.T) {
+	f := newBlogFixture(t)
+	foreign, err := blog.New(uuid.New(), uuid.New(), uuid.New(), "Foreign", "", "body")
+	require.NoError(t, err)
+	f.h.posts.Seed(foreign)
+	client := f.h.blogClient()
+
+	getReq := connect.NewRequest(&blogv1.GetPostRequest{PostId: foreign.ID.String()})
+	withBearer(getReq.Header())
+	_, err = client.GetPost(context.Background(), getReq)
+	require.Equal(t, connect.CodeNotFound, connectCode(err), "GetPost: %v", err)
+
+	pubReq := connect.NewRequest(&blogv1.PublishPostRequest{PostId: foreign.ID.String()})
+	withBearer(pubReq.Header())
+	_, err = client.PublishPost(context.Background(), pubReq)
+	require.Equal(t, connect.CodeNotFound, connectCode(err), "PublishPost: %v", err)
+
+	stored, err := f.h.posts.ByID(context.Background(), foreign.ID)
+	require.NoError(t, err)
+	require.Equal(t, blog.StatusDraft, stored.Status, "the foreign post must be left untouched")
 }
 
 func TestBlog_CreatePost_MissingAuthIsUnauthenticated(t *testing.T) {

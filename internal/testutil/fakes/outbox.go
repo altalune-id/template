@@ -52,6 +52,18 @@ func (f *Outbox) ByID(id uuid.UUID) (outbox.Entry, bool) {
 	return cloneOutboxEntry(e), ok
 }
 
+// SetCreatedAt overrides a recorded entry's CreatedAt, for tests that need to force a tie.
+func (f *Outbox) SetCreatedAt(id uuid.UUID, at time.Time) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	e, ok := f.byID[id]
+	if !ok {
+		return
+	}
+	e.CreatedAt = at
+	f.byID[id] = e
+}
+
 func (f *Outbox) Enqueue(ctx context.Context, e outbox.Entry) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -76,6 +88,7 @@ func (f *Outbox) Enqueue(ctx context.Context, e outbox.Entry) error {
 	if e.NextAttemptAt.IsZero() {
 		e.NextAttemptAt = time.Now().UTC()
 	}
+	e.CreatedAt = time.Now().UTC()
 	f.keys[key] = e.ID
 	f.byID[e.ID] = cloneOutboxEntry(e)
 	return nil
@@ -156,6 +169,76 @@ func (f *Outbox) transition(ctx context.Context, claimed outbox.Entry, apply fun
 	apply(&e)
 	f.byID[id] = e
 	return nil
+}
+
+func (f *Outbox) Requeue(ctx context.Context, id uuid.UUID, target string) error {
+	tc, err := tenant.From(ctx)
+	if err != nil {
+		return err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	e, ok := f.byID[id]
+	if !ok || e.OrgID != tc.OrgID || e.Target != target {
+		return &outbox.NotFoundError{ID: id.String()}
+	}
+	if e.Status != outbox.StatusFailed {
+		return &outbox.NotFailedError{ID: id.String(), Status: e.Status}
+	}
+	e.Status = outbox.StatusPending
+	e.Attempt = 0
+	e.NextAttemptAt = time.Now().UTC()
+	e.LastError = ""
+	f.byID[id] = e
+	return nil
+}
+
+func (f *Outbox) RequeueFailed(ctx context.Context, target string) (int, error) {
+	tc, err := tenant.From(ctx)
+	if err != nil {
+		return 0, err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	n := 0
+	for id, e := range f.byID {
+		if e.OrgID != tc.OrgID || e.Target != target || e.Status != outbox.StatusFailed {
+			continue
+		}
+		e.Status = outbox.StatusPending
+		e.Attempt = 0
+		e.NextAttemptAt = time.Now().UTC()
+		e.LastError = ""
+		f.byID[id] = e
+		n++
+	}
+	return n, nil
+}
+
+func (f *Outbox) ListByTarget(ctx context.Context, target string, limit int) ([]outbox.Entry, error) {
+	tc, err := tenant.From(ctx)
+	if err != nil {
+		return nil, err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]outbox.Entry, 0, len(f.byID))
+	for _, e := range f.byID {
+		if e.OrgID != tc.OrgID || e.Target != target {
+			continue
+		}
+		out = append(out, cloneOutboxEntry(e))
+	}
+	slices.SortFunc(out, func(a, b outbox.Entry) int {
+		if c := b.CreatedAt.Compare(a.CreatedAt); c != 0 {
+			return c
+		}
+		return bytes.Compare(b.ID[:], a.ID[:])
+	})
+	if lim := min(max(limit, 1), outbox.MaxListLimit); lim < len(out) {
+		out = out[:lim]
+	}
+	return out, nil
 }
 
 func (f *Outbox) reapLocked(orgID uuid.UUID, now time.Time) {

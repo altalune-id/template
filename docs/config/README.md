@@ -172,9 +172,9 @@ Boot fails if the runtime role holds `BYPASSRLS` and `db.allowBypassRLS` is `fal
 
 ## Encryption at rest
 
-| Key                      | Default | Awareness                     | Meaning                                                        |
-| ------------------------ | ------- | ----------------------------- | -------------------------------------------------------------- |
-| `security.encryptionKey` | `""`    | `required, secret, bootstrap` | 32 bytes as hex or standard base64. Seals the session payload. |
+| Key                      | Default | Awareness                     | Meaning                                                                         |
+| ------------------------ | ------- | ----------------------------- | ------------------------------------------------------------------------------- |
+| `security.encryptionKey` | `""`    | `required, secret, bootstrap` | 32 bytes as hex or standard base64. Seals sessions and webhook signing secrets. |
 
 Web sessions are rows in `sessions`; the payload holds the `Principal`, which carries a live IdP
 ID token. The row is sealed with AES-256-GCM bound to its session id, so a row copied under
@@ -182,11 +182,11 @@ another id will not open. The table carries no `org_id` and no RLS policy: a ses
 before any tenant scope exists, so a policy on it would reject every login under
 `db.allowBypassRLS=false`.
 
-`db.driver=postgres` and `mode=cloud` both require the key. Under `sqlite` it is optional and
-boot mints an **ephemeral** one — sessions then last for the life of the process, not across a
-restart, and boot warns `security.encryptionKey is empty — using an ephemeral key; …`. Rotating
-the key corrupts nothing: rows sealed with the old key stop opening, so their holders are signed
-out and the `session-sweep` job reaps the rows at expiry.
+`db.driver=postgres` and `mode=cloud` both require the key. Under `sqlite` boot mints an **ephemeral** one
+and warns `security.encryptionKey is empty — using an ephemeral key; sessions and webhook signing secrets
+will not survive a restart; …`. After a restart or a key rotation nothing old opens: users are signed out
+(`session-sweep` reaps the rows) and deliveries fail with `webhook.SecretUnavailableError` until the tenant
+rotates the endpoint secret. The endpoint page shows a banner (`capabilities.EphemeralEncryptionKey`).
 
 ## Validation
 

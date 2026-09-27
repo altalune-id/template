@@ -33,6 +33,7 @@ import (
 	"altalune.id/template/internal/web"
 	webhandlers "altalune.id/template/internal/web/handlers"
 	webmw "altalune.id/template/internal/web/middleware"
+	"altalune.id/template/internal/webhook"
 )
 
 func buildAPIHandler(cfg *config.Config, k *platform.Kernel, s *Services) (*controlplane.Server, http.Handler) {
@@ -88,6 +89,7 @@ func buildWebHandler(
 	cats *category.Service,
 	tags *blogtag.Service,
 	apiKeys *apikey.Service,
+	webhooks *webhook.Service,
 	required *atomic.Bool,
 	setupToken string,
 	apiHandler http.Handler,
@@ -110,6 +112,7 @@ func buildWebHandler(
 	todoHandler := webhandlers.NewTodoHandler(deps, projects, todos)
 	blogHandler := webhandlers.NewBlogHandler(deps, projects, posts, cats, tags)
 	apiKeyHandler := webhandlers.NewAPIKeyHandler(deps, projects, apiKeys)
+	webhookHandler := webhandlers.NewWebhookHandler(deps, projects, webhooks)
 	inviteHandler := webhandlers.NewInviteHandler(deps, orgs, invites)
 	localeHandler := webhandlers.NewLocaleHandler(deps, users)
 	welcomeHandler := webhandlers.NewWelcomeHandler(deps, users)
@@ -122,7 +125,7 @@ func buildWebHandler(
 		BasePath: cfg.HTTP.BasePath,
 		HealthOK: healthOK,
 		AppHandlers: []web.Register{
-			authHandler, onboardingHandler, onboardHandler, homeHandler, orgHandler, projectHandler, todoHandler, blogHandler, apiKeyHandler, inviteHandler, localeHandler, welcomeHandler, signupHandler, legalHandler,
+			authHandler, onboardingHandler, onboardHandler, homeHandler, orgHandler, projectHandler, todoHandler, blogHandler, apiKeyHandler, webhookHandler, inviteHandler, localeHandler, welcomeHandler, signupHandler, legalHandler,
 		},
 		APIHandler:         apiHandler,
 		DataHandler:        dataHandler,
