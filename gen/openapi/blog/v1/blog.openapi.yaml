@@ -337,7 +337,7 @@ components:
         projectId:
           type: string
           title: project_id
-          description: UUID of the project to list posts in
+          description: UUID of the project to list posts in; omit to use the credential's active project
         status:
           type: string
           title: status

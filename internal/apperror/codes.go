@@ -35,6 +35,7 @@ const (
 	CodeProjectAlreadyExists   = "PRJ002"
 	CodeProjectInvalidSlug     = "PRJ003"
 	CodeProjectSystemProtected = "PRJ004"
+	CodeProjectUnresolved      = "PRJ005"
 
 	CodeInviteNotFound    = "INV001"
 	CodeInviteExpired     = "INV002"

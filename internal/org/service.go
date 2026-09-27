@@ -4,14 +4,19 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"github.com/google/uuid"
 	"go.opentelemetry.io/otel"
 
 	"altalune.id/template/internal/apperror"
 	"altalune.id/template/internal/platform/capabilities"
+	slugs "altalune.id/template/internal/platform/slug"
 	"altalune.id/template/internal/platform/tenant"
 )
+
+// MaxSlugAttempts bounds how many generated slugs Create tries before giving up.
+const MaxSlugAttempts = 5
 
 //nolint:gochecknoglobals // OTel tracer is a package-level fixture, not runtime state.
 var tracer = otel.Tracer("altalune.id/template/internal/org")
@@ -97,7 +102,7 @@ func (s *Service) BootstrapSingleton(ctx context.Context, slug, name string, own
 	return o, nil
 }
 
-// Create constructs a new org and enrols the owner as an owner-role member.
+// Create constructs a new org and enrols the owner as an owner-role member; an empty slug is generated.
 func (s *Service) Create(ctx context.Context, req CreateRequest) (*Org, error) {
 	ctx, span := tracer.Start(ctx, "org.Create")
 	defer span.End()
@@ -106,15 +111,34 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*Org, error) {
 		return nil, &CreationDisabledError{}
 	}
 
-	existing, err := s.store.BySlug(ctx, req.Slug)
-	switch {
-	case err == nil && existing != nil:
-		return nil, &AlreadyExistsError{Slug: req.Slug}
-	case err != nil && !IsNotFoundError(err):
-		return nil, s.unexpected(ctx, "org.Create: BySlug", fmt.Errorf("org.Create: BySlug: %w", err), "slug", req.Slug)
+	if chosen := strings.TrimSpace(req.Slug); chosen != "" {
+		return s.createWithSlug(ctx, req, chosen)
 	}
 
-	o, err := NewOrg(req.Slug, req.Name, req.OwnerID)
+	var taken error
+	for range MaxSlugAttempts {
+		o, err := s.createWithSlug(ctx, req, slugs.Generate())
+		if err == nil {
+			return o, nil
+		}
+		if !IsAlreadyExistsError(err) {
+			return nil, err
+		}
+		taken = err
+	}
+	return nil, taken
+}
+
+func (s *Service) createWithSlug(ctx context.Context, req CreateRequest, chosen string) (*Org, error) {
+	existing, err := s.store.BySlug(ctx, chosen)
+	switch {
+	case err == nil && existing != nil:
+		return nil, &AlreadyExistsError{Slug: chosen}
+	case err != nil && !IsNotFoundError(err):
+		return nil, s.unexpected(ctx, "org.Create: BySlug", fmt.Errorf("org.Create: BySlug: %w", err), "slug", chosen)
+	}
+
+	o, err := NewOrg(chosen, req.Name, req.OwnerID)
 	if err != nil {
 		return nil, err
 	}
@@ -124,7 +148,7 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*Org, error) {
 		if IsAlreadyExistsError(err) {
 			return nil, err
 		}
-		return nil, s.unexpected(ctx, "org.Create: Save", fmt.Errorf("org.Create: Save: %w", err), "slug", req.Slug)
+		return nil, s.unexpected(ctx, "org.Create: Save", fmt.Errorf("org.Create: Save: %w", err), "slug", chosen)
 	}
 
 	m, err := NewMembership(o.ID, req.OwnerID, RoleOwner)

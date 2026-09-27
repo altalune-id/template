@@ -377,9 +377,10 @@ func TestMCP_KeyScopeIsCheckedPerTool(t *testing.T) {
 func TestMCP_CallWithoutArgumentsDecodes(t *testing.T) {
 	f := newMCPFixture(t, mcpOpts{enabled: true})
 
-	rec := f.call(t, f.readKey, map[string]any{
+	token := f.issuer.mint(t, mcpAudience, []string{authn.ScopePostsWrite})
+	rec := f.call(t, token, map[string]any{
 		"jsonrpc": "2.0", "id": 2, "method": "tools/call",
-		"params": map[string]any{"name": "blog_list"},
+		"params": map[string]any{"name": mcpinternal.ToolBlogPublish},
 	})
 	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
 	require.Equal(t, apperror.CodeValidation, toolPayload(t, rec).Code,
@@ -490,6 +491,7 @@ func TestMCP_ToolsCarryAScopeAndTheSharedInstances(t *testing.T) {
 		"todo_create":  f.srv.API.TodoSvc,
 		"blog_publish": f.srv.API.BlogSvc,
 		"blog_list":    f.srv.API.BlogSvc,
+		"project_list": f.srv.API.ProjectSvc,
 	}
 	for _, name := range names {
 		t.Run(name, func(t *testing.T) {
@@ -523,6 +525,7 @@ func TestMCP_ToolsShareTheConnectHandlerInstance(t *testing.T) {
 		{mcpinternal.ToolTodoCreate, f.srv.API.TodoSvc},
 		{mcpinternal.ToolBlogPublish, f.srv.API.BlogSvc},
 		{mcpinternal.ToolBlogList, f.srv.API.BlogSvc},
+		{mcpinternal.ToolProjectList, f.srv.API.ProjectSvc},
 	}
 
 	covered := make([]string, 0, len(tests))

@@ -74,6 +74,7 @@ In the Status column, `—` means the code is registered but nothing constructs 
 | `PRJ002` | `apperror.CodeProjectAlreadyExists`   | `AlreadyExists`      | Project Already Exists   |
 | `PRJ003` | `apperror.CodeProjectInvalidSlug`     | `InvalidArgument`    | Project Invalid Slug     |
 | `PRJ004` | `apperror.CodeProjectSystemProtected` | `FailedPrecondition` | Project System Protected |
+| `PRJ005` | `apperror.CodeProjectUnresolved`      | `FailedPrecondition` | Project Unresolved       |
 
 ## INV — Invites
 

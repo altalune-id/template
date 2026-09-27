@@ -9,6 +9,7 @@ import (
 
 	"altalune.id/template/internal/org"
 	"altalune.id/template/internal/platform/session"
+	slugs "altalune.id/template/internal/platform/slug"
 	"altalune.id/template/internal/web"
 	"altalune.id/template/internal/web/templates"
 )
@@ -46,7 +47,7 @@ func (h *OrgHandler) GetNew(w http.ResponseWriter, r *http.Request) {
 		h.ErrorPage(w, r, http.StatusForbidden, "Not allowed", "Organization creation is disabled in this deployment.")
 		return
 	}
-	Render(w, r, templates.OrgNewLayout(h.Layout(r, "Create organization", web.ActiveNav{Scope: web.NavScopeOrg}), templates.OrgNewView{}))
+	Render(w, r, templates.OrgNewLayout(h.Layout(r, "Create organization", web.ActiveNav{Scope: web.NavScopeOrg}), templates.OrgNewView{Slug: slugs.Generate()}))
 }
 
 // PostCreate handles POST /orgs (org creation is capability-gated).
@@ -193,6 +194,9 @@ func (h *OrgHandler) requireAuth(w http.ResponseWriter, r *http.Request) (sessio
 }
 
 func (h *OrgHandler) renderNewErr(w http.ResponseWriter, r *http.Request, slug, name string, err error) {
+	if slug == "" {
+		slug = slugs.Generate()
+	}
 	msg := err.Error()
 	switch {
 	case org.IsAlreadyExistsError(err):
