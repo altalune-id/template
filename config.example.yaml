@@ -208,6 +208,16 @@ onboard:
   # [secret] env: ALT_ONBOARD_SETUP_TOKEN
   setupToken: ""
 
+queue:
+  # env: ALT_QUEUE_CONNECT_TIMEOUT
+  connectTimeout: 10s
+  # env: ALT_QUEUE_ENABLED
+  enabled: false
+  # [secret] env: ALT_QUEUE_TOKEN
+  token: ""
+  # [secret] env: ALT_QUEUE_URL
+  url: ""
+
 scheduler:
   # [bootstrap] env: ALT_SCHEDULER_ENABLED
   enabled: true

@@ -91,6 +91,7 @@ func buildWebHandler(
 	apiKeys *apikey.Service,
 	webhooks *webhook.Service,
 	required *atomic.Bool,
+	onComplete func(ctx context.Context),
 	setupToken string,
 	apiHandler http.Handler,
 	dataHandler http.Handler,
@@ -105,7 +106,7 @@ func buildWebHandler(
 
 	authHandler := webhandlers.NewAuthHandler(deps, auths, users, orgs, projects, kernel.AltAuth, required)
 	onboardingHandler := webhandlers.NewOnboardingHandler(deps, users)
-	onboardHandler := webhandlers.NewOnboardHandler(deps, users, orgs, projects, onboards, required, setupToken)
+	onboardHandler := webhandlers.NewOnboardHandler(deps, users, orgs, projects, onboards, required, onComplete, setupToken)
 	homeHandler := webhandlers.NewHomeHandler(deps, orgs, projects)
 	orgHandler := webhandlers.NewOrgHandler(deps, orgs)
 	projectHandler := webhandlers.NewProjectHandler(deps, projects)

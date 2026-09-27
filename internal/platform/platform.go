@@ -15,6 +15,7 @@ import (
 	"altalune.id/template/internal/platform/capabilities"
 	"altalune.id/template/internal/platform/db"
 	"altalune.id/template/internal/platform/outbox"
+	"altalune.id/template/internal/platform/queue"
 	"altalune.id/template/internal/platform/sealer"
 	"altalune.id/template/internal/platform/session"
 	"altalune.id/template/internal/platform/tenant"
@@ -42,6 +43,8 @@ type Kernel struct {
 	Nano     NanoIDFunc
 	Caps     capabilities.Capabilities
 	Outbox   outbox.Store
+	// Queue is always non-nil: Disabled(log) when queue.enabled is false.
+	Queue *queue.Client
 
 	closers []io.Closer
 }

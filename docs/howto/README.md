@@ -36,10 +36,11 @@ promise to someone outside.
 
 ## Platform and configuration
 
-| I want to                                           | Recipe                                      |
-| --------------------------------------------------- | ------------------------------------------- |
-| add a cache, queue, rate limiter or background loop | [platform-primitive](platform-primitive.md) |
-| add a config key                                    | [config-key](config-key.md)                 |
+| I want to                                             | Recipe                                      |
+| ----------------------------------------------------- | ------------------------------------------- |
+| add a cache, queue, rate limiter or background loop   | [platform-primitive](platform-primitive.md) |
+| run work on the queue, or broadcast to every instance | [queue-consumer](queue-consumer.md)         |
+| add a config key                                      | [config-key](config-key.md)                 |
 
 ## Errors
 
@@ -65,6 +66,7 @@ wrong. [`multitenancy`](../multitenancy/README.md) is the model;
 | [`scopes`](../scopes/README.md)             | the scope catalog                          |
 | [`mcp`](../mcp/README.md)                   | the MCP surface                            |
 | [`webhooks`](../webhooks/README.md)         | the webhook receiver contract              |
+| [`queue`](../queue/README.md)               | jobs, broadcasts, retries and the DLQ      |
 | [`modules`](../modules/README.md)           | the domain-module shape                    |
 | [`platform`](../platform/README.md)         | the platform-primitive shape               |
 | [`error codes`](../errors/README.md)        | the code registry and where each travels   |

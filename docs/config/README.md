@@ -122,11 +122,11 @@ one account once and never overwrite it. Boot writes nothing — it reconciles t
   exists is itself a disclosure — and every write route requires a key regardless of the flag.
   Scope strings a key or token can carry: [`scopes`](../scopes/README.md).
 
-## MCP
+## MCP and queue
 
-`mcp.enabled` mounts S7 at `basePath + /mcp`. It fails boot without `tokens.issuer` and without
-either `http.baseURL` or an explicit `mcp.audience`. Keys, defaults, the enforced setup order
-and the Apps UI bundle: [`mcp`](../mcp/README.md).
+- `mcp.enabled` mounts S7 at `basePath + /mcp`; boot fails without `tokens.issuer` and without
+  `http.baseURL` or `mcp.audience`. Keys, defaults, setup order, Apps UI: [`mcp`](../mcp/README.md).
+- `queue.*` is the NATS connection behind `Submit` and `Emit`: [`queue`](../queue/README.md#config).
 
 ## Database
 

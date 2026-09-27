@@ -11,7 +11,7 @@ the session principal — **not** from `--org`.
 | Group   | Command                                                 | Args           | Flags                                                                                                                             | Contract / prints                                                                                                                    |
 | ------- | ------------------------------------------------------- | -------------- | --------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
 | Runtime | `init`                                                  | none           | `--email` (required), `--name` (defaults to `--email`), `--org-slug` (`default`), `--org-name`, `--project-slug`, `--interactive` | First-run bootstrap: creates the genesis admin and marks onboarding complete. Exits `6` when already onboarded (`ONB002`).           |
-| Runtime | `serve`                                                 | none           | `--no-scheduler`, `--scheduler-only` — mutually exclusive                                                                         | Runs the HTTP listener on `http.addr` and blocks until signalled.                                                                    |
+| Runtime | `serve`                                                 | none           | `--no-scheduler`, `--scheduler-only`, `--no-consumer`, `--consumer-only` — exclusions below                                       | Runs the HTTP listener on `http.addr` and blocks until signalled.                                                                    |
 | Runtime | `migrate up`                                            | none           | —                                                                                                                                 | Applies every pending migration. Prints `migrations: up-to-date`.                                                                    |
 | Runtime | `migrate status`                                        | none           | —                                                                                                                                 | One row per migration: `<version> <applied-at \| "pending"> <source>`.                                                               |
 | Runtime | `migrate down-to <version>`                             | exactly 1, int | —                                                                                                                                 | Rolls the schema back to that goose version.                                                                                         |
@@ -34,6 +34,11 @@ the session principal — **not** from `--org`.
 
 - `init --org-slug` creates the singleton org only in `selfhosted` mode; in `cloud` mode it is
   ignored.
+- `serve` flag exclusions: `--no-scheduler`/`--scheduler-only`, `--no-consumer`/`--consumer-only`
+  and `--consumer-only`/`--scheduler-only`. `--no-consumer` keeps full HTTP and stops consuming
+  jobs; `--consumer-only` serves health probes only, consumes jobs and runs no scheduler, and fails
+  boot with `queue.enabled=false`. `--scheduler-only` runs no consumer. What each combination
+  runs: [`queue`](../queue/README.md#serve-flags).
 - `scheduler run` exits `5` on an unknown job (`scheduler.unknown_job`), `6` when it is already
   running here or another replica holds the lock, and `7` when the runner is draining or
   `scheduler.enabled=false` (`scheduler.disabled`).

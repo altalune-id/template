@@ -7,12 +7,12 @@ factory, one field on `Kernel`.
 
 ## What counts
 
-- **Adapter over an external system** — `internal/platform/{db,session,tokens,outbox,notify}`,
+- **Adapter over an external system** — `internal/platform/{db,session,tokens,outbox,notify,queue}`,
   `mailer/`, `authl/`.
 - **Cross-cutting primitive** — `logger/`, `telemetry/`, `reqid/`, `nanoid/`, `httpclient/`,
   `internal/platform/{tenant,capabilities,sealer,authn}`.
 - **Long-running loop** — `worker/` (the Supervisor), `scheduler/`, `outbox.Worker`,
-  `db.HealthMonitor`.
+  `db.HealthMonitor`, `queue.Consumer`, `queue.Listen`.
 - **Public contract** — `internal/platform/events`: the webhook event catalog and payloads.
   Stdlib and uuid only; additive within a version ([`webhooks`](../webhooks/README.md#versioning)).
 - **Not one** — domain logic (`internal/<name>/`), a surface
@@ -116,7 +116,7 @@ depguard in `.golangci.yaml` is the source of truth.
 
 A platform package MAY import stdlib, the third-party library its adapter needs,
 `internal/apperror`, and a narrow set of siblings (`tenant`→`apperror`, `tokens`→`session`,
-`notify`→`apperror`+`mailer`).
+`notify`→`apperror`+`mailer`, `queue`→`apperror`+`tenant`+root `worker`).
 
 ## Adapters
 
@@ -138,12 +138,17 @@ One port, several backends, one factory. Reference: `internal/platform/session/`
 | Worker              | `internal/platform/outbox/`, `db.HealthMonitor` | Implements `worker.Worker`; `sup.Register` in boot                                                             |
 | Worker owning jobs  | `scheduler/`                                    | Many `Job`s; per-job config under `config.SchedulerConfig.Jobs`                                                |
 | Producer + consumer | `internal/platform/outbox/`                     | Producer is a `Store` registered as a Closer; consumer is the `Worker`, delivering through `webhook.Deliverer` |
+| Queue over NATS     | `internal/platform/queue/`                      | `Client.Submit`/`Emit`; `queue.Consumer` and `queue.Listen` workers. Contract: [`queue`](../queue/README.md)   |
 
 ## Boot — the Kernel
 
 Every primitive is one field on `platform.Kernel` (`internal/platform/platform.go`): `Pool`,
 `PgConn`, `Log`, `Reporter`, `Sessions`, `Sealer`, `Verifier`, `Mail`, `AltAuth`, `Tracer`,
-`Meter`, `Notify`, `Nano`, `Caps`, `Outbox`, plus an unexported `closers []io.Closer`.
+`Meter`, `Notify`, `Nano`, `Caps`, `Outbox`, `Queue`, plus an unexported `closers []io.Closer`.
+
+- **`Kernel.Queue` is never nil.** It is `queue.Disabled(log)` when `queue.enabled=false`, so a
+  service calls `Submit` unconditionally. Boot adds it with `AddCloser` right after `Connect`, so
+  it closes before the pool and every later boot failure closes it.
 
 - **`AddCloser` then `Close`** — `Close` walks `slices.Backward(closers)` and returns
   `errors.Join`. Reverse order means the last thing built is the first torn down, so a dependent

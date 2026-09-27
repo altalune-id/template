@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"cmp"
+	"context"
 	"crypto/subtle"
 	"net/http"
 	"net/url"
@@ -38,6 +39,9 @@ type OnboardHandler struct {
 	Onboards *onboard.Service
 	Required *atomic.Bool
 
+	// OnComplete runs after onboarding completes; it owns clearing Required on every instance.
+	OnComplete func(ctx context.Context)
+
 	// SetupToken gates every /onboard route while it is non-empty.
 	SetupToken string
 }
@@ -50,6 +54,7 @@ func NewOnboardHandler(
 	projects *project.Service,
 	onboards *onboard.Service,
 	required *atomic.Bool,
+	onComplete func(ctx context.Context),
 	setupToken string,
 ) *OnboardHandler {
 	return &OnboardHandler{
@@ -59,6 +64,7 @@ func NewOnboardHandler(
 		Projects:   projects,
 		Onboards:   onboards,
 		Required:   required,
+		OnComplete: onComplete,
 		SetupToken: setupToken,
 	}
 }
@@ -233,6 +239,7 @@ func (h *OnboardHandler) PostLocal(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	h.completed(r.Context())
 
 	principal := session.Principal{
 		UserID:          u.ID,
@@ -252,9 +259,6 @@ func (h *OnboardHandler) PostLocal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if h.Required != nil {
-		h.Required.Store(false)
-	}
 	http.Redirect(w, r, web.Path(h.Cfg.HTTP.BasePath, "/"), http.StatusSeeOther)
 }
 
@@ -367,16 +371,20 @@ func (h *OnboardHandler) PostOIDCComplete(w http.ResponseWriter, r *http.Request
 			return
 		}
 	}
+	h.completed(r.Context())
 	p.IsAdmin = true
 	p.ActiveOrgID = o.ID
 	p.ActiveProjectID = projectID(proj)
 	if err := h.UpdateSession(r, sid, p); err != nil {
 		h.LogErr("web onboard: refresh session", err)
 	}
-	if h.Required != nil {
-		h.Required.Store(false)
-	}
 	http.Redirect(w, r, web.Path(h.Cfg.HTTP.BasePath, "/"), http.StatusSeeOther)
+}
+
+func (h *OnboardHandler) completed(ctx context.Context) {
+	if h.OnComplete != nil {
+		h.OnComplete(ctx)
+	}
 }
 
 func (h *OnboardHandler) oidcFinalizeView(p session.Principal, errMsg string, fieldErrs map[string]string) templates.OnboardView {

@@ -138,10 +138,10 @@ compose-logs: ## Tail logs from the local dev stack
 	@if command -v docker >/dev/null 2>&1; then docker compose logs -f --tail=100; \
 	elif command -v podman-compose >/dev/null 2>&1; then podman-compose logs -f --tail=100; fi
 
-compose-nuke: ## Stop the stack AND wipe the bind-mounted postgres data
+compose-nuke: ## Stop the stack AND wipe the bind-mounted postgres and nats data
 	@if command -v docker >/dev/null 2>&1; then docker compose down -v; \
 	elif command -v podman-compose >/dev/null 2>&1; then podman-compose down -v; fi
-	rm -rf docker/data/pg
+	rm -rf docker/data/pg docker/data/nats
 
 install-tools: ## Install pinned developer tools (pnpm devDeps + go tool templ)
 	@if command -v pnpm >/dev/null 2>&1; then pnpm install --frozen-lockfile; \

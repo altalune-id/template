@@ -30,10 +30,11 @@ Find the row, open the recipe, follow it. Do not reconstruct the procedure from 
 | a `Service` method                 | [`howto/service-method.md`](../../../docs/howto/service-method.md)         |
 | a `Store` method                   | [`howto/store-method.md`](../../../docs/howto/store-method.md)             |
 | a cache, queue, limiter or loop    | [`howto/platform-primitive.md`](../../../docs/howto/platform-primitive.md) |
+| a queue job or broadcast           | [`howto/queue-consumer.md`](../../../docs/howto/queue-consumer.md)         |
 | a config key                       | [`howto/config-key.md`](../../../docs/howto/config-key.md)                 |
 | failing from any layer             | [`howto/errors.md`](../../../docs/howto/errors.md)                         |
 | a new `<DOM><NNN>` code            | [`howto/error-code.md`](../../../docs/howto/error-code.md)                 |
-| reviewing any of the above         | [`references/review.md`](references/review.md)                             |
+| reviewing any of the above         | the `altalune-go-review` skill                                             |
 
 Deciding _which_ surface before anything else is mandatory — every route belongs to exactly
 one and there is no eighth ([`surfaces`](../../../docs/surfaces/README.md)). The recipes
@@ -102,12 +103,13 @@ matter. Detail and the pinning tests:
 glob that matches nothing passes silently. Break it on purpose and confirm the failure.
 
 **A route probe is not a feature test.** `probeRoutes()` stops at project resolution and never
-enters a handler body. More of these in [`references/review.md`](references/review.md).
+enters a handler body. More of these in the `altalune-go-review` skill, `references/convention.md`.
 
 ## Verifying
 
 `scripts/verify.sh` runs the gates in dependency order and explains each failure. It takes
-`--integration` to add the Postgres suite. Run it before claiming a module is done.
+`--integration` to add the Postgres suite, and `--check` to run read-only (it regenerates and
+formats files otherwise). Run it before claiming a module is done.
 
 Integration tests need Postgres. Set `TEST_PG_DSN` at a throwaway database and use `-p 1` —
 without it, packages race on `CREATE/DROP ROLE` and cleanup fails. Without `TEST_PG_DSN` each

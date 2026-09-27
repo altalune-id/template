@@ -75,7 +75,7 @@ func buildServices(cfg *config.Config, k *platform.Kernel, caps capabilities.Cap
 
 	orgs := org.NewService(orgStore, caps, log, reporter.Unexpected)
 	projects := project.NewService(projectStore, log, reporter.Unexpected)
-	todos := todo.NewService(todoStore, log, reporter.Unexpected)
+	todos := todo.NewService(todoStore, log, reporter.Unexpected, k.Queue)
 	onboards := onboard.NewService(onboardStore, log, reporter.Unexpected)
 	uow := tenant.NewUnitOfWork(cfg.DB, pool, pgConn)
 	webhookStore := webhook.NewStore(cfg.DB, pool, pgConn)

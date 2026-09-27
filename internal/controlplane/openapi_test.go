@@ -44,7 +44,7 @@ func openAPIServer(t *testing.T, enabled bool, auth *controlplane.BasicAuth) *ht
 		nil, nil,
 		org.NewService(orgs, capabilities.Capabilities{OrgCreation: true}, log, reporter.Unexpected),
 		project.NewService(projs, log, reporter.Unexpected),
-		todo.NewService(tds, log, reporter.Unexpected),
+		todo.NewService(tds, log, reporter.Unexpected, &fakes.Queue{}),
 		nil,
 		tds,
 		blog.NewService(posts, log, reporter.Unexpected, fakes.UnitOfWork, &fakes.Webhooks{}),

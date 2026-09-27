@@ -264,6 +264,22 @@ func TestValidate_ModeInvariants(t *testing.T) {
 			wantSub: "genesis.password without genesis.email",
 		},
 		{
+			name: "queue enabled without url fails",
+			mutate: func(c *Config) {
+				c.Queue.Enabled = true
+				c.Queue.URL = ""
+			},
+			wantSub: "queue.url",
+		},
+		{
+			name: "queue enabled with url is allowed",
+			mutate: func(c *Config) {
+				c.Queue.Enabled = true
+				c.Queue.URL = "nats://127.0.0.1:4222"
+			},
+			wantSub: "",
+		},
+		{
 			name: "cloud with genesis password alone fails",
 			mutate: func(c *Config) {
 				c.Mode = ModeCloud
@@ -342,6 +358,12 @@ func TestDefaults_SchedulerAndDBKeys(t *testing.T) {
 	}
 	if cfg.DB.Health.Timeout != 2*time.Second {
 		t.Errorf("db.health.timeout = %s, want 2s", cfg.DB.Health.Timeout)
+	}
+	if cfg.Queue.Enabled {
+		t.Error("queue.enabled must default false")
+	}
+	if cfg.Queue.ConnectTimeout != 10*time.Second {
+		t.Errorf("queue.connectTimeout = %s, want 10s", cfg.Queue.ConnectTimeout)
 	}
 }
 

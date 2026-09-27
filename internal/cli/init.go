@@ -84,6 +84,9 @@ func newInitCmd(bootServer ServerBootFn) *cobra.Command {
 				}
 				return err
 			}
+			if srv.CompleteOnboarding != nil {
+				srv.CompleteOnboarding(cmd.Context())
+			}
 
 			cmd.Printf("altempl: onboarded admin=%s (org=%s, project=%s)\n", u.Email, orgSlug, projectSlug)
 			return nil

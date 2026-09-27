@@ -66,3 +66,30 @@ func TestInit_SucceedsAndSecondCallReportsAlreadyOnboarded(t *testing.T) {
 		t.Fatalf("exit=%d want %d", code, ExitAlreadyExists)
 	}
 }
+
+func TestInit_CompletesOnboardingThroughTheServer(t *testing.T) {
+	setSelfhostedEnv(t)
+	t.Setenv("ALT_GENESIS_EMAIL", "")
+	t.Setenv("ALT_GENESIS_PASSWORD", "")
+
+	var calls int
+	bootFn := func(ctx context.Context, cfg *config.Config, _ ...boot.Option) (*boot.Server, error) {
+		srv, err := boot.BootServer(ctx, cfg)
+		if err != nil {
+			return nil, err
+		}
+		srv.CompleteOnboarding = func(context.Context) { calls++ }
+		return srv, nil
+	}
+
+	root := NewRootCmd(bootFn, stubClientBoot)
+	root.SetOut(&bytes.Buffer{})
+	root.SetErr(&bytes.Buffer{})
+	root.SetArgs([]string{"init", "--email", "root@example.com"})
+	if err := root.ExecuteContext(context.Background()); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("CompleteOnboarding calls=%d want 1", calls)
+	}
+}

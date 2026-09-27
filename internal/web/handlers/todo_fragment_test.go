@@ -31,7 +31,7 @@ func newTodoFixture(t *testing.T) *todoFixture {
 	t.Helper()
 	f := newFixture(t)
 
-	todos := todo.NewService(fakes.NewTodo(), discardLogger(), passthroughUnexpected())
+	todos := todo.NewService(fakes.NewTodo(), discardLogger(), passthroughUnexpected(), &fakes.Queue{})
 
 	uid := uuid.New()
 	o := f.seedOrg(t, "acme", uid)

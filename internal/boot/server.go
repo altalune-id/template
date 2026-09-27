@@ -31,6 +31,7 @@ import (
 	"altalune.id/template/internal/platform/db"
 	"altalune.id/template/internal/platform/notify"
 	"altalune.id/template/internal/platform/outbox"
+	"altalune.id/template/internal/platform/queue"
 	"altalune.id/template/internal/platform/session"
 	"altalune.id/template/internal/platform/tenant"
 	"altalune.id/template/internal/platform/tokens"
@@ -82,13 +83,21 @@ type Server struct {
 
 	Web http.Handler
 	// Routes are the app-route patterns the web handlers registered, taken from the mux.
-	Routes     []string
-	API        *controlplane.Server
-	MCP        *rootmcp.Server
-	Scheduler  *scheduler.Runner
+	Routes    []string
+	API       *controlplane.Server
+	MCP       *rootmcp.Server
+	Scheduler *scheduler.Runner
+	// Consumer runs this instance's queue jobs; nil when it does not run here.
+	Consumer *queue.Consumer
+	// Listener applies broadcasts to this instance; nil when the queue is disabled.
+	Listener   *queue.Listen
 	Health     *db.HealthMonitor
 	Supervisor *worker.Supervisor
 
+	// CompleteOnboarding clears the setup gate here and on every other running instance.
+	CompleteOnboarding func(ctx context.Context)
+
+	httpHandler  http.Handler
 	shutdownOTel func(context.Context) error
 }
 
@@ -175,17 +184,44 @@ func BootServer(ctx context.Context, cfg *config.Config, opts ...Option) (*Serve
 	}
 	kernel.AddCloser(pool)
 
-	svcs, err := buildServices(cfg, kernel, caps)
+	q, err := openQueue(ctx, cfg, kernel, reporter, log)
 	if err != nil {
 		_ = pool.Close()
 		_ = shutdownOTel(context.Background())
+		return nil, fmt.Errorf("boot: queue: %w", err)
+	}
+	kernel.Queue = q
+	kernel.AddCloser(q)
+	abort := func() {
+		_ = q.Close()
+		_ = pool.Close()
+		_ = shutdownOTel(context.Background())
+	}
+
+	startSeq, err := q.BroadcastStartSeq(ctx)
+	if err != nil {
+		abort()
+		return nil, fmt.Errorf("boot: queue: %w", err)
+	}
+
+	required := &atomic.Bool{}
+
+	svcs, err := buildServices(cfg, kernel, caps)
+	if err != nil {
+		abort()
+		return nil, err
+	}
+
+	gate := &onboardingGate{required: required, queue: q, unexpected: reporter.Unexpected}
+	hs, ls, err := declareQueue(q, svcs, gate, log)
+	if err != nil {
+		abort()
 		return nil, err
 	}
 
 	onboarded, err := bootstrap(ctx, cfg, svcs.Users, svcs.Onboards, log)
 	if err != nil {
-		_ = pool.Close()
-		_ = shutdownOTel(context.Background())
+		abort()
 		return nil, fmt.Errorf("boot: bootstrap: %w", err)
 	}
 	caps.OnboardingRequired = !onboarded
@@ -213,31 +249,54 @@ func BootServer(ctx context.Context, cfg *config.Config, opts ...Option) (*Serve
 	}
 
 	var runner *scheduler.Runner
-	switch {
-	case !o.scheduler:
-		log.Info("boot: scheduler disabled by WithScheduler(false)")
-	case !cfg.Scheduler.Enabled:
-		log.Info("boot: scheduler disabled by scheduler.enabled=false")
-	default:
+	switch off := schedulerOff(o, cfg); off {
+	case "":
 		r, sErr := buildScheduler(cfg, kernel, svcs, log)
 		if sErr != nil {
-			_ = pool.Close()
-			_ = shutdownOTel(context.Background())
+			abort()
 			return nil, sErr
 		}
 		runner = r
 		sup.Register(runner)
+	default:
+		log.Info("boot: scheduler disabled by " + off)
 	}
 
 	if o.schedulerOnly && runner == nil {
-		disabledBy := "scheduler.enabled=false"
-		if !o.scheduler {
-			disabledBy = "WithScheduler(false)"
-		}
-		_ = pool.Close()
-		_ = shutdownOTel(context.Background())
+		abort()
 		return nil, fmt.Errorf(
-			"boot: --scheduler-only requires the scheduler, but the scheduler is disabled by %s", disabledBy)
+			"boot: --scheduler-only requires the scheduler, but the scheduler is disabled by %s", schedulerOff(o, cfg))
+	}
+
+	var consumer *queue.Consumer
+	switch off := consumerOff(o, cfg); off {
+	case "":
+		c, cErr := queue.NewConsumer(ctx, q, hs)
+		if cErr != nil {
+			abort()
+			return nil, fmt.Errorf("boot: queue consumer: %w", cErr)
+		}
+		consumer = c
+		sup.Register(consumer)
+	default:
+		log.Info("boot: consumer disabled by " + off)
+	}
+
+	if o.consumerOnly && consumer == nil {
+		abort()
+		return nil, fmt.Errorf(
+			"boot: --consumer-only requires the queue, but the queue is disabled by %s", consumerOff(o, cfg))
+	}
+
+	var listener *queue.Listen
+	if cfg.Queue.Enabled {
+		l, lErr := queue.NewListener(q, ls, startSeq)
+		if lErr != nil {
+			abort()
+			return nil, fmt.Errorf("boot: queue listener: %w", lErr)
+		}
+		listener = l
+		sup.Register(listener)
 	}
 
 	apiSrv, apiHandler := buildAPIHandler(cfg, kernel, svcs)
@@ -245,29 +304,25 @@ func BootServer(ctx context.Context, cfg *config.Config, opts ...Option) (*Serve
 
 	mcpSurf, err := buildMCPSurface(ctx, cfg, log, svcs, apiSrv)
 	if err != nil {
-		_ = pool.Close()
-		_ = shutdownOTel(context.Background())
+		abort()
 		return nil, err
 	}
 
 	bundle, defaultLoc, err := buildI18nBundle(cfg)
 	if err != nil {
-		_ = pool.Close()
-		_ = shutdownOTel(context.Background())
+		abort()
 		return nil, err
 	}
 
 	healthOK := health.Ready
 
-	required := &atomic.Bool{}
 	required.Store(!onboarded)
 
 	var setup string
 	if required.Load() {
 		t, tErr := setupToken(cfg)
 		if tErr != nil {
-			_ = pool.Close()
-			_ = shutdownOTel(context.Background())
+			abort()
 			return nil, fmt.Errorf("boot: setup token: %w", tErr)
 		}
 		setup = t
@@ -276,41 +331,45 @@ func BootServer(ctx context.Context, cfg *config.Config, opts ...Option) (*Serve
 
 	webHandler, webRoutes := buildWebHandler(cfg, kernel, caps, log, reporter, healthOK,
 		svcs.Auth, svcs.Users, svcs.Orgs, svcs.Projects, svcs.Todos, svcs.Invites, svcs.Onboards,
-		svcs.Posts, svcs.Categories, svcs.Tags, svcs.APIKeys, svcs.Webhooks, required, setup, apiHandler, dataHandler, mcpSurf, bundle, defaultLoc)
+		svcs.Posts, svcs.Categories, svcs.Tags, svcs.APIKeys, svcs.Webhooks, required, gate.Complete, setup, apiHandler, dataHandler, mcpSurf, bundle, defaultLoc)
 
 	httpHandler := webHandler
-	if o.schedulerOnly {
+	if o.schedulerOnly || o.consumerOnly {
 		httpHandler = healthOnlyHandler(cfg, healthOK)
 	}
 	sup.Register(worker.HTTP("http", cfg.HTTP.Addr, httpHandler, log))
 
 	return &Server{
-		Cfg:          cfg,
-		Caps:         caps,
-		Platform:     kernel,
-		Auth:         svcs.Auth,
-		Users:        svcs.Users,
-		Orgs:         svcs.Orgs,
-		Projects:     svcs.Projects,
-		Todos:        svcs.Todos,
-		Invites:      svcs.Invites,
-		Onboards:     svcs.Onboards,
-		Posts:        svcs.Posts,
-		Categories:   svcs.Categories,
-		Tags:         svcs.Tags,
-		APIKeys:      svcs.APIKeys,
-		Webhooks:     svcs.Webhooks,
-		Onboarded:    onboarded,
-		Routes:       webRoutes,
-		SetupToken:   setup,
-		Onboard:      svcs.Onboard,
-		Web:          webHandler,
-		API:          apiSrv,
-		MCP:          mcpSurf.Server,
-		Scheduler:    runner,
-		Health:       health,
-		Supervisor:   sup,
-		shutdownOTel: shutdownOTel,
+		Cfg:                cfg,
+		Caps:               caps,
+		Platform:           kernel,
+		Auth:               svcs.Auth,
+		Users:              svcs.Users,
+		Orgs:               svcs.Orgs,
+		Projects:           svcs.Projects,
+		Todos:              svcs.Todos,
+		Invites:            svcs.Invites,
+		Onboards:           svcs.Onboards,
+		Posts:              svcs.Posts,
+		Categories:         svcs.Categories,
+		Tags:               svcs.Tags,
+		APIKeys:            svcs.APIKeys,
+		Webhooks:           svcs.Webhooks,
+		Onboarded:          onboarded,
+		Routes:             webRoutes,
+		SetupToken:         setup,
+		Onboard:            svcs.Onboard,
+		Web:                webHandler,
+		API:                apiSrv,
+		MCP:                mcpSurf.Server,
+		Scheduler:          runner,
+		Consumer:           consumer,
+		Listener:           listener,
+		CompleteOnboarding: gate.Complete,
+		httpHandler:        httpHandler,
+		Health:             health,
+		Supervisor:         sup,
+		shutdownOTel:       shutdownOTel,
 	}, nil
 }
 
@@ -449,4 +508,56 @@ func mailerConfig(m config.MailConfig) mailer.Config {
 			MaxAttempts: m.Resend.MaxAttempts,
 		},
 	}
+}
+
+func openQueue(ctx context.Context, cfg *config.Config, k *platform.Kernel, reporter *apperror.Reporter, log *slog.Logger) (*queue.Client, error) {
+	if !cfg.Queue.Enabled {
+		return queue.Disabled(log), nil
+	}
+	return queue.Connect(ctx, queue.Options{
+		URL:            cfg.Queue.URL,
+		Token:          cfg.Queue.Token,
+		ConnectTimeout: cfg.Queue.ConnectTimeout,
+		Log:            log,
+		Tracer:         k.Tracer,
+		Meter:          k.Meter,
+		Unexpected:     reporter.Unexpected,
+	})
+}
+
+func declareQueue(q *queue.Client, svcs *Services, gate *onboardingGate, log *slog.Logger) ([]queue.Handler, []queue.Listener, error) {
+	providers := consumerProviders(svcs, log)
+	if err := assertConsumerWiring(providers); err != nil {
+		return nil, nil, err
+	}
+	hs := handlersOf(providers)
+	ls := listenersOf(listenerProviders(gate))
+	if err := q.Declare(jobsOf(hs), broadcastsOf(ls)); err != nil {
+		return nil, nil, fmt.Errorf("boot: queue declare: %w", err)
+	}
+	return hs, ls, nil
+}
+
+func schedulerOff(o *options, cfg *config.Config) string {
+	switch {
+	case !o.scheduler:
+		return "WithScheduler(false)"
+	case o.consumerOnly:
+		return "--consumer-only"
+	case !cfg.Scheduler.Enabled:
+		return "scheduler.enabled=false"
+	}
+	return ""
+}
+
+func consumerOff(o *options, cfg *config.Config) string {
+	switch {
+	case !o.consumer:
+		return "WithConsumer(false)"
+	case o.schedulerOnly:
+		return "--scheduler-only"
+	case !cfg.Queue.Enabled:
+		return "queue.enabled=false"
+	}
+	return ""
 }

@@ -45,6 +45,7 @@ type Config struct {
 	Log           logger.Config       `yaml:"log"           mapstructure:"log"`
 	Telemetry     telemetry.Config    `yaml:"telemetry"     mapstructure:"telemetry"`
 	Scheduler     SchedulerConfig     `yaml:"scheduler"     mapstructure:"scheduler"`
+	Queue         QueueConfig         `yaml:"queue"         mapstructure:"queue"`
 	Observability ObservabilityConfig `yaml:"observability" mapstructure:"observability"`
 	Mail          MailConfig          `yaml:"mail"          mapstructure:"mail"`
 	I18n          I18nConfig          `yaml:"i18n"          mapstructure:"i18n"`
@@ -217,6 +218,14 @@ type SchedulerJobConfig struct {
 	Timezone string `yaml:"timezone" mapstructure:"timezone" awareness:"-"`
 }
 
+// QueueConfig configures the NATS JetStream connection behind queue.Submit and the consumer.
+type QueueConfig struct {
+	Enabled        bool          `yaml:"enabled"        mapstructure:"enabled"        awareness:"-"`
+	URL            string        `yaml:"url"            mapstructure:"url"            awareness:"secret"`
+	Token          string        `yaml:"token"          mapstructure:"token"          awareness:"secret"`
+	ConnectTimeout time.Duration `yaml:"connectTimeout" mapstructure:"connectTimeout" awareness:"-"      validate:"gte=0"`
+}
+
 // GetTimezone resolves Timezone via time.LoadLocation; empty returns time.UTC.
 func (s *SchedulerConfig) GetTimezone() (*time.Location, error) {
 	if s == nil || s.Timezone == "" {
@@ -286,6 +295,9 @@ func validateInvariants(c *Config) error {
 	if err := validateMCP(c); err != nil {
 		return err
 	}
+	if err := validateQueueNeedsURL(c); err != nil {
+		return err
+	}
 	switch c.Mode {
 	case ModeSelfhosted:
 		if err := validateSelfhosted(c); err != nil {
@@ -346,6 +358,13 @@ func validateCloudDBDriver(c *Config) error {
 func validateCloudGenesisEmail(c *Config) error {
 	if c.Genesis.Email == "" {
 		return errors.New("config: mode=cloud requires genesis.email — first-boot admin identity, matched against OIDC subject email (set ALT_GENESIS_EMAIL)")
+	}
+	return nil
+}
+
+func validateQueueNeedsURL(c *Config) error {
+	if c.Queue.Enabled && c.Queue.URL == "" {
+		return errors.New("config: queue.enabled=true requires queue.url (set ALT_QUEUE_URL)")
 	}
 	return nil
 }
