@@ -7,17 +7,20 @@ Defined in `internal/platform/authn/scope.go`. `authn.Valid()` gates minting.
 
 ## Catalog
 
-| Scope           | Grants                             |
-| --------------- | ---------------------------------- |
-| `posts:read`    | Read posts and todos               |
-| `posts:write`   | Create, update, publish, unpublish |
-| `posts:admin`   | Delete a post or todo              |
-| `apikeys:read`  | List keys; `Whoami`                |
-| `apikeys:write` | Create and revoke keys             |
+| Scope           | Grants                              |
+| --------------- | ----------------------------------- |
+| `posts:read`    | Read posts and todos; list projects |
+| `posts:write`   | Create, update, publish, unpublish  |
+| `posts:admin`   | Delete a post or todo               |
+| `apikeys:read`  | List keys; `Whoami`                 |
+| `apikeys:write` | Create and revoke keys              |
 
 - **No implication.** `posts:admin` does not grant `posts:write`. The check is
   `slices.Contains`. A key needing read + delete holds both strings.
 - **`posts:*` spans `blog` and `todo`.** A fork splitting them adds its own strings.
+- **`project_list` rides on `posts:read`** rather than a `projects:read` of its own. A new scope
+  string obliges every operator to extend an external authorization server's catalog and re-attach
+  the client before project discovery works at all.
 
 ## Enforcement
 

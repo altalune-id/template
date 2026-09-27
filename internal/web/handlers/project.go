@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strings"
 
+	slugs "altalune.id/template/internal/platform/slug"
 	"altalune.id/template/internal/project"
 	"altalune.id/template/internal/web"
 	"altalune.id/template/internal/web/templates"
@@ -46,7 +47,7 @@ func (h *ProjectHandler) GetNew(w http.ResponseWriter, r *http.Request) {
 	o := sc.org
 	Render(w, r, templates.ProjectNewLayout(
 		h.LayoutForOrg(r, "Create project", o.Slug, "projects"),
-		templates.ProjectNewView{OrgSlug: o.Slug},
+		templates.ProjectNewView{OrgSlug: o.Slug, Slug: slugs.Generate()},
 	))
 }
 
@@ -69,6 +70,9 @@ func (h *ProjectHandler) PostCreate(w http.ResponseWriter, r *http.Request) {
 		msg := err.Error()
 		if project.IsAlreadyExistsError(err) {
 			msg = "Slug is already taken."
+		}
+		if slug == "" {
+			slug = slugs.Generate()
 		}
 		Render(w, r, templates.ProjectNewLayout(
 			h.LayoutForOrg(r, "Create project", o.Slug, "projects"),

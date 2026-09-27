@@ -31,12 +31,12 @@ func BlogServiceToolNames() []string {
 func RegisterBlogServiceTools(reg *mcp.Registry, h blogv1connect.BlogServiceHandler, scopeFor func(string) string) {
 	reg.Register(mcp.ToolSpec{
 		Name:        BlogListToolName,
-		Description: "List a project's blog posts. Pass status \"published\" for published posts only.",
+		Description: "List a project's blog posts. Omit projectId to use the credential's active project; call project_list to discover the others. Pass status \"published\" for published posts only.",
 		Scope:       scopeFor(BlogListToolName),
 		Mutation:    false,
 		Destructive: false,
 		UI:          "ui://altempl/app",
-		InputSchema: json.RawMessage(`{"type":"object","properties":{"projectId":{"type":"string","description":"UUID of the project to list posts in"},"status":{"type":"string","description":"Filter by state: \"published\" or \"draft\""},"categoryId":{"type":"string","description":"UUID of a category to filter by"}},"required":["projectId"],"additionalProperties":false}`),
+		InputSchema: json.RawMessage(`{"type":"object","properties":{"projectId":{"type":"string","description":"UUID of the project to list posts in; omit to use the credential's active project"},"status":{"type":"string","description":"Filter by state: \"published\" or \"draft\""},"categoryId":{"type":"string","description":"UUID of a category to filter by"}},"additionalProperties":false}`),
 		Handler: func(ctx context.Context, input json.RawMessage) (json.RawMessage, error) {
 			if len(input) == 0 {
 				input = json.RawMessage(`{}`)

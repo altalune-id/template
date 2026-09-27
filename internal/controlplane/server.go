@@ -16,6 +16,8 @@ import (
 	authv1connect "altalune.id/template/gen/go/auth/v1/authv1connect"
 	blogv1 "altalune.id/template/gen/go/blog/v1"
 	blogv1connect "altalune.id/template/gen/go/blog/v1/blogv1connect"
+	projectv1 "altalune.id/template/gen/go/project/v1"
+	projectv1connect "altalune.id/template/gen/go/project/v1/projectv1connect"
 	todov1 "altalune.id/template/gen/go/todo/v1"
 	todov1connect "altalune.id/template/gen/go/todo/v1/todov1connect"
 	"altalune.id/template/internal/apikey"
@@ -54,10 +56,11 @@ type Server struct {
 	// APIKeys is set by boot after New returns, mirroring Authn/KeyPrefix below.
 	APIKeys *apikey.Service
 
-	AuthSvc   *AuthService
-	TodoSvc   *TodoService
-	BlogSvc   *BlogService
-	APIKeySvc *APIKeyService
+	AuthSvc    *AuthService
+	TodoSvc    *TodoService
+	BlogSvc    *BlogService
+	ProjectSvc *ProjectService
+	APIKeySvc  *APIKeyService
 
 	Authn     authn.Chain
 	KeyPrefix string
@@ -95,9 +98,10 @@ func New(
 		Categories: categories,
 		Tags:       tags,
 
-		AuthSvc: NewAuthService(orgs),
-		TodoSvc: NewTodoService(todos, todoStore, projects),
-		BlogSvc: NewBlogService(posts, categories, tags, projects),
+		AuthSvc:    NewAuthService(orgs),
+		TodoSvc:    NewTodoService(todos, todoStore, projects),
+		BlogSvc:    NewBlogService(posts, categories, tags, projects),
+		ProjectSvc: NewProjectService(projects),
 	}
 	if cfg != nil {
 		s.OpenAPIEnabled = cfg.API.OpenAPI.Enabled
@@ -112,10 +116,11 @@ func New(
 }
 
 var (
-	_ authv1connect.AuthServiceHandler     = (*AuthService)(nil)
-	_ todov1connect.TodoServiceHandler     = (*TodoService)(nil)
-	_ blogv1connect.BlogServiceHandler     = (*BlogService)(nil)
-	_ apikeyv1connect.APIKeyServiceHandler = (*APIKeyService)(nil)
+	_ authv1connect.AuthServiceHandler       = (*AuthService)(nil)
+	_ todov1connect.TodoServiceHandler       = (*TodoService)(nil)
+	_ blogv1connect.BlogServiceHandler       = (*BlogService)(nil)
+	_ projectv1connect.ProjectServiceHandler = (*ProjectService)(nil)
+	_ apikeyv1connect.APIKeyServiceHandler   = (*APIKeyService)(nil)
 )
 
 // Handler mounts the Connect handlers plus OpenAPI endpoints under basePath+"/api".
@@ -131,6 +136,8 @@ func (s *Server) Handler(basePath string) http.Handler {
 	inner.Handle(authPath, authHandler)
 	blogPath, blogHandler := blogv1connect.NewBlogServiceHandler(s.BlogSvc, opts...)
 	inner.Handle(blogPath, blogHandler)
+	projectPath, projectHandler := projectv1connect.NewProjectServiceHandler(s.ProjectSvc, opts...)
+	inner.Handle(projectPath, projectHandler)
 	apikeyPath, apikeyHandler := apikeyv1connect.NewAPIKeyServiceHandler(s.APIKeySvc, opts...)
 	inner.Handle(apikeyPath, apikeyHandler)
 
@@ -156,6 +163,7 @@ func (s *Server) MountedProcedures() []string {
 		serviceProcedures(todov1.File_todo_v1_todo_proto, "TodoService"),
 		serviceProcedures(authv1.File_auth_v1_auth_proto, "AuthService"),
 		serviceProcedures(blogv1.File_blog_v1_blog_proto, "BlogService"),
+		serviceProcedures(projectv1.File_project_v1_project_proto, "ProjectService"),
 		serviceProcedures(apikeyv1.File_apikey_v1_apikey_proto, "APIKeyService"),
 	)
 }

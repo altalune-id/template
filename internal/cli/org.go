@@ -90,9 +90,8 @@ func newOrgCreateCmd(bootServer ServerBootFn, bootClient ClientBootFn) *cobra.Co
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&slug, "slug", "", "URL-safe org slug (required)")
+	cmd.Flags().StringVar(&slug, "slug", "", "URL-safe org slug (generated when omitted)")
 	cmd.Flags().StringVar(&name, "name", "", "Human-readable org name (required)")
-	_ = cmd.MarkFlagRequired("slug")
 	_ = cmd.MarkFlagRequired("name")
 	return cmd
 }

@@ -15,6 +15,7 @@ type Org struct {
 	orgs        map[uuid.UUID]*org.Org
 	memberships []*org.Membership
 	userLookup  map[uuid.UUID]func() (string, string)
+	takenSlugs  int
 }
 
 // NewOrg returns an empty in-memory org.Store.
@@ -40,9 +41,20 @@ func (r *Org) Save(_ context.Context, o *org.Org) error {
 	return nil
 }
 
+// TakeNextSlugs makes the next n BySlug lookups report the slug as taken, without storing a row.
+func (r *Org) TakeNextSlugs(n int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.takenSlugs = n
+}
+
 func (r *Org) BySlug(_ context.Context, slug string) (*org.Org, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.takenSlugs > 0 {
+		r.takenSlugs--
+		return &org.Org{ID: uuid.New(), Slug: slug, Name: slug}, nil
+	}
 	for _, o := range r.orgs {
 		if o.Slug == slug {
 			c := *o

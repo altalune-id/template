@@ -12,6 +12,7 @@ import (
 
 	authv1connect "altalune.id/template/gen/go/auth/v1/authv1connect"
 	blogv1connect "altalune.id/template/gen/go/blog/v1/blogv1connect"
+	projectv1connect "altalune.id/template/gen/go/project/v1/projectv1connect"
 	todov1connect "altalune.id/template/gen/go/todo/v1/todov1connect"
 	"altalune.id/template/internal/apperror"
 	"altalune.id/template/internal/blog"
@@ -101,6 +102,10 @@ func (h *harness) authClient() todov1connect.TodoServiceClient {
 
 func (h *harness) blogClient() blogv1connect.BlogServiceClient {
 	return blogv1connect.NewBlogServiceClient(http.DefaultClient, h.server.URL+"/api")
+}
+
+func (h *harness) projectClient() projectv1connect.ProjectServiceClient {
+	return projectv1connect.NewProjectServiceClient(http.DefaultClient, h.server.URL+"/api")
 }
 
 func (h *harness) whoamiClient() authv1connect.AuthServiceClient {

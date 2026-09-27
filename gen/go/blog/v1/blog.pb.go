@@ -502,7 +502,7 @@ func (x *GetPostResponse) GetPost() *Post {
 
 type ListPostsRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// UUID of the project to list posts in
+	// UUID of the project to list posts in; omit to use the credential's active project
 	ProjectId string `protobuf:"bytes,1,opt,name=project_id,json=projectId,proto3" json:"project_id,omitempty"`
 	// Filter by state: "published" or "draft"
 	Status string `protobuf:"bytes,2,opt,name=status,proto3" json:"status,omitempty"`
@@ -1114,13 +1114,13 @@ const file_blog_v1_blog_proto_rawDesc = "" +
 	"if_version\x18\x02 \x01(\x05H\x00R\tifVersion\x88\x01\x01B\r\n" +
 	"\v_if_version\":\n" +
 	"\x15UnpublishPostResponse\x12!\n" +
-	"\x04post\x18\x01 \x01(\v2\r.blog.v1.PostR\x04post2\xc5\x05\n" +
+	"\x04post\x18\x01 \x01(\v2\r.blog.v1.PostR\x04post2\x9e\x06\n" +
 	"\vBlogService\x12E\n" +
 	"\n" +
 	"CreatePost\x12\x1a.blog.v1.CreatePostRequest\x1a\x1b.blog.v1.CreatePostResponse\x12<\n" +
-	"\aGetPost\x12\x17.blog.v1.GetPostRequest\x1a\x18.blog.v1.GetPostResponse\x12\xb3\x01\n" +
-	"\tListPosts\x12\x19.blog.v1.ListPostsRequest\x1a\x1a.blog.v1.ListPostsResponse\"o\xca\xf3\x18k\n" +
-	"\tblog_list\x12NList a project's blog posts. Pass status \"published\" for published posts only.\x1a\tprojectId*\x03app\x12E\n" +
+	"\aGetPost\x12\x17.blog.v1.GetPostRequest\x1a\x18.blog.v1.GetPostResponse\x12\x8c\x02\n" +
+	"\tListPosts\x12\x19.blog.v1.ListPostsRequest\x1a\x1a.blog.v1.ListPostsResponse\"\xc7\x01\xca\xf3\x18\xc2\x01\n" +
+	"\tblog_list\x12\xaf\x01List a project's blog posts. Omit projectId to use the credential's active project; call project_list to discover the others. Pass status \"published\" for published posts only.*\x03app\x12E\n" +
 	"\n" +
 	"UpdatePost\x12\x1a.blog.v1.UpdatePostRequest\x1a\x1b.blog.v1.UpdatePostResponse\x12E\n" +
 	"\n" +

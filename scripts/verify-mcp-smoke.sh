@@ -221,10 +221,10 @@ code=$(rpc "$tools_out" "$READ_KEY" '{"jsonrpc":"2.0","id":2,"method":"tools/lis
 
 names=$(jqx "$tools_out" '[.result.tools[].name] | sort | join(",")') \
     || fail "tools/list returned no tools array"
-[ "$names" = "blog_list,blog_publish,todo_create" ] \
-    || fail "tools/list published [${names}], want [blog_list,blog_publish,todo_create]"
+[ "$names" = "blog_list,blog_publish,project_list,todo_create" ] \
+    || fail "tools/list published [${names}], want [blog_list,blog_publish,project_list,todo_create]"
 
-for tool in blog_list blog_publish todo_create; do
+for tool in blog_list blog_publish project_list todo_create; do
     require_true "$tools_out" \
         ".result.tools[] | select(.name == \"${tool}\") | .description | type == \"string\" and length > 0" \
         "tool ${tool} carries no description — a host renders it unlabelled"
@@ -243,6 +243,22 @@ require_true "$tools_out" \
 require_true "$tools_out" \
     '.result.tools[] | select(.name == "blog_list") | ._meta | has("ui/resourceUri") | not' \
     'blog_list _meta carries the deprecated flat "ui/resourceUri" sibling — the pair breaks strict hosts'
+
+projects_out="${tmpdir}/project-list.json"
+code=$(rpc "$projects_out" "$READ_KEY" \
+    '{"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"project_list","arguments":{}}}')
+[ "$code" = "200" ] || fail "project_list returned HTTP ${code}, want 200"
+require_true "$projects_out" '.result.isError != true' \
+    "project_list failed — an agent cannot discover a projectId without it"
+require_true "$projects_out" '[.result.content[].text] | join(" ") | test("smoke-proj")' \
+    "project_list did not name the caller's own project"
+
+blog_default_out="${tmpdir}/blog-list-default.json"
+code=$(rpc "$blog_default_out" "$READ_KEY" \
+    '{"jsonrpc":"2.0","id":11,"method":"tools/call","params":{"name":"blog_list","arguments":{}}}')
+[ "$code" = "200" ] || fail "argument-less blog_list returned HTTP ${code}, want 200"
+require_true "$blog_default_out" '.result.isError != true' \
+    "blog_list with no projectId did not fall back to the credential's active project"
 
 res_out="${tmpdir}/resources-list.json"
 code=$(rpc "$res_out" "$READ_KEY" '{"jsonrpc":"2.0","id":3,"method":"resources/list"}')
@@ -351,5 +367,5 @@ fi
 mkdir -p .cache
 cp "$servelog" .cache/verify-mcp.log 2>/dev/null || true
 
-echo "OK: initialize + 3 tools + ui://altempl/app (${bundle_size} bytes) + RFC 9728 challenge; shutdown in ${elapsed}s"
+echo "OK: initialize + 4 tools + ui://altempl/app (${bundle_size} bytes) + RFC 9728 challenge; shutdown in ${elapsed}s"
 exit 0

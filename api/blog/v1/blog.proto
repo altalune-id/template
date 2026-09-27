@@ -13,8 +13,7 @@ service BlogService {
   rpc ListPosts(ListPostsRequest) returns (ListPostsResponse) {
     option (mcp.v1.tool) = {
       name: "blog_list"
-      description: "List a project's blog posts. Pass status \"published\" for published posts only."
-      required: ["projectId"]
+      description: "List a project's blog posts. Omit projectId to use the credential's active project; call project_list to discover the others. Pass status \"published\" for published posts only."
       ui: "app"
     };
   }
@@ -82,7 +81,7 @@ message GetPostResponse {
 }
 
 message ListPostsRequest {
-  // UUID of the project to list posts in
+  // UUID of the project to list posts in; omit to use the credential's active project
   string project_id = 1;
   // Filter by state: "published" or "draft"
   string status = 2;

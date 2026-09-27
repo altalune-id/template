@@ -77,9 +77,9 @@ func (s *BlogService) GetPost(ctx context.Context, req *connect.Request[blogv1.G
 	return connect.NewResponse(&blogv1.GetPostResponse{Post: msg}), nil
 }
 
-// ListPosts returns the posts in the request's project, optionally filtered by status and category.
+// ListPosts returns the posts in the request's project, or in the principal's active project when project_id is omitted, optionally filtered by status and category.
 func (s *BlogService) ListPosts(ctx context.Context, req *connect.Request[blogv1.ListPostsRequest]) (*connect.Response[blogv1.ListPostsResponse], error) {
-	tctx, err := s.scopeToProject(ctx, req.Msg.GetProjectId())
+	tctx, err := s.scopeToActiveProject(ctx, req.Msg.GetProjectId())
 	if err != nil {
 		return nil, err
 	}
@@ -183,6 +183,21 @@ func (s *BlogService) UnpublishPost(ctx context.Context, req *connect.Request[bl
 		return nil, err
 	}
 	return connect.NewResponse(&blogv1.UnpublishPostResponse{Post: msg}), nil
+}
+
+// SECURITY: an omitted project_id falls back to the principal's own active project and still lands in scopeToProject, so the org check is the same one an explicit id passes through.
+func (s *BlogService) scopeToActiveProject(ctx context.Context, projectIDRaw string) (context.Context, error) {
+	if strings.TrimSpace(projectIDRaw) != "" {
+		return s.scopeToProject(ctx, projectIDRaw)
+	}
+	p, err := principal(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if p.ActiveProjectID == uuid.Nil {
+		return nil, &ProjectUnresolvedError{}
+	}
+	return s.scopeToProject(ctx, p.ActiveProjectID.String())
 }
 
 func (s *BlogService) scopeToProject(ctx context.Context, projectIDRaw string) (context.Context, error) {

@@ -3,6 +3,7 @@ package project
 import (
 	"context"
 	"log/slog"
+	"strings"
 
 	"github.com/google/uuid"
 	"go.opentelemetry.io/otel"
@@ -10,8 +11,12 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"altalune.id/template/internal/apperror"
+	slugs "altalune.id/template/internal/platform/slug"
 	"altalune.id/template/internal/platform/tenant"
 )
+
+// MaxSlugAttempts bounds how many generated slugs Create tries before giving up.
+const MaxSlugAttempts = 5
 
 //nolint:gochecknoglobals // OTel tracer is a package-level fixture, not runtime state.
 var tracer trace.Tracer = otel.Tracer("altalune.id/template/internal/project")
@@ -28,7 +33,7 @@ func NewService(store Store, log *slog.Logger, unexpected apperror.UnexpectedFun
 	return &Service{store: store, log: log.With("module", "project"), unexpected: unexpected}
 }
 
-// Create constructs a Project inside orgID and persists it.
+// Create constructs a Project inside orgID and persists it; an empty slug is generated.
 func (s *Service) Create(ctx context.Context, orgID uuid.UUID, slug, name string) (*Project, error) {
 	ctx, span := tracer.Start(ctx, "project.Create",
 		trace.WithAttributes(
@@ -41,17 +46,35 @@ func (s *Service) Create(ctx context.Context, orgID uuid.UUID, slug, name string
 		return nil, err
 	}
 
-	existing, err := s.store.BySlug(ctx, orgID, slug)
+	if chosen := strings.TrimSpace(slug); chosen != "" {
+		return s.createWithSlug(ctx, span, orgID, chosen, name)
+	}
+
+	var taken error
+	for range MaxSlugAttempts {
+		p, err := s.createWithSlug(ctx, span, orgID, slugs.Generate(), name)
+		if err == nil {
+			return p, nil
+		}
+		if !IsAlreadyExistsError(err) {
+			return nil, err
+		}
+		taken = err
+	}
+	return nil, taken
+}
+
+func (s *Service) createWithSlug(ctx context.Context, span trace.Span, orgID uuid.UUID, chosen, name string) (*Project, error) {
+	_, err := s.store.BySlug(ctx, orgID, chosen)
 	if err == nil {
-		_ = existing
-		return nil, &AlreadyExistsError{Field: "slug", Value: slug}
+		return nil, &AlreadyExistsError{Field: "slug", Value: chosen}
 	}
 	if !IsNotFoundError(err) {
 		return nil, s.unexpected(ctx, "project.Create: bySlug", err,
-			"org_id", orgID, "slug", slug)
+			"org_id", orgID, "slug", chosen)
 	}
 
-	p, err := New(orgID, slug, name)
+	p, err := New(orgID, chosen, name)
 	if err != nil {
 		span.RecordError(err)
 		return nil, err
@@ -62,7 +85,7 @@ func (s *Service) Create(ctx context.Context, orgID uuid.UUID, slug, name string
 		}
 		span.RecordError(err)
 		return nil, s.unexpected(ctx, "project.Create: save", err,
-			"org_id", orgID, "slug", slug)
+			"org_id", orgID, "slug", chosen)
 	}
 	span.SetAttributes(attribute.String("project.id", p.ID.String()))
 	return p, nil

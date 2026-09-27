@@ -11,6 +11,7 @@ import (
 	"altalune.id/template/internal/org"
 	"altalune.id/template/internal/platform/config"
 	"altalune.id/template/internal/platform/session"
+	slugs "altalune.id/template/internal/platform/slug"
 	"altalune.id/template/internal/platform/tenant"
 	"altalune.id/template/internal/project"
 	"altalune.id/template/internal/user"
@@ -94,9 +95,6 @@ func (h *SignupHandler) PostSignup(w http.ResponseWriter, r *http.Request) {
 	view.FieldErrors = map[string]string{}
 	if view.OrgName == "" {
 		view.FieldErrors["org_name"] = "Enter an organization name."
-	}
-	if view.OrgSlug == "" {
-		view.FieldErrors["org_slug"] = "Enter an organization slug."
 	}
 	if view.AskDisplayName && view.Name == "" {
 		view.FieldErrors["name"] = "Enter your display name."
@@ -198,7 +196,7 @@ func (h *SignupHandler) defaultView(p session.Principal) templates.SignupComplet
 		AskAccept:      h.Cfg.Compliance.RequireAcceptance && p.TermsAcceptedAt.IsZero(),
 		TermsURL:       cmp.Or(strings.TrimSpace(h.Cfg.Compliance.TermsURL), web.Path(h.Cfg.HTTP.BasePath, "/terms")),
 		PrivacyURL:     cmp.Or(strings.TrimSpace(h.Cfg.Compliance.PrivacyURL), web.Path(h.Cfg.HTTP.BasePath, "/privacy")),
-		OrgSlug:        user.SlugFromEmail(p.Email, ""),
+		OrgSlug:        slugs.Generate(),
 		ProjectName:    "Default Project",
 		ProjectSlug:    h.defaultProjectSlug(),
 		FieldErrors:    map[string]string{},
@@ -206,5 +204,8 @@ func (h *SignupHandler) defaultView(p session.Principal) templates.SignupComplet
 }
 
 func (h *SignupHandler) render(w http.ResponseWriter, r *http.Request, view templates.SignupCompleteView) {
+	if view.OrgSlug == "" {
+		view.OrgSlug = slugs.Generate()
+	}
 	Render(w, r, templates.SignupCompleteLayout(h.Base(r, "Complete signup"), view))
 }

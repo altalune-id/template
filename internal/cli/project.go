@@ -92,9 +92,8 @@ func newProjectCreateCmd(bootServer ServerBootFn, bootClient ClientBootFn) *cobr
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&slug, "slug", "", "URL-safe project slug (required)")
+	cmd.Flags().StringVar(&slug, "slug", "", "URL-safe project slug (generated when omitted)")
 	cmd.Flags().StringVar(&name, "name", "", "Human-readable project name (required)")
-	_ = cmd.MarkFlagRequired("slug")
 	_ = cmd.MarkFlagRequired("name")
 	return cmd
 }
