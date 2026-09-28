@@ -36,9 +36,8 @@ func newSmokeCfg(t *testing.T) *config.Config {
 			Password: "hunter2",
 		},
 		Tenant: config.TenantConfig{
-			SingletonOrg:            config.SingletonOrgConfig{Slug: "default", Name: "Default"},
+			SingletonOrg:            config.SingletonOrgConfig{Name: "Default"},
 			PersonalOrgSlugFallback: "personal",
-			PersonalProjectSlug:     "default",
 		},
 		Log: logger.Config{Level: "error", Format: "json"},
 		Mail: config.MailConfig{

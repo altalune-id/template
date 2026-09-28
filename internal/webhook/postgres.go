@@ -162,8 +162,6 @@ func (s *postgresStore) save(ctx context.Context, tx *sql.Tx, tc tenant.Context,
 				s.endpoints.URL.SET(postgres.String(e.URL)),
 				s.endpoints.Description.SET(postgres.String(e.Description)),
 				s.endpoints.EventTypes.SET(postgres.String(types)),
-				s.endpoints.SecretPrimary.SET(postgres.Bytea(e.Secrets.Primary)),
-				s.endpoints.SecretSecondary.SET(pgSecondary(e.Secrets.Secondary)),
 				s.endpoints.Active.SET(postgres.Bool(e.Active)),
 				s.endpoints.UpdatedAt.SET(postgres.TimestampzT(e.UpdatedAt.UTC())),
 			).WHERE(s.endpoints.OrgID.EQ(postgres.UUID(tc.OrgID))),
@@ -181,6 +179,52 @@ func (s *postgresStore) save(ctx context.Context, tx *sql.Tx, tc tenant.Context,
 		return &NotFoundError{ID: e.ID.String()}
 	}
 	return nil
+}
+
+func (s *postgresStore) SaveSecrets(ctx context.Context, id uuid.UUID, expected, next SealedSecrets) error {
+	tx, owned, tc, err := s.txAcquire(ctx)
+	if err != nil {
+		return err
+	}
+	return s.endTx(tx, owned, s.saveSecrets(ctx, tx, tc, id, expected, next))
+}
+
+func (s *postgresStore) saveSecrets(ctx context.Context, tx *sql.Tx, tc tenant.Context, id uuid.UUID, expected, next SealedSecrets) error {
+	stmt := s.endpoints.UPDATE().
+		SET(
+			s.endpoints.SecretPrimary.SET(postgres.Bytea(next.Primary)),
+			s.endpoints.SecretSecondary.SET(pgSecondary(next.Secondary)),
+			s.endpoints.UpdatedAt.SET(postgres.TimestampzT(time.Now().UTC())),
+		).
+		WHERE(s.endpoints.OrgID.EQ(postgres.UUID(tc.OrgID)).
+			AND(s.endpoints.ID.EQ(postgres.UUID(id))).
+			AND(s.endpoints.SecretPrimary.EQ(postgres.Bytea(expected.Primary))).
+			AND(s.endpoints.SecretSecondary.IS_NOT_DISTINCT_FROM(pgSecondary(expected.Secondary))))
+	res, err := stmt.ExecContext(ctx, tx)
+	if err != nil {
+		return fmt.Errorf("webhook.postgres.SaveSecrets: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("webhook.postgres.SaveSecrets: rows affected: %w", err)
+	}
+	if n > 0 {
+		return nil
+	}
+	probe := postgres.SELECT(s.endpoints.ID).
+		FROM(s.endpoints).
+		WHERE(s.endpoints.OrgID.EQ(postgres.UUID(tc.OrgID)).
+			AND(s.endpoints.ID.EQ(postgres.UUID(id))))
+	var row struct {
+		ID uuid.UUID `alias:"webhook_endpoints.id"`
+	}
+	if err := probe.QueryContext(ctx, tx, &row); err != nil {
+		if errors.Is(err, qrm.ErrNoRows) || errors.Is(err, sql.ErrNoRows) {
+			return &NotFoundError{ID: id.String()}
+		}
+		return fmt.Errorf("webhook.postgres.SaveSecrets: probe: %w", err)
+	}
+	return &SecretConflictError{ID: id.String()}
 }
 
 func (s *postgresStore) ByID(ctx context.Context, id uuid.UUID) (*Endpoint, error) {

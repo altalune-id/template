@@ -184,3 +184,4 @@ scope-denial code, returned by `internal/mcp/auth.go` — for a denied or undecl
 | `WHK005` | `apperror.CodeWebhookDeliveryNotRetryable` | `FailedPrecondition` | Webhook Delivery Not Retryable |
 | `WHK006` | `apperror.CodeWebhookDeliveryNotFound`     | `NotFound`           | Webhook Delivery Not Found     |
 | `WHK007` | `apperror.CodeWebhookEndpointInactive`     | `FailedPrecondition` | Webhook Endpoint Inactive      |
+| `WHK008` | `apperror.CodeWebhookSecretConflict`       | `FailedPrecondition` | Webhook Secret Conflict        |

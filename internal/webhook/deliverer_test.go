@@ -165,6 +165,28 @@ func TestDeliverer_Success(t *testing.T) {
 	assert.NotContains(t, x.logs.String(), "delivery exhausted")
 }
 
+func TestDeliveryHeaders_MatchWhatTheDelivererSends(t *testing.T) {
+	r := newReceiver(t, http.StatusOK)
+	x := newDelivery(t, r.srv.Client())
+	e, _ := x.endpoint(t, hookURL(r))
+	entry := x.entry(t, e)
+
+	require.NoError(t, x.d.Deliver(x.orgCtx(t), entry))
+	got := r.request(t)
+
+	headers := webhook.DeliveryHeaders(webhook.Delivery{Entry: entry, EventType: events.PostPublished})
+	names := make([]string, 0, len(headers))
+	for _, h := range headers {
+		names = append(names, h.Name)
+		assert.Equal(t, h.Value, got.header.Get(h.Name), "header %s", h.Name)
+	}
+	assert.ElementsMatch(t, []string{
+		"Content-Type", "User-Agent", "X-Altempl-Event-Id", "X-Altempl-Event-Type", "X-Altempl-Delivery-Id",
+	}, names)
+	assert.NotContains(t, names, "X-Altempl-Signature", "a per-attempt secret header must never be listed")
+	assert.NotContains(t, names, "X-Altempl-Timestamp")
+}
+
 func TestDeliverer_SignsWithBothSecretsPrimaryFirst(t *testing.T) {
 	r := newReceiver(t, http.StatusNoContent)
 	x := newDelivery(t, r.srv.Client())

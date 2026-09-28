@@ -216,6 +216,7 @@ func TestErrors_ToAppError(t *testing.T) {
 		{name: "not retryable", err: &webhook.DeliveryNotRetryableError{ID: "x"}, code: apperror.CodeWebhookDeliveryNotRetryable, grpc: codes.FailedPrecondition},
 		{name: "delivery not found", err: &webhook.DeliveryNotFoundError{ID: "x"}, code: apperror.CodeWebhookDeliveryNotFound, grpc: codes.NotFound},
 		{name: "inactive", err: &webhook.EndpointInactiveError{ID: "x"}, code: apperror.CodeWebhookEndpointInactive, grpc: codes.FailedPrecondition},
+		{name: "secret conflict", err: &webhook.SecretConflictError{ID: "x"}, code: apperror.CodeWebhookSecretConflict, grpc: codes.FailedPrecondition},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -235,6 +236,7 @@ func TestErrors_Helpers(t *testing.T) {
 	assert.Contains(t, cause.Error(), "rotate")
 
 	assert.True(t, webhook.IsNotFoundError(wrap(&webhook.NotFoundError{})))
+	assert.True(t, webhook.IsSecretConflictError(wrap(&webhook.SecretConflictError{})))
 	assert.True(t, webhook.IsInvalidURLError(wrap(&webhook.InvalidURLError{})))
 	assert.True(t, webhook.IsInvalidEventTypesError(wrap(&webhook.InvalidEventTypesError{})))
 	assert.True(t, webhook.IsInvalidDescriptionError(wrap(&webhook.InvalidDescriptionError{})))

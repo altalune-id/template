@@ -8,8 +8,10 @@ import (
 
 // Store is the driven port.
 type Store interface {
-	// Save upserts e, returning a *NotFoundError when the id belongs to another org.
+	// Save upserts e, writing its secrets only on insert, and returns a *NotFoundError when the id belongs to another org.
 	Save(ctx context.Context, e *Endpoint) error
+	// SaveSecrets replaces the endpoint's secrets when the stored pair still equals expected, or returns a *SecretConflictError or *NotFoundError.
+	SaveSecrets(ctx context.Context, id uuid.UUID, expected, next SealedSecrets) error
 	// ByID returns the endpoint in the caller's org, or a *NotFoundError.
 	ByID(ctx context.Context, id uuid.UUID) (*Endpoint, error)
 	// List returns the project's endpoints, newest first.

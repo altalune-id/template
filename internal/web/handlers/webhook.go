@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"bytes"
+	"encoding/json"
 	"net/http"
 	"slices"
 	"strings"
@@ -41,7 +43,7 @@ func (h *WebhookHandler) Register(mux web.Mux) {
 	mux.HandleFunc("POST "+base+"/{id}/rotate", h.PostWebhookRotate)
 	mux.HandleFunc("POST "+base+"/{id}/retire", h.PostWebhookRetire)
 	mux.HandleFunc("POST "+base+"/{id}/test", h.PostWebhookTest)
-	mux.HandleFunc("GET "+base+"/{id}/deliveries/{did}", h.GetWebhookAttempts)
+	mux.HandleFunc("GET "+base+"/{id}/deliveries/{did}", h.GetWebhookDelivery)
 	mux.HandleFunc("POST "+base+"/{id}/deliveries/{did}/retry", h.PostWebhookRetry)
 	mux.HandleFunc("POST "+base+"/{id}/retry-failed", h.PostWebhookRetryFailed)
 }
@@ -191,10 +193,20 @@ func (h *WebhookHandler) PostWebhookTest(w http.ResponseWriter, r *http.Request)
 	h.writeDeliveries(w, sc, e, templates.WebhookNotice{Key: "webhooks.test_queued"}, templates.WebhookError{})
 }
 
-// GetWebhookAttempts returns the attempts fragment of one delivery.
-func (h *WebhookHandler) GetWebhookAttempts(w http.ResponseWriter, r *http.Request) {
+// GetWebhookDelivery returns the payload and attempts fragment of one delivery.
+func (h *WebhookHandler) GetWebhookDelivery(w http.ResponseWriter, r *http.Request) {
 	sc, e, did, ok := h.requireDelivery(w, r)
 	if !ok {
+		return
+	}
+	d, err := h.Webhooks.Delivery(sc.req.Context(), e.ID, did)
+	if err != nil {
+		if webhook.IsDeliveryNotFoundError(err) || webhook.IsNotFoundError(err) {
+			h.ErrorPage(w, sc.req, http.StatusNotFound, "Not found", "That delivery no longer exists.", err)
+			return
+		}
+		h.LogErr("web webhook: delivery", err)
+		h.ErrorPage(w, sc.req, http.StatusInternalServerError, "Load failed", "Could not load the delivery.", err)
 		return
 	}
 	items, err := h.Webhooks.Attempts(sc.req.Context(), e.ID, did)
@@ -213,7 +225,7 @@ func (h *WebhookHandler) GetWebhookAttempts(w http.ResponseWriter, r *http.Reque
 			CreatedAt:  a.CreatedAt.UTC().Format(time.RFC3339),
 		})
 	}
-	Render(w, sc.req, templates.WebhookAttempts(h.ProjectFragmentBase(sc), rows, outbox.MaxAttempts))
+	Render(w, sc.req, templates.WebhookDeliveryDetail(h.ProjectFragmentBase(sc), payloadView(d), rows, outbox.MaxAttempts))
 }
 
 // PostWebhookRetry requeues one failed delivery and returns its row fragment.
@@ -468,6 +480,28 @@ func deliveryRow(d webhook.Delivery) templates.WebhookDeliveryRow {
 	return row
 }
 
+func payloadView(d webhook.Delivery) templates.WebhookPayloadView {
+	v := templates.WebhookPayloadView{Body: prettyPayload(d.Payload)}
+	if d.EventType == "" {
+		return v
+	}
+	headers := webhook.DeliveryHeaders(d)
+	rows := make([]templates.WebhookHeaderRow, len(headers))
+	for i, hd := range headers {
+		rows[i] = templates.WebhookHeaderRow{Name: hd.Name, Value: hd.Value}
+	}
+	v.Headers = rows
+	return v
+}
+
+func prettyPayload(b []byte) string {
+	var buf bytes.Buffer
+	if err := json.Indent(&buf, b, "", "  "); err != nil {
+		return string(b)
+	}
+	return buf.String()
+}
+
 //i18n:use webhooks.event.*
 func eventLabelKey(t events.Type) string {
 	if _, ok := events.Lookup(t); !ok {
@@ -529,6 +563,7 @@ func webhookErrorRules() []webhookErrorRule {
 		{webhook.IsDeliveryNotFoundError, "webhooks.error.delivery_not_found", true, 0},
 		{webhook.IsDeliveryNotRetryableError, "webhooks.error.not_retryable", true, 0},
 		{webhook.IsEndpointInactiveError, "webhooks.error.inactive", true, 0},
+		{webhook.IsSecretConflictError, "webhooks.error.secret_conflict", true, 0},
 		{sealer.IsUnavailableError, "webhooks.error.sealer_unavailable", false, 0},
 	}
 }

@@ -132,8 +132,8 @@ func setDefaults(v *viper.Viper) {
 
 	v.SetDefault("tenant.rlsEnforce", true)
 	v.SetDefault("tenant.personalOrgSlugFallback", "personal")
-	v.SetDefault("tenant.personalProjectSlug", "default")
-	v.SetDefault("tenant.singletonOrg.slug", "default")
+	v.SetDefault("tenant.personalProjectSlug", "")
+	v.SetDefault("tenant.singletonOrg.slug", "")
 	v.SetDefault("tenant.singletonOrg.name", "Default Organization")
 
 	v.SetDefault("genesis.breakGlass", false)

@@ -351,6 +351,27 @@ func (s *sqliteStore) RequeueFailed(ctx context.Context, target string) (int, er
 	return int(n), nil
 }
 
+func (s *sqliteStore) ByID(ctx context.Context, id uuid.UUID, target string) (Entry, error) {
+	conn, tc, err := s.conn(ctx)
+	if err != nil {
+		return Entry{}, err
+	}
+	stmt := sqlite.SELECT(s.entries.AllColumns).
+		FROM(s.entries).
+		WHERE(s.entries.OrgID.EQ(sqlite.String(tc.OrgID.String())).
+			AND(s.entries.ID.EQ(sqlite.String(id.String()))).
+			AND(s.entries.Target.EQ(sqlite.String(target))))
+
+	var row sqliteEntryRow
+	if qErr := stmt.QueryContext(ctx, conn, &row); qErr != nil {
+		if errorIsNoRows(qErr) {
+			return Entry{}, &NotFoundError{ID: id.String()}
+		}
+		return Entry{}, fmt.Errorf("outbox.sqlite.ByID: %w", qErr)
+	}
+	return row.toEntry()
+}
+
 func (s *sqliteStore) ListByTarget(ctx context.Context, target string, limit int) ([]Entry, error) {
 	conn, tc, err := s.conn(ctx)
 	if err != nil {

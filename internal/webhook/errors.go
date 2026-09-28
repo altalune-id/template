@@ -213,6 +213,31 @@ func IsEndpointInactiveError(err error) bool {
 	return ok
 }
 
+// SecretConflictError reports a secret write refused because the stored secrets changed since they were loaded.
+type SecretConflictError struct {
+	ID string
+}
+
+func (e *SecretConflictError) Error() string {
+	return fmt.Sprintf("webhook: secret changed concurrently: id=%s", e.ID)
+}
+
+// ToAppError converts the typed error into the wire envelope.
+func (e *SecretConflictError) ToAppError() *apperror.AppError {
+	return apperror.New(
+		apperror.CodeWebhookSecretConflict,
+		"The webhook secret changed concurrently; reload and retry",
+		codes.FailedPrecondition,
+		&apperrorv1.ErrorDetail{Code: apperror.CodeWebhookSecretConflict},
+	)
+}
+
+// IsSecretConflictError reports whether err's tree contains a *SecretConflictError.
+func IsSecretConflictError(err error) bool {
+	_, ok := errors.AsType[*SecretConflictError](err)
+	return ok
+}
+
 // InvalidAttemptError reports an attempt field that cannot be persisted under the tenant scope on ctx.
 type InvalidAttemptError struct {
 	Field  string

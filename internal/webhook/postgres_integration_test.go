@@ -16,7 +16,6 @@ import (
 
 	"altalune.id/template/internal/platform/config"
 	"altalune.id/template/internal/platform/db"
-	"altalune.id/template/internal/platform/events"
 	"altalune.id/template/internal/platform/outbox"
 	"altalune.id/template/internal/platform/tenant"
 	"altalune.id/template/internal/testutil/pgtest"
@@ -95,28 +94,6 @@ func TestPostgres_SaveAndByID(t *testing.T) {
 	require.NoError(t, err)
 	assertSameEndpoint(t, e, got)
 	assert.Nil(t, got.Secrets.Secondary, "a NULL secondary must read back as nil")
-}
-
-func TestPostgres_SaveUpdatesAndClearsSecondary(t *testing.T) {
-	f := newPgFixture(t)
-	ctx := tenant.Into(t.Context(), f.tc)
-
-	e := newSealedEndpoint(t, f.tc)
-	require.NoError(t, f.store.Save(ctx, e))
-
-	updateEndpoint(t, e, "https://example.org/v2", "renamed", []events.Type{events.PostUnpublished}, false)
-	e.Secrets = webhook.SealedSecrets{Primary: []byte("new-primary"), Secondary: []byte("old-primary")}
-	require.NoError(t, f.store.Save(ctx, e))
-
-	got, err := f.store.ByID(ctx, e.ID)
-	require.NoError(t, err)
-	assertSameEndpoint(t, e, got)
-
-	e.Secrets.Secondary = nil
-	require.NoError(t, f.store.Save(ctx, e))
-	got, err = f.store.ByID(ctx, e.ID)
-	require.NoError(t, err)
-	assert.Nil(t, got.Secrets.Secondary, "saving a nil secondary must clear the column")
 }
 
 func TestPostgres_SaveWritesAnEmptySecondaryAsNull(t *testing.T) {
@@ -320,12 +297,15 @@ func assertOtherOrgIsInvisible(t *testing.T, store webhook.Store, a, b tenant.Co
 	hijack.ID = victim.ID
 	hijack.URL = "https://attacker.example/steal"
 	assert.True(t, webhook.IsNotFoundError(store.Save(otherCtx, hijack)), "org B must not upsert onto org A's endpoint")
+	assert.True(t, webhook.IsNotFoundError(store.SaveSecrets(otherCtx, victim.ID, victim.Secrets,
+		webhook.SealedSecrets{Primary: []byte("attacker-primary")})), "org B must not rewrite org A's secrets")
 
 	assert.True(t, webhook.IsNotFoundError(store.Delete(otherCtx, victim.ID)), "org B must not delete org A's endpoint")
 
 	got, err := store.ByID(ownerCtx, victim.ID)
 	require.NoError(t, err)
 	assert.Equal(t, validURL, got.URL, "org A's endpoint must be untouched")
+	assert.Equal(t, victim.Secrets, got.Secrets, "org A's secrets must be untouched")
 	return victim
 }
 
@@ -426,4 +406,19 @@ func seedRLSTenant(t *testing.T, migDB *sql.DB, prefix string) tenant.Context {
 		projID, orgID, projID.String()[:8], userID, now)
 	require.NoError(t, err)
 	return tenant.Context{OrgID: orgID, ProjectID: projID, UserID: userID}
+}
+
+func TestPostgres_SaveKeepsStoredSecrets(t *testing.T) {
+	f := newPgFixture(t)
+	assertSaveKeepsStoredSecrets(t, f.store, f.tc)
+}
+
+func TestPostgres_SaveSecretsRotatesAndClearsSecondary(t *testing.T) {
+	f := newPgFixture(t)
+	assertSaveSecretsRotatesAndClearsSecondary(t, f.store, f.tc)
+}
+
+func TestPostgres_SaveSecretsRefusesAStaleExpected(t *testing.T) {
+	f := newPgFixture(t)
+	assertSaveSecretsRefusesAStaleExpected(t, f.store, f.tc)
 }

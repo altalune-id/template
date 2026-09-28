@@ -6,7 +6,7 @@ Guide for AI coding agents (Claude Code, Codex, Cursor, …). Read before touchi
 
 Multitenant Go template — Templ + HTMX + Connect-RPC on one HTTP listener. Downstream
 services fork it and swap the domain modules. Signatures under `authl/`, `httpclient/`,
-`logger/`, `mailer/`, `mcp/`, `nanoid/`, `reqid/`, `scheduler/`, `telemetry/`, `worker/`
+`logger/`, `mailer/`, `mcp/`, `nanoid/`, `reqid/`, `scheduler/`, `slug/`, `telemetry/`, `worker/`
 and `internal/platform/` are copied verbatim into forks — a signature change costs every
 fork churn, so land tests first. `mcp/` is held to that boundary by the `mcp-purity`
 depguard rule: stdlib and the MCP Go SDK only.

@@ -72,3 +72,37 @@ func TestWebhookStoreSaveAttemptHoldsTheProjectGuard(t *testing.T) {
 	assert.ErrorIs(t, store.SaveAttempt(ctx, a), boom)
 	assert.Len(t, store.Attempts(), 2)
 }
+
+// TestWebhookStoreSecretWritesMatchTheRealStores pins the fake to the real stores' secret contract: Save keeps them, SaveSecrets guards on the expected pair.
+func TestWebhookStoreSecretWritesMatchTheRealStores(t *testing.T) {
+	a := tenant.Context{OrgID: uuid.New(), ProjectID: uuid.New()}
+	ctx := tenant.Into(t.Context(), a)
+	store := fakes.NewWebhookStore()
+	e, err := webhook.New(a.OrgID, a.ProjectID, "https://example.com/hook", "", []events.Type{events.PostPublished})
+	require.NoError(t, err)
+	e.Secrets = webhook.SealedSecrets{Primary: []byte("p1")}
+	require.NoError(t, store.Save(ctx, e))
+
+	rotated := webhook.SealedSecrets{Primary: []byte("p2"), Secondary: []byte("p1")}
+	require.NoError(t, store.SaveSecrets(ctx, e.ID, e.Secrets, rotated))
+
+	require.NoError(t, store.Save(ctx, e), "a copy loaded before the rotation")
+	got, err := store.ByID(ctx, e.ID)
+	require.NoError(t, err)
+	assert.Equal(t, rotated, got.Secrets, "Save must keep the stored secrets")
+
+	err = store.SaveSecrets(ctx, e.ID, e.Secrets, webhook.SealedSecrets{Primary: []byte("p3")})
+	assert.True(t, webhook.IsSecretConflictError(err), "got %T: %v", err, err)
+	err = store.SaveSecrets(ctx, e.ID, webhook.SealedSecrets{Primary: []byte("p2")}, webhook.SealedSecrets{Primary: []byte("p3")})
+	assert.True(t, webhook.IsSecretConflictError(err), "a nil expected secondary must not match a stored one")
+
+	b := tenant.Context{OrgID: uuid.New(), ProjectID: uuid.New()}
+	err = store.SaveSecrets(tenant.Into(t.Context(), b), e.ID, rotated, webhook.SealedSecrets{Primary: []byte("p3")})
+	assert.True(t, webhook.IsNotFoundError(err), "another org: got %T: %v", err, err)
+	err = store.SaveSecrets(ctx, uuid.New(), rotated, webhook.SealedSecrets{Primary: []byte("p3")})
+	assert.True(t, webhook.IsNotFoundError(err))
+
+	got, err = store.ByID(ctx, e.ID)
+	require.NoError(t, err)
+	assert.Equal(t, rotated, got.Secrets)
+}

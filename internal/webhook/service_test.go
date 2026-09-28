@@ -105,7 +105,7 @@ func (h *harness) failEntry(ctx context.Context, t *testing.T, id uuid.UUID) {
 			require.NoError(t, h.outbox.Fail(ctx, c, time.Now(), "boom"))
 		}
 	}
-	e, ok := h.outbox.ByID(id)
+	e, ok := h.outbox.Entry(id)
 	require.True(t, ok)
 	require.Equal(t, outbox.StatusFailed, e.Status)
 }
@@ -351,6 +351,66 @@ func TestService_RetireSecondary(t *testing.T) {
 	assert.Equal(t, fresh, h.open(t, e.ID, webhook.SlotPrimary, stored.Secrets.Primary))
 }
 
+func TestService_UpdateRacingARotateKeepsTheNewSecret(t *testing.T) {
+	h := newHarness(t)
+	ctx, _ := svcCtx(t)
+	e, _ := h.create(ctx, t, events.PostPublished)
+	var fresh string
+	h.store.AfterByID = func() {
+		h.store.AfterByID = nil
+		var err error
+		fresh, err = h.svc.Rotate(ctx, e.ID)
+		require.NoError(t, err)
+	}
+
+	_, err := h.svc.Update(ctx, e.ID, "https://example.org/v2", "renamed", []events.Type{events.PostDeleted}, true)
+	require.NoError(t, err)
+
+	stored, err := h.store.ByID(ctx, e.ID)
+	require.NoError(t, err)
+	assert.Equal(t, fresh, h.open(t, e.ID, webhook.SlotPrimary, stored.Secrets.Primary), "the update must not revert the rotation")
+	assert.Equal(t, "https://example.org/v2", stored.URL)
+}
+
+func TestService_SecretWritesRacingARotateConflict(t *testing.T) {
+	calls := []struct {
+		name string
+		call func(svc *webhook.Service, ctx context.Context, id uuid.UUID) error
+	}{
+		{"Rotate", func(svc *webhook.Service, ctx context.Context, id uuid.UUID) error {
+			_, err := svc.Rotate(ctx, id)
+			return err
+		}},
+		{"RetireSecondary", func(svc *webhook.Service, ctx context.Context, id uuid.UUID) error {
+			return svc.RetireSecondary(ctx, id)
+		}},
+	}
+	for _, c := range calls {
+		t.Run(c.name, func(t *testing.T) {
+			h := newHarness(t)
+			ctx, _ := svcCtx(t)
+			e, _ := h.create(ctx, t, events.PostPublished)
+			_, err := h.svc.Rotate(ctx, e.ID)
+			require.NoError(t, err)
+			var fresh string
+			h.store.AfterByID = func() {
+				h.store.AfterByID = nil
+				var err error
+				fresh, err = h.svc.Rotate(ctx, e.ID)
+				require.NoError(t, err)
+			}
+
+			err = c.call(h.svc, ctx, e.ID)
+			assert.True(t, webhook.IsSecretConflictError(err), "got %T: %v", err, err)
+			assert.Zero(t, *h.unexpected)
+
+			stored, err := h.store.ByID(ctx, e.ID)
+			require.NoError(t, err)
+			assert.Equal(t, fresh, h.open(t, e.ID, webhook.SlotPrimary, stored.Secrets.Primary), "the racing rotation must survive")
+		})
+	}
+}
+
 func TestService_SendTest(t *testing.T) {
 	t.Run("inactive is refused", func(t *testing.T) {
 		h := newHarness(t)
@@ -451,6 +511,50 @@ func TestService_Attempts(t *testing.T) {
 	assert.Equal(t, a.ID, got[0].ID)
 }
 
+func TestService_Delivery(t *testing.T) {
+	h := newHarness(t)
+	ctx, _ := svcCtx(t)
+	e, _ := h.create(ctx, t, events.PostPublished)
+	other, _ := h.create(ctx, t, events.PostPublished)
+	require.NoError(t, h.svc.SendTest(ctx, e.ID))
+	d := h.outbox.Entries()[0]
+
+	got, err := h.svc.Delivery(ctx, e.ID, d.ID)
+	require.NoError(t, err)
+	assert.Equal(t, d.ID, got.ID)
+	assert.Equal(t, d.EventID, got.EventID)
+	assert.Equal(t, d.Payload, got.Payload)
+	assert.Equal(t, events.WebhookPing, got.EventType)
+
+	_, err = h.svc.Delivery(ctx, other.ID, d.ID)
+	assert.True(t, webhook.IsDeliveryNotFoundError(err), "another endpoint's delivery: got %T: %v", err, err)
+
+	_, err = h.svc.Delivery(ctx, e.ID, uuid.New())
+	assert.True(t, webhook.IsDeliveryNotFoundError(err), "an unknown delivery: got %T: %v", err, err)
+	assert.Zero(t, *h.unexpected)
+}
+
+func TestService_DeliveryReadsAnUndecodableEnvelopeWithoutType(t *testing.T) {
+	h := newHarness(t)
+	ctx, tc := svcCtx(t)
+	e, _ := h.create(ctx, t, events.PostPublished)
+	entry := outbox.Entry{
+		ID:        uuid.Must(uuid.NewV7()),
+		EventID:   uuid.Must(uuid.NewV7()),
+		ProjectID: tc.ProjectID,
+		Target:    e.ID.String(),
+		Payload:   []byte(`not json`),
+	}
+	require.NoError(t, h.outbox.Enqueue(ctx, entry))
+
+	got, err := h.svc.Delivery(ctx, e.ID, entry.ID)
+
+	require.NoError(t, err)
+	assert.Equal(t, []byte(`not json`), got.Payload)
+	assert.Empty(t, got.EventType)
+	assert.Zero(t, *h.unexpected)
+}
+
 func TestService_Retry(t *testing.T) {
 	h := newHarness(t)
 	ctx, _ := svcCtx(t)
@@ -470,7 +574,7 @@ func TestService_Retry(t *testing.T) {
 	assert.True(t, webhook.IsDeliveryNotFoundError(err), "another endpoint's delivery: got %T: %v", err, err)
 
 	require.NoError(t, h.svc.Retry(ctx, e.ID, d.ID))
-	got, ok := h.outbox.ByID(d.ID)
+	got, ok := h.outbox.Entry(d.ID)
 	require.True(t, ok)
 	assert.Equal(t, outbox.StatusPending, got.Status)
 	assert.Zero(t, got.Attempt)
@@ -522,6 +626,10 @@ func TestService_BareIDMethodsCheckOrgAndProject(t *testing.T) {
 		}},
 		{"Attempts", func(svc *webhook.Service, ctx context.Context, id uuid.UUID) error {
 			_, err := svc.Attempts(ctx, id, uuid.New())
+			return err
+		}},
+		{"Delivery", func(svc *webhook.Service, ctx context.Context, id uuid.UUID) error {
+			_, err := svc.Delivery(ctx, id, uuid.New())
 			return err
 		}},
 		{"Retry", func(svc *webhook.Service, ctx context.Context, id uuid.UUID) error {

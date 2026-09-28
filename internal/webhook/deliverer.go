@@ -42,6 +42,27 @@ const (
 
 var _ outbox.Deliverer = (*Deliverer)(nil)
 
+// Header is one HTTP header name and value sent with a delivery.
+type Header struct {
+	Name  string
+	Value string
+}
+
+// DeliveryHeaders returns the non-secret headers every attempt of d carries; the timestamp and signature are computed per attempt and never stored.
+func DeliveryHeaders(d Delivery) []Header {
+	return deliveryHeaders(d.Entry, d.EventType)
+}
+
+func deliveryHeaders(e outbox.Entry, eventType events.Type) []Header {
+	return []Header{
+		{Name: headerEventID, Value: eventIDPrefix + e.EventID.String()},
+		{Name: headerEventType, Value: string(eventType)},
+		{Name: headerDeliveryID, Value: deliveryIDPrefix + e.ID.String()},
+		{Name: headerContentType, Value: contentTypeJSON},
+		{Name: headerUserAgent, Value: userAgent},
+	}
+}
+
 // Deliverer is the outbox.Deliverer that signs and POSTs one webhook delivery.
 type Deliverer struct {
 	store  Store
@@ -152,11 +173,9 @@ func (d *Deliverer) post(ctx context.Context, endpointURL string, e outbox.Entry
 	for i, s := range secrets {
 		signatures[i] = Sign(s, timestamp, e.Payload)
 	}
-	req.Header.Set(headerContentType, contentTypeJSON)
-	req.Header.Set(headerUserAgent, userAgent)
-	req.Header.Set(headerEventID, eventIDPrefix+e.EventID.String())
-	req.Header.Set(headerEventType, string(eventType))
-	req.Header.Set(headerDeliveryID, deliveryIDPrefix+e.ID.String())
+	for _, h := range deliveryHeaders(e, eventType) {
+		req.Header.Set(h.Name, h.Value)
+	}
 	req.Header.Set(headerTimestamp, timestamp)
 	req.Header.Set(headerSignature, strings.Join(signatures, " "))
 

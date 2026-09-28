@@ -351,6 +351,8 @@ func TestStoreOperationsRequireATenantScope(t *testing.T) {
 	require.Error(t, err)
 	require.Error(t, s.Succeed(bare, outbox.Entry{ID: uuid.New()}, time.Now()))
 	require.Error(t, s.Fail(bare, outbox.Entry{ID: uuid.New()}, time.Now(), "x"))
+	_, err = s.ByID(bare, uuid.New(), "delivery-endpoint")
+	require.Error(t, err)
 }
 
 func TestClaimDueIgnoresAnotherOrgsEntries(t *testing.T) {
@@ -682,4 +684,61 @@ func TestListByTargetBreaksATiedCreatedAtByIDDescending(t *testing.T) {
 		require.Len(t, limited, 1)
 		assert.Equal(t, hi, limited[0].ID, "the limit cutoff did not respect the id-descending tiebreak")
 	})
+}
+
+func TestByIDReturnsTheEntryOfItsTarget(t *testing.T) {
+	for _, sc := range storeCases() {
+		t.Run(sc.name, func(t *testing.T) {
+			s, ctx, tc := sc.new(t)
+			e := entry(tc, uuid.New())
+			require.NoError(t, s.Enqueue(ctx, e))
+
+			got, err := s.ByID(ctx, e.ID, e.Target)
+			require.NoError(t, err)
+			assert.Equal(t, e.ID, got.ID)
+			assert.Equal(t, e.EventID, got.EventID)
+			assert.Equal(t, tc.OrgID, got.OrgID)
+			assert.Equal(t, e.Target, got.Target)
+			assert.Equal(t, e.Payload, got.Payload)
+			assert.Equal(t, outbox.StatusPending, got.Status)
+			assert.False(t, got.CreatedAt.IsZero(), "CreatedAt was not filled")
+		})
+	}
+}
+
+func TestByIDOfAnUnknownEntryIsNotFound(t *testing.T) {
+	for _, sc := range storeCases() {
+		t.Run(sc.name, func(t *testing.T) {
+			s, ctx, _ := sc.new(t)
+			_, err := s.ByID(ctx, uuid.New(), "delivery-endpoint")
+			require.Error(t, err)
+			assert.True(t, outbox.IsNotFoundError(err), "got %v", err)
+		})
+	}
+}
+
+// TestByIDIsScopedToOrgAndTarget proves the org and target predicates are the only guards on SQLite (no RLS); reverting either must fail this test.
+func TestByIDIsScopedToOrgAndTarget(t *testing.T) {
+	for _, sc := range storeCases() {
+		t.Run(sc.name+"/another org", func(t *testing.T) {
+			s, ctx, tc := sc.new(t)
+			e := entry(tc, uuid.New())
+			require.NoError(t, s.Enqueue(ctx, e))
+
+			other := tenant.Into(t.Context(), tenant.Context{OrgID: uuid.New(), ProjectID: uuid.New()})
+			_, err := s.ByID(other, e.ID, e.Target)
+			require.Error(t, err)
+			assert.True(t, outbox.IsNotFoundError(err), "an entry was read across the tenant boundary: %v", err)
+		})
+
+		t.Run(sc.name+"/another target", func(t *testing.T) {
+			s, ctx, tc := sc.new(t)
+			e := entry(tc, uuid.New())
+			require.NoError(t, s.Enqueue(ctx, e))
+
+			_, err := s.ByID(ctx, e.ID, "another-endpoint")
+			require.Error(t, err)
+			assert.True(t, outbox.IsNotFoundError(err), "an entry was read under another target: %v", err)
+		})
+	}
 }

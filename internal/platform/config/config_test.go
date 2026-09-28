@@ -228,7 +228,7 @@ func TestValidate_ModeInvariants(t *testing.T) {
 			wantSub: "requires genesis.email",
 		},
 		{
-			name: "cloud without singleton org slug fails",
+			name: "cloud without singleton org slug is allowed: the slug is prefill only",
 			mutate: func(c *Config) {
 				c.Mode = ModeCloud
 				c.OIDC = OIDCConfig{Issuer: "https://iss.example.com", ClientID: "c", ClientSecret: "s"}
@@ -236,7 +236,7 @@ func TestValidate_ModeInvariants(t *testing.T) {
 				c.Genesis = GenesisConfig{Email: "root@example.com", Password: "s3cret", BreakGlass: true}
 				c.Tenant.SingletonOrg.Slug = ""
 			},
-			wantSub: "singletonOrg.slug",
+			wantSub: "",
 		},
 		{
 			name: "cloud without singleton org name fails",
@@ -503,4 +503,20 @@ func TestSchedulerConfig_Locations_NilReceiverIsUTC(t *testing.T) {
 	loc, err := cfg.Locations()
 	require.NoError(t, err)
 	require.Equal(t, "UTC", loc("any").String())
+}
+
+func TestDefaults_FirstRunSlugsAreGenerated(t *testing.T) {
+	cfg := Defaults()
+	require.Empty(t, cfg.Tenant.SingletonOrg.Slug, "a blank tenant.singletonOrg.slug means generate one at first run")
+	require.Empty(t, cfg.Tenant.PersonalProjectSlug, "a blank tenant.personalProjectSlug means generate one at first run")
+}
+
+func TestLoad_FirstRunSlugsHonourEnv(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("ALT_TENANT_SINGLETON_ORG_SLUG", "acme")
+	t.Setenv("ALT_TENANT_PERSONAL_PROJECT_SLUG", "web")
+	cfg, err := Load("", withCwdOverride(t, t.TempDir()), withGenesisFallback(t))
+	require.NoError(t, err)
+	require.Equal(t, "acme", cfg.Tenant.SingletonOrg.Slug, "a configured slug still wins over generation")
+	require.Equal(t, "web", cfg.Tenant.PersonalProjectSlug)
 }

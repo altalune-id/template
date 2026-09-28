@@ -139,29 +139,6 @@ func TestSQLite_SaveAndByID(t *testing.T) {
 	assert.Nil(t, got.Secrets.Secondary, "a NULL secondary must read back as nil")
 }
 
-func TestSQLite_SaveUpdatesAndClearsSecondary(t *testing.T) {
-	store, _, tc := newSQLiteStore(t)
-	ctx := tenant.Into(t.Context(), tc)
-
-	e := newSealedEndpoint(t, tc)
-	require.NoError(t, store.Save(ctx, e))
-
-	updateEndpoint(t, e, "https://example.org/v2", "renamed", []events.Type{events.PostUnpublished}, false)
-	e.Secrets = webhook.SealedSecrets{Primary: []byte("new-primary"), Secondary: []byte("old-primary")}
-	require.NoError(t, store.Save(ctx, e))
-
-	got, err := store.ByID(ctx, e.ID)
-	require.NoError(t, err)
-	assertSameEndpoint(t, e, got)
-
-	e.Secrets.Secondary = nil
-	require.NoError(t, store.Save(ctx, e))
-	got, err = store.ByID(ctx, e.ID)
-	require.NoError(t, err)
-	assert.Nil(t, got.Secrets.Secondary, "saving a nil secondary must clear the column")
-	assert.Equal(t, []byte("new-primary"), got.Secrets.Primary)
-}
-
 func TestSQLite_SaveWritesAnEmptySecondaryAsNull(t *testing.T) {
 	store, sqlDB, tc := newSQLiteStore(t)
 	ctx := tenant.Into(t.Context(), tc)

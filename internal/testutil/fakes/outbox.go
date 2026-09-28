@@ -44,8 +44,8 @@ func (f *Outbox) Entries() []outbox.Entry {
 	return out
 }
 
-// ByID returns the recorded entry and whether it exists.
-func (f *Outbox) ByID(id uuid.UUID) (outbox.Entry, bool) {
+// Entry returns the recorded entry and whether it exists, ignoring the tenant scope.
+func (f *Outbox) Entry(id uuid.UUID) (outbox.Entry, bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	e, ok := f.byID[id]
@@ -213,6 +213,20 @@ func (f *Outbox) RequeueFailed(ctx context.Context, target string) (int, error) 
 		n++
 	}
 	return n, nil
+}
+
+func (f *Outbox) ByID(ctx context.Context, id uuid.UUID, target string) (outbox.Entry, error) {
+	tc, err := tenant.From(ctx)
+	if err != nil {
+		return outbox.Entry{}, err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	e, ok := f.byID[id]
+	if !ok || e.OrgID != tc.OrgID || e.Target != target {
+		return outbox.Entry{}, &outbox.NotFoundError{ID: id.String()}
+	}
+	return cloneOutboxEntry(e), nil
 }
 
 func (f *Outbox) ListByTarget(ctx context.Context, target string, limit int) ([]outbox.Entry, error) {

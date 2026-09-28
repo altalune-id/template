@@ -248,8 +248,7 @@ func (s *Service) Rotate(ctx context.Context, id uuid.UUID) (string, error) {
 			return "", s.sealFailure(ctx, span, "webhook.Rotate: seal secondary", err, id)
 		}
 	}
-	e.SetSecrets(SealedSecrets{Primary: primary, Secondary: secondary})
-	if err := s.save(ctx, span, "webhook.Rotate", e); err != nil {
+	if err := s.saveSecrets(ctx, span, "webhook.Rotate", e, SealedSecrets{Primary: primary, Secondary: secondary}); err != nil {
 		return "", err
 	}
 	return secret, nil
@@ -267,8 +266,7 @@ func (s *Service) RetireSecondary(ctx context.Context, id uuid.UUID) error {
 	if e.Secrets.Secondary == nil {
 		return nil
 	}
-	e.SetSecrets(SealedSecrets{Primary: e.Secrets.Primary})
-	return s.save(ctx, span, "webhook.RetireSecondary", e)
+	return s.saveSecrets(ctx, span, "webhook.RetireSecondary", e, SealedSecrets{Primary: e.Secrets.Primary})
 }
 
 // SendTest queues one webhook.ping to the identified endpoint, whatever it subscribes to.
@@ -318,16 +316,38 @@ func (s *Service) Deliveries(ctx context.Context, id uuid.UUID, limit int) ([]De
 	}
 	out := make([]Delivery, len(entries))
 	for i, e := range entries {
-		out[i] = Delivery{Entry: e}
-		typ, err := envelopeType(e.Payload)
-		if err != nil {
-			s.log.WarnContext(ctx, "webhook: delivery envelope has no readable type",
-				"endpoint_id", id, "delivery_id", e.ID, "err", err)
-			continue
-		}
-		out[i].EventType = typ
+		out[i] = s.toDelivery(ctx, id, e)
 	}
 	return out, nil
+}
+
+func (s *Service) toDelivery(ctx context.Context, endpointID uuid.UUID, e outbox.Entry) Delivery {
+	typ, err := envelopeType(e.Payload)
+	if err != nil {
+		s.log.WarnContext(ctx, "webhook: delivery envelope has no readable type",
+			"endpoint_id", endpointID, "delivery_id", e.ID, "err", err)
+		return Delivery{Entry: e}
+	}
+	return Delivery{Entry: e, EventType: typ}
+}
+
+// Delivery returns one delivery of the identified endpoint, or *DeliveryNotFoundError when the endpoint has none by that id.
+func (s *Service) Delivery(ctx context.Context, id, deliveryID uuid.UUID) (Delivery, error) {
+	ctx, span := startWithID(ctx, "webhook.Delivery", id)
+	defer span.End()
+
+	if _, err := s.load(ctx, span, "webhook.Delivery", id); err != nil {
+		return Delivery{}, err
+	}
+	e, err := s.outbox.ByID(ctx, deliveryID, id.String())
+	if err != nil {
+		if outbox.IsNotFoundError(err) {
+			return Delivery{}, record(span, &DeliveryNotFoundError{ID: deliveryID.String()})
+		}
+		span.RecordError(err)
+		return Delivery{}, s.unexpected(ctx, "webhook.Delivery: byID", err, "endpoint_id", id, "delivery_id", deliveryID)
+	}
+	return s.toDelivery(ctx, id, e), nil
 }
 
 // Attempts returns the recorded attempts of one delivery to the identified endpoint, newest first.
@@ -452,6 +472,19 @@ func (s *Service) save(ctx context.Context, span trace.Span, method string, e *E
 		return s.unexpected(ctx, method+": save", err, "endpoint_id", e.ID)
 	}
 	return nil
+}
+
+func (s *Service) saveSecrets(ctx context.Context, span trace.Span, method string, e *Endpoint, next SealedSecrets) error {
+	err := s.store.SaveSecrets(ctx, e.ID, e.Secrets, next)
+	if err == nil {
+		e.SetSecrets(next)
+		return nil
+	}
+	span.RecordError(err)
+	if IsNotFoundError(err) || IsSecretConflictError(err) {
+		return err
+	}
+	return s.unexpected(ctx, method+": save secrets", err, "endpoint_id", e.ID)
 }
 
 func (s *Service) sealFailure(ctx context.Context, span trace.Span, msg string, err error, id uuid.UUID) error {

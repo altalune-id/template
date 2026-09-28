@@ -9,9 +9,9 @@ import (
 
 	"altalune.id/template/internal/org"
 	"altalune.id/template/internal/platform/session"
-	slugs "altalune.id/template/internal/platform/slug"
 	"altalune.id/template/internal/web"
 	"altalune.id/template/internal/web/templates"
+	slugs "altalune.id/template/slug"
 )
 
 // OrgHandler owns /orgs, /orgs/new, /orgs/{slug} and members routes.

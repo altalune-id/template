@@ -173,9 +173,9 @@ After attempt 8 the delivery is `failed` and stays in the console. Source: `outb
 
 - **Retry** requeues one `failed` delivery: attempt 0, due now, same delivery id and body.
 - **Retry all failed (N)** does the same for every failed delivery of one endpoint.
-- A `pending` or `delivered` delivery cannot be retried (`WHK005`), so a manual retry never races
-  the automatic one.
+- A `pending` or `delivered` delivery cannot be retried (`WHK005`): no race with the automatic retry.
 - A retried delivery reuses its delivery id: if you already processed it, answer 2xx.
+- Each delivery's row shows the exact body sent and its headers; the timestamp and signature are per attempt and not stored.
 
 ## Rotation
 
@@ -184,6 +184,7 @@ After attempt 8 the delivery is `failed` and stays in the console. Source: `outb
 3. **Retire** drops the secondary. Nothing retires it for you.
 
 - Rotating again during a rotation drops the old secondary; the current primary becomes the secondary.
+- A rotate or retire that races another secret change is refused with `WHK008`: reload and retry.
 - If the server's encryption key was ephemeral and the process restarted, secrets cannot be opened:
   deliveries fail with `webhook: signing secret unavailable: rotate the endpoint secret to recover` until you rotate. See [`config`](../config/README.md#encryption-at-rest).
 
@@ -195,4 +196,4 @@ After attempt 8 the delivery is `failed` and stays in the console. Source: `outb
 - A v2 ships only with a per-endpoint version selector in the console. Until then, one version per event.
 - A new event type reaches you only if you subscribe to it.
 
-Error codes `WHK001`–`WHK007`: [`error codes`](../errors/README.md#whk--webhooks).
+Error codes `WHK001`–`WHK008`: [`error codes`](../errors/README.md#whk--webhooks).

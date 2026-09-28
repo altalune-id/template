@@ -121,7 +121,7 @@ type TenantConfig struct {
 	RLSEnforce              bool               `yaml:"rlsEnforce"              mapstructure:"rlsEnforce"               awareness:"bootstrap"`
 	SingletonOrg            SingletonOrgConfig `yaml:"singletonOrg"            mapstructure:"singletonOrg"`
 	PersonalOrgSlugFallback string             `yaml:"personalOrgSlugFallback" mapstructure:"personalOrgSlugFallback"`
-	PersonalProjectSlug     string             `yaml:"personalProjectSlug"     mapstructure:"personalProjectSlug"`
+	PersonalProjectSlug     string             `yaml:"personalProjectSlug"     mapstructure:"personalProjectSlug"      awareness:"-"`
 	TenantScopedTables      []string           `yaml:"tenantScopedTables"      mapstructure:"tenantScopedTables"       awareness:"bootstrap"`
 }
 
@@ -398,9 +398,6 @@ func validateCloudGenesisPasswordBreakGlass(c *Config) error {
 }
 
 func validateCloudSingletonOrg(c *Config) error {
-	if c.Tenant.SingletonOrg.Slug == "" {
-		return errors.New("config: mode=cloud requires tenant.singletonOrg.slug — the first organization created at bootstrap (set ALT_TENANT_SINGLETON_ORG_SLUG)")
-	}
 	if c.Tenant.SingletonOrg.Name == "" {
 		return errors.New("config: mode=cloud requires tenant.singletonOrg.name — the display name of the first organization (set ALT_TENANT_SINGLETON_ORG_NAME)")
 	}

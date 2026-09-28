@@ -269,9 +269,8 @@ func schedulerBootCfg(t *testing.T) *config.Config {
 		},
 		Genesis: config.GenesisConfig{Email: "root@example.com", Password: "hunter2"},
 		Tenant: config.TenantConfig{
-			SingletonOrg:            config.SingletonOrgConfig{Slug: "default", Name: "Default"},
+			SingletonOrg:            config.SingletonOrgConfig{Name: "Default"},
 			PersonalOrgSlugFallback: "personal",
-			PersonalProjectSlug:     "default",
 		},
 		Log:       logger.Config{Level: "error", Format: "json"},
 		Mail:      config.MailConfig{Driver: "console", From: "no-reply@example.com"},

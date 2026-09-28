@@ -25,6 +25,8 @@ type Store interface {
 	Requeue(ctx context.Context, id uuid.UUID, target string) error
 	// RequeueFailed resets every failed entry of target to pending, attempt 0, and returns how many it touched.
 	RequeueFailed(ctx context.Context, target string) (int, error)
+	// ByID returns the entry id of target, or *NotFoundError when it is absent from the caller's org.
+	ByID(ctx context.Context, id uuid.UUID, target string) (Entry, error)
 	// ListByTarget returns up to limit entries of target, newest first.
 	ListByTarget(ctx context.Context, target string, limit int) ([]Entry, error)
 }

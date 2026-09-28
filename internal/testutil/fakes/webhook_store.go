@@ -1,6 +1,7 @@
 package fakes
 
 import (
+	"bytes"
 	"context"
 	"slices"
 	"strings"
@@ -23,6 +24,8 @@ type WebhookStore struct {
 
 	// SaveAttemptErr, when set, is returned by SaveAttempt instead of recording the attempt.
 	SaveAttemptErr error
+	// AfterByID, when set, runs after each successful ByID and outside the lock, so a test can interleave a racing write.
+	AfterByID func()
 }
 
 // NewWebhookStore returns an empty in-memory webhook.Store.
@@ -58,15 +61,39 @@ func (f *WebhookStore) Save(ctx context.Context, e *webhook.Endpoint) error {
 	}
 	stored := cloneEndpoint(e)
 	if existing, ok := f.endpoints[e.ID]; ok {
-		// NOTE: both real stores refuse the conflict update under another org and keep the stored created_at, org and project.
+		// NOTE: both real stores refuse the conflict update under another org and keep the stored created_at, org, project and secrets.
 		if existing.OrgID != tc.OrgID {
 			return &webhook.NotFoundError{ID: e.ID.String()}
 		}
 		stored.OrgID = existing.OrgID
 		stored.ProjectID = existing.ProjectID
 		stored.CreatedAt = existing.CreatedAt
+		stored.Secrets = cloneSecrets(existing.Secrets)
 	}
 	f.endpoints[e.ID] = stored
+	return nil
+}
+
+func (f *WebhookStore) SaveSecrets(ctx context.Context, id uuid.UUID, expected, next webhook.SealedSecrets) error {
+	tc, err := tenant.From(ctx)
+	if err != nil {
+		return err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	e, ok := f.endpoints[id]
+	if !ok || e.OrgID != tc.OrgID {
+		return &webhook.NotFoundError{ID: id.String()}
+	}
+	// NOTE: both real stores compare the primary bytes and the secondary null-safely, an empty secondary being stored as NULL.
+	if !bytes.Equal(e.Secrets.Primary, expected.Primary) || !sameSecondary(e.Secrets.Secondary, expected.Secondary) {
+		return &webhook.SecretConflictError{ID: id.String()}
+	}
+	e.Secrets = cloneSecrets(next)
+	if len(next.Secondary) == 0 {
+		e.Secrets.Secondary = nil
+	}
+	e.UpdatedAt = time.Now().UTC()
 	return nil
 }
 
@@ -76,12 +103,18 @@ func (f *WebhookStore) ByID(ctx context.Context, id uuid.UUID) (*webhook.Endpoin
 		return nil, err
 	}
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	e, ok := f.endpoints[id]
 	if !ok || e.OrgID != tc.OrgID {
+		f.mu.Unlock()
 		return nil, &webhook.NotFoundError{ID: id.String()}
 	}
-	return cloneEndpoint(e), nil
+	out := cloneEndpoint(e)
+	hook := f.AfterByID
+	f.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
+	return out, nil
 }
 
 func (f *WebhookStore) List(ctx context.Context, orgID, projectID uuid.UUID) ([]*webhook.Endpoint, error) {
@@ -180,9 +213,17 @@ func (f *WebhookStore) ListAttempts(ctx context.Context, endpointID, deliveryID 
 func cloneEndpoint(e *webhook.Endpoint) *webhook.Endpoint {
 	cp := *e
 	cp.EventTypes = slices.Clone(e.EventTypes)
-	cp.Secrets = webhook.SealedSecrets{
-		Primary:   slices.Clone(e.Secrets.Primary),
-		Secondary: slices.Clone(e.Secrets.Secondary),
-	}
+	cp.Secrets = cloneSecrets(e.Secrets)
 	return &cp
+}
+
+func cloneSecrets(s webhook.SealedSecrets) webhook.SealedSecrets {
+	return webhook.SealedSecrets{Primary: slices.Clone(s.Primary), Secondary: slices.Clone(s.Secondary)}
+}
+
+func sameSecondary(stored, expected []byte) bool {
+	if len(stored) == 0 || len(expected) == 0 {
+		return len(stored) == 0 && len(expected) == 0
+	}
+	return bytes.Equal(stored, expected)
 }

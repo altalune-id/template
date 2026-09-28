@@ -11,11 +11,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
 	"altalune.id/template/internal/apperror"
 	"altalune.id/template/internal/platform/config"
 	"altalune.id/template/internal/platform/queue"
+	"altalune.id/template/internal/user"
 )
 
 type unexpectedRecorder struct {
@@ -151,4 +153,34 @@ func TestOnboarding_CompleteOnboardingIsTheGate(t *testing.T) {
 	srv.CompleteOnboarding(t.Context())
 
 	require.False(t, redirectsToOnboard(srv))
+}
+
+func TestOnboarding_CustomOrgSlugStillResolvesOnLaterLogins(t *testing.T) {
+	cfg := onboardingBootCfg(t, "")
+	cfg.Tenant.SingletonOrg.Slug = ""
+	srv, err := BootServer(t.Context(), cfg)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, srv.Close()) })
+
+	form := url.Values{
+		"token": {cfg.Onboard.SetupToken}, "email": {"admin@example.com"}, "name": {"Admin"},
+		"password": {"secret-password"}, "org_slug": {"admin-edited-slug"}, "org_name": {"Acme"},
+		"project_slug": {""}, "project_name": {"Main"},
+	}
+	req := httptest.NewRequest(http.MethodPost, "/onboard/local", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	srv.Web.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusSeeOther, rec.Code, rec.Body.String())
+
+	o, err := srv.Orgs.BySlug(t.Context(), "admin-edited-slug")
+	require.NoError(t, err, "the edited slug must be the one stored")
+
+	res, err := srv.Onboard.Onboard(t.Context(), o.OwnerID, "admin@example.com")
+	require.NoError(t, err, "a later selfhosted login must find the singleton org by its system flag, not the configured slug")
+	require.Equal(t, o.ID, res.OrgID)
+	require.NotEqual(t, uuid.Nil, res.ProjectID, "the generated first project must be picked")
+
+	_, err = srv.Onboard.Onboard(t.Context(), uuid.New(), "stranger@example.com")
+	require.True(t, user.IsNotInvitedError(err), "an uninvited user must meet the existing org, got %T: %v", err, err)
 }

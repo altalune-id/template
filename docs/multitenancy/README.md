@@ -63,13 +63,15 @@ flowchart LR
 
 ### Reads that run before a scope exists
 
-Resolving a slug is what _establishes_ a scope, so it cannot go through RLS. Five
-`SECURITY DEFINER` wrappers in `005_definer_functions.sql`, `EXECUTE` revoked from `PUBLIC`:
+Resolving a slug is what _establishes_ a scope, so it cannot go through RLS. Six
+`SECURITY DEFINER` wrappers (`005_definer_functions.sql`, `012_resolve_system_org.sql`), `EXECUTE`
+revoked from `PUBLIC`:
 
 | Wrapper                                | Read by                                                    |
 | -------------------------------------- | ---------------------------------------------------------- |
 | `list_org_ids()`                       | `tenant.NewOrgReader` — the scheduler and dispatch fan-out |
 | `resolve_org_by_slug(text)`            | `org` store `BySlug`                                       |
+| `resolve_system_org()`                 | `org` store `SystemOrg` — the selfhosted login             |
 | `list_orgs_for_user(uuid)`             | `org` store `List`                                         |
 | `resolve_invite_by_token_hash(text)`   | `invite` store `ByTokenHash`                               |
 | `list_pending_invites_for_email(text)` | `invite` store `FindPendingForEmail`                       |

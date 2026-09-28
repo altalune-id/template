@@ -338,6 +338,35 @@ func (s *postgresStore) requeueFailed(ctx context.Context, tx *sql.Tx, tc tenant
 	return int(n), nil
 }
 
+func (s *postgresStore) ByID(ctx context.Context, id uuid.UUID, target string) (Entry, error) {
+	tx, owned, tc, err := s.txAcquire(ctx)
+	if err != nil {
+		return Entry{}, err
+	}
+	e, readErr := s.byID(ctx, tx, tc, id, target)
+	if txErr := s.endTx(tx, owned, readErr); txErr != nil {
+		return Entry{}, txErr
+	}
+	return e, nil
+}
+
+func (s *postgresStore) byID(ctx context.Context, tx *sql.Tx, tc tenant.Context, id uuid.UUID, target string) (Entry, error) {
+	stmt := postgres.SELECT(s.entries.AllColumns).
+		FROM(s.entries).
+		WHERE(s.entries.OrgID.EQ(postgres.UUID(tc.OrgID)).
+			AND(s.entries.ID.EQ(postgres.UUID(id))).
+			AND(s.entries.Target.EQ(postgres.String(target))))
+
+	var row pgEntryRow
+	if err := stmt.QueryContext(ctx, tx, &row); err != nil {
+		if errorIsNoRows(err) {
+			return Entry{}, &NotFoundError{ID: id.String()}
+		}
+		return Entry{}, fmt.Errorf("outbox.postgres.ByID: %w", err)
+	}
+	return row.toEntry(), nil
+}
+
 func (s *postgresStore) ListByTarget(ctx context.Context, target string, limit int) ([]Entry, error) {
 	tx, owned, tc, err := s.txAcquire(ctx)
 	if err != nil {

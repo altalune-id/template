@@ -84,4 +84,5 @@ const (
 	CodeWebhookDeliveryNotRetryable = "WHK005"
 	CodeWebhookDeliveryNotFound     = "WHK006"
 	CodeWebhookEndpointInactive     = "WHK007"
+	CodeWebhookSecretConflict       = "WHK008"
 )

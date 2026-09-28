@@ -640,7 +640,7 @@ func TestOnboardHandler_PostLocal_MissingFields(t *testing.T) {
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, r)
 	assert.Equal(t, http.StatusOK, rec.Code)
-	assert.Contains(t, rec.Body.String(), "Enter your email")
+	assert.Contains(t, rec.Body.String(), "onboard.error.email_required")
 }
 
 func TestOnboardHandler_PostLocal_HappyPath(t *testing.T) {

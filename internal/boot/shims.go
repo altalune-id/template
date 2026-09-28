@@ -87,19 +87,23 @@ func (s userStoreForAuth) Save(ctx context.Context, u *auth.UserRef) error {
 
 type orgStoreForOnboard struct{ store org.Store }
 
-func (s orgStoreForOnboard) BySlug(ctx context.Context, slug string) (*user.OrgRef, error) {
-	o, err := s.store.BySlug(ctx, slug)
+func (s orgStoreForOnboard) SystemOrg(ctx context.Context) (*user.OrgRef, error) {
+	o, err := s.store.SystemOrg(ctx)
 	if err != nil {
 		if org.IsNotFoundError(err) {
-			return nil, &user.SingletonOrgMissingError{Slug: slug}
+			return nil, &user.SingletonOrgMissingError{}
 		}
 		return nil, err
 	}
-	return &user.OrgRef{ID: o.ID, Slug: o.Slug, Name: o.Name, OwnerID: o.OwnerID, CreatedAt: o.CreatedAt}, nil
+	return orgRefForOnboard(o), nil
 }
 
 func (s orgStoreForOnboard) Save(ctx context.Context, o *user.OrgRef) error {
-	return s.store.Save(ctx, &org.Org{ID: o.ID, Slug: o.Slug, Name: o.Name, OwnerID: o.OwnerID, CreatedAt: o.CreatedAt})
+	return s.store.Save(ctx, &org.Org{ID: o.ID, Slug: o.Slug, Name: o.Name, OwnerID: o.OwnerID, CreatedAt: o.CreatedAt, System: o.System})
+}
+
+func orgRefForOnboard(o *org.Org) *user.OrgRef {
+	return &user.OrgRef{ID: o.ID, Slug: o.Slug, Name: o.Name, OwnerID: o.OwnerID, CreatedAt: o.CreatedAt, System: o.System}
 }
 
 func (s orgStoreForOnboard) ListForUser(ctx context.Context, userID uuid.UUID) ([]*user.OrgRef, error) {
@@ -109,7 +113,7 @@ func (s orgStoreForOnboard) ListForUser(ctx context.Context, userID uuid.UUID) (
 	}
 	out := make([]*user.OrgRef, 0, len(orgs))
 	for _, o := range orgs {
-		out = append(out, &user.OrgRef{ID: o.ID, Slug: o.Slug, Name: o.Name, OwnerID: o.OwnerID, CreatedAt: o.CreatedAt})
+		out = append(out, orgRefForOnboard(o))
 	}
 	return out, nil
 }

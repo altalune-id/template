@@ -11,12 +11,9 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"altalune.id/template/internal/apperror"
-	slugs "altalune.id/template/internal/platform/slug"
 	"altalune.id/template/internal/platform/tenant"
+	slugs "altalune.id/template/slug"
 )
-
-// MaxSlugAttempts bounds how many generated slugs Create tries before giving up.
-const MaxSlugAttempts = 5
 
 //nolint:gochecknoglobals // OTel tracer is a package-level fixture, not runtime state.
 var tracer trace.Tracer = otel.Tracer("altalune.id/template/internal/project")
@@ -47,24 +44,14 @@ func (s *Service) Create(ctx context.Context, orgID uuid.UUID, slug, name string
 	}
 
 	if chosen := strings.TrimSpace(slug); chosen != "" {
-		return s.createWithSlug(ctx, span, orgID, chosen, name)
+		return s.createWithSlug(ctx, span, orgID, chosen, name, false)
 	}
-
-	var taken error
-	for range MaxSlugAttempts {
-		p, err := s.createWithSlug(ctx, span, orgID, slugs.Generate(), name)
-		if err == nil {
-			return p, nil
-		}
-		if !IsAlreadyExistsError(err) {
-			return nil, err
-		}
-		taken = err
-	}
-	return nil, taken
+	return slugs.Retry(slugs.MaxAttempts, IsAlreadyExistsError, func(candidate string) (*Project, error) {
+		return s.createWithSlug(ctx, span, orgID, candidate, name, false)
+	})
 }
 
-func (s *Service) createWithSlug(ctx context.Context, span trace.Span, orgID uuid.UUID, chosen, name string) (*Project, error) {
+func (s *Service) createWithSlug(ctx context.Context, span trace.Span, orgID uuid.UUID, chosen, name string, system bool) (*Project, error) {
 	_, err := s.store.BySlug(ctx, orgID, chosen)
 	if err == nil {
 		return nil, &AlreadyExistsError{Field: "slug", Value: chosen}
@@ -79,8 +66,9 @@ func (s *Service) createWithSlug(ctx context.Context, span trace.Span, orgID uui
 		span.RecordError(err)
 		return nil, err
 	}
+	p.System = system
 	if err := s.store.Save(ctx, p); err != nil {
-		if IsAlreadyExistsError(err) {
+		if IsAlreadyExistsError(err) || IsSystemProjectExistsError(err) {
 			return nil, err
 		}
 		span.RecordError(err)
@@ -91,7 +79,7 @@ func (s *Service) createWithSlug(ctx context.Context, span trace.Span, orgID uui
 	return p, nil
 }
 
-// BootstrapSystem idempotently ensures a project with the given slug exists inside orgID and is stamped System=true.
+// BootstrapSystem idempotently ensures a project with the given slug exists inside orgID and is stamped System=true; a blank slug reuses the system project or generates one.
 func (s *Service) BootstrapSystem(ctx context.Context, orgID uuid.UUID, slug, name string) (*Project, error) {
 	ctx, span := tracer.Start(ctx, "project.BootstrapSystem",
 		trace.WithAttributes(
@@ -104,39 +92,63 @@ func (s *Service) BootstrapSystem(ctx context.Context, orgID uuid.UUID, slug, na
 		return nil, err
 	}
 
-	existing, err := s.store.BySlug(ctx, orgID, slug)
+	p, err := s.ensureSystem(ctx, span, orgID, strings.TrimSpace(slug), name)
+	if !IsSystemProjectExistsError(err) && !IsAlreadyExistsError(err) {
+		return p, err
+	}
+	winner, wErr := s.systemProject(ctx, span, orgID)
+	if wErr != nil {
+		return nil, wErr
+	}
+	if winner == nil {
+		return nil, err
+	}
+	return winner, nil
+}
+
+func (s *Service) ensureSystem(ctx context.Context, span trace.Span, orgID uuid.UUID, slug, name string) (*Project, error) {
+	existing, err := s.systemProject(ctx, span, orgID)
+	if err != nil || existing != nil {
+		return existing, err
+	}
+	if slug == "" {
+		return slugs.Retry(slugs.MaxAttempts, IsAlreadyExistsError, func(candidate string) (*Project, error) {
+			return s.createWithSlug(ctx, span, orgID, candidate, name, true)
+		})
+	}
+
+	bySlug, err := s.store.BySlug(ctx, orgID, slug)
 	if err == nil {
-		if !existing.System {
-			existing.System = true
-			if sErr := s.store.Save(ctx, existing); sErr != nil {
-				span.RecordError(sErr)
-				return nil, s.unexpected(ctx, "project.BootstrapSystem: promote", sErr,
-					"org_id", orgID, "slug", slug)
+		bySlug.System = true
+		if sErr := s.store.Save(ctx, bySlug); sErr != nil {
+			if IsSystemProjectExistsError(sErr) {
+				return nil, sErr
 			}
+			span.RecordError(sErr)
+			return nil, s.unexpected(ctx, "project.BootstrapSystem: promote", sErr,
+				"org_id", orgID, "slug", slug)
 		}
-		return existing, nil
+		return bySlug, nil
 	}
 	if !IsNotFoundError(err) {
 		return nil, s.unexpected(ctx, "project.BootstrapSystem: bySlug", err,
 			"org_id", orgID, "slug", slug)
 	}
+	return s.createWithSlug(ctx, span, orgID, slug, name, true)
+}
 
-	p, err := New(orgID, slug, name)
+func (s *Service) systemProject(ctx context.Context, span trace.Span, orgID uuid.UUID) (*Project, error) {
+	list, err := s.store.List(ctx, orgID)
 	if err != nil {
 		span.RecordError(err)
-		return nil, err
+		return nil, s.unexpected(ctx, "project.BootstrapSystem: list", err, "org_id", orgID)
 	}
-	p.System = true
-	if err := s.store.Save(ctx, p); err != nil {
-		if IsAlreadyExistsError(err) {
-			return s.store.BySlug(ctx, orgID, slug)
+	for _, p := range list {
+		if p.System {
+			return p, nil
 		}
-		span.RecordError(err)
-		return nil, s.unexpected(ctx, "project.BootstrapSystem: save", err,
-			"org_id", orgID, "slug", slug)
 	}
-	span.SetAttributes(attribute.String("project.id", p.ID.String()))
-	return p, nil
+	return nil, nil
 }
 
 // List returns every project inside orgID.

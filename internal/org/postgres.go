@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -20,13 +21,14 @@ const orgFuncSelect = `SELECT o.id AS "orgs.id", o.slug AS "orgs.slug", o.name A
 	`o.created_by AS "orgs.created_by", o.created_at AS "orgs.created_at", o.system AS "orgs.system" FROM `
 
 type postgresStore struct {
-	pool              pdb.Pool
-	pc                *tenant.PgConn
-	orgs              *pgent.Orgs
-	members           *pgent.Memberships
-	users             *pgent.Users
-	resolveBySlugStmt string
-	listForUserStmt   string
+	pool                 pdb.Pool
+	pc                   *tenant.PgConn
+	orgs                 *pgent.Orgs
+	members              *pgent.Memberships
+	users                *pgent.Users
+	resolveBySlugStmt    string
+	resolveSystemOrgStmt string
+	listForUserStmt      string
 }
 
 func newPostgresStore(pool pdb.Pool, pc *tenant.PgConn, schema, tablePrefix string) *postgresStore {
@@ -35,12 +37,13 @@ func newPostgresStore(pool pdb.Pool, pc *tenant.PgConn, schema, tablePrefix stri
 	}
 	fnPrefix := schema + "." + tablePrefix
 	return &postgresStore{
-		pool:              pool,
-		pc:                pc,
-		orgs:              pgent.NewOrgs(schema, tablePrefix),
-		members:           pgent.NewMemberships(schema, tablePrefix),
-		users:             pgent.NewUsers(schema, tablePrefix),
-		resolveBySlugStmt: orgFuncSelect + fnPrefix + "resolve_org_by_slug(#slug) AS o",
+		pool:                 pool,
+		pc:                   pc,
+		orgs:                 pgent.NewOrgs(schema, tablePrefix),
+		members:              pgent.NewMemberships(schema, tablePrefix),
+		users:                pgent.NewUsers(schema, tablePrefix),
+		resolveBySlugStmt:    orgFuncSelect + fnPrefix + "resolve_org_by_slug(#slug) AS o",
+		resolveSystemOrgStmt: orgFuncSelect + fnPrefix + "resolve_system_org() AS o",
 		// NOTE: a SELECT without ORDER BY has no guaranteed row order, whatever ordering the wrapper body carries.
 		listForUserStmt: orgFuncSelect + fnPrefix + "list_orgs_for_user(#userID) AS o" +
 			" ORDER BY o.created_at ASC, o.id ASC",
@@ -132,6 +135,11 @@ func (s *postgresStore) endTx(tx *sql.Tx, owned bool, err error) error {
 		return fmt.Errorf("org.postgres: commit: %w", cerr)
 	}
 	return nil
+}
+
+func isPostgresOneSystemViolation(err error, index string) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23505" && strings.HasSuffix(pgErr.ConstraintName, index)
 }
 
 func isPostgresUniqueViolation(err error) bool {

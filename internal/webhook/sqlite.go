@@ -199,8 +199,6 @@ func (s *sqliteStore) save(ctx context.Context, tx *sql.Tx, tc tenant.Context, e
 				s.endpoints.URL.SET(sqlite.String(e.URL)),
 				s.endpoints.Description.SET(sqlite.String(e.Description)),
 				s.endpoints.EventTypes.SET(sqlite.String(types)),
-				s.endpoints.SecretPrimary.SET(sqlite.Blob(e.Secrets.Primary)),
-				s.endpoints.SecretSecondary.SET(sqliteSecondary(e.Secrets.Secondary)),
 				s.endpoints.Active.SET(sqlite.Int(sqliteBool(e.Active))),
 				s.endpoints.UpdatedAt.SET(sqlite.String(updatedAt)),
 			).WHERE(s.endpoints.OrgID.EQ(sqlite.String(tc.OrgID.String()))),
@@ -218,6 +216,52 @@ func (s *sqliteStore) save(ctx context.Context, tx *sql.Tx, tc tenant.Context, e
 		return &NotFoundError{ID: e.ID.String()}
 	}
 	return nil
+}
+
+func (s *sqliteStore) SaveSecrets(ctx context.Context, id uuid.UUID, expected, next SealedSecrets) error {
+	tx, owned, tc, err := s.txAcquire(ctx)
+	if err != nil {
+		return err
+	}
+	return s.endTx(tx, owned, s.saveSecrets(ctx, tx, tc, id, expected, next))
+}
+
+func (s *sqliteStore) saveSecrets(ctx context.Context, tx *sql.Tx, tc tenant.Context, id uuid.UUID, expected, next SealedSecrets) error {
+	stmt := s.endpoints.UPDATE().
+		SET(
+			s.endpoints.SecretPrimary.SET(sqlite.Blob(next.Primary)),
+			s.endpoints.SecretSecondary.SET(sqliteSecondary(next.Secondary)),
+			s.endpoints.UpdatedAt.SET(sqlite.String(sqliteent.SQLiteTime(time.Now()))),
+		).
+		WHERE(s.endpoints.OrgID.EQ(sqlite.String(tc.OrgID.String())).
+			AND(s.endpoints.ID.EQ(sqlite.String(id.String()))).
+			AND(s.endpoints.SecretPrimary.EQ(sqlite.Blob(expected.Primary))).
+			AND(s.endpoints.SecretSecondary.IS_NOT_DISTINCT_FROM(sqliteSecondary(expected.Secondary))))
+	res, err := stmt.ExecContext(ctx, tx)
+	if err != nil {
+		return fmt.Errorf("webhook.sqlite.SaveSecrets: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("webhook.sqlite.SaveSecrets: rows affected: %w", err)
+	}
+	if n > 0 {
+		return nil
+	}
+	probe := sqlite.SELECT(s.endpoints.ID).
+		FROM(s.endpoints).
+		WHERE(s.endpoints.OrgID.EQ(sqlite.String(tc.OrgID.String())).
+			AND(s.endpoints.ID.EQ(sqlite.String(id.String()))))
+	var row struct {
+		ID string `alias:"webhook_endpoints.id"`
+	}
+	if err := probe.QueryContext(ctx, tx, &row); err != nil {
+		if errors.Is(err, qrm.ErrNoRows) || errors.Is(err, sql.ErrNoRows) {
+			return &NotFoundError{ID: id.String()}
+		}
+		return fmt.Errorf("webhook.sqlite.SaveSecrets: probe: %w", err)
+	}
+	return &SecretConflictError{ID: id.String()}
 }
 
 func (s *sqliteStore) ByID(ctx context.Context, id uuid.UUID) (*Endpoint, error) {

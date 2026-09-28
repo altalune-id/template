@@ -95,9 +95,9 @@ One durable pull consumer per job: `AckExplicit`, `AckWait` 30s, `MaxDeliver` un
 A malformed id, version or tenant header is `permanent` before the handler runs.
 
 **Dead letter.** Publish to `dlq.<subject>` within `DLQPublishTimeout` (4s): the same body and
-headers except `traceparent`, which points at the DLQ publish span, the same `Nats-Msg-Id`,
-plus `Altempl-Dlq-Reason`, `Altempl-Dlq-Error` (at most 1 KiB, valid UTF-8),
-`Altempl-Dlq-Attempts` and `Altempl-Dlq-Stream-Seq`.
+headers except `traceparent`, which points at the DLQ publish span when tracing is on, the
+same `Nats-Msg-Id`, plus `Altempl-Dlq-Reason`, `Altempl-Dlq-Error` (at most 1 KiB, valid
+UTF-8), `Altempl-Dlq-Attempts` and `Altempl-Dlq-Stream-Seq`.
 
 | DLQ publish | Then                                                                                                                       |
 | ----------- | -------------------------------------------------------------------------------------------------------------------------- |

@@ -19,7 +19,7 @@ the owners in this codebase; a second copy of anything they hold is a finding.
 | credentials, auth failures       | `internal/platform/authn`                                   |
 | SQL NULLs, SQLite time           | `internal/platform/db/entity/{postgres,sqlite}` helpers     |
 | outbound HTTP, retries           | `httpclient/`                                               |
-| ids, slugs, request ids          | `nanoid/`, `internal/platform/slug`, `reqid/`               |
+| ids, slugs, request ids          | `nanoid/`, `slug/`, `reqid/`                                |
 | webhook event catalog            | `internal/platform/events`                                  |
 | UI strings                       | locale files via `d.Tr`, never a literal in a `.templ`      |
 | test doubles                     | `internal/testutil/fakes/` — one fake per port, shared      |

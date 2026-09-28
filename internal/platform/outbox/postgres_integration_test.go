@@ -409,3 +409,33 @@ func TestPostgresListByTargetOrdersNewestFirstAndIsOrgScoped(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, leaked, "ListByTarget leaked another org's rows")
 }
+
+func TestPostgresByIDReturnsTheEntryOfItsTarget(t *testing.T) {
+	s, ctx, tc := newPostgresStore(t)
+	e := entry(tc, uuid.New())
+	require.NoError(t, s.Enqueue(ctx, e))
+
+	got, err := s.ByID(ctx, e.ID, e.Target)
+	require.NoError(t, err)
+	assert.Equal(t, e.ID, got.ID)
+	assert.Equal(t, e.EventID, got.EventID)
+	assert.Equal(t, e.Payload, got.Payload)
+	assert.Equal(t, outbox.StatusPending, got.Status)
+	assert.False(t, got.CreatedAt.IsZero(), "CreatedAt was not filled")
+}
+
+func TestPostgresByIDIsScopedToOrgAndTarget(t *testing.T) {
+	s, ctx, tc := newPostgresStore(t)
+	e := entry(tc, uuid.New())
+	require.NoError(t, s.Enqueue(ctx, e))
+
+	_, err := s.ByID(ctx, uuid.New(), e.Target)
+	assert.True(t, outbox.IsNotFoundError(err), "unknown id: got %v", err)
+
+	_, err = s.ByID(ctx, e.ID, "another-endpoint")
+	assert.True(t, outbox.IsNotFoundError(err), "another target: got %v", err)
+
+	other := tenant.Into(t.Context(), tenant.Context{OrgID: uuid.New(), ProjectID: uuid.New()})
+	_, err = s.ByID(other, e.ID, e.Target)
+	assert.True(t, outbox.IsNotFoundError(err), "another org: got %v", err)
+}

@@ -93,3 +93,36 @@ func TestInit_CompletesOnboardingThroughTheServer(t *testing.T) {
 		t.Fatalf("CompleteOnboarding calls=%d want 1", calls)
 	}
 }
+
+func TestInit_BlankOrgSlugGeneratesAndPrintsTheRealSlug(t *testing.T) {
+	setSelfhostedEnv(t)
+	t.Setenv("ALT_GENESIS_EMAIL", "")
+	t.Setenv("ALT_GENESIS_PASSWORD", "")
+
+	var booted *config.Config
+	bootFn := func(ctx context.Context, cfg *config.Config, _ ...boot.Option) (*boot.Server, error) {
+		booted = cfg
+		return boot.BootServer(ctx, cfg)
+	}
+	root := NewRootCmd(bootFn, stubClientBoot)
+	buf := &bytes.Buffer{}
+	root.SetOut(buf)
+	root.SetErr(buf)
+	root.SetArgs([]string{"init", "--email", "root@example.com"})
+	if err := root.ExecuteContext(context.Background()); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+
+	srv, err := boot.BootServer(context.Background(), booted)
+	if err != nil {
+		t.Fatalf("reboot: %v", err)
+	}
+	t.Cleanup(func() { _ = srv.Close() })
+	o, err := srv.Orgs.SystemOrg(context.Background())
+	if err != nil {
+		t.Fatalf("init must create the system org even without --org-slug: %v", err)
+	}
+	if o.Slug == "default" || !strings.Contains(buf.String(), "org="+o.Slug) {
+		t.Fatalf("want a generated slug printed as org=%s, got %q", o.Slug, buf.String())
+	}
+}

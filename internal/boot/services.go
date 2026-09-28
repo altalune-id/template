@@ -213,10 +213,7 @@ func onboardPolicyFrom(cfg *config.Config) user.Policy {
 	if cfg.Mode == config.ModeSelfhosted {
 		policyMode = user.PolicyModeSelfhosted
 	}
-	return user.Policy{
-		Mode:             policyMode,
-		SingletonOrgSlug: cfg.Tenant.SingletonOrg.Slug,
-	}
+	return user.Policy{Mode: policyMode}
 }
 
 func hashGenesisPassword(plain string) (string, error) {

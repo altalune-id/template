@@ -31,7 +31,7 @@ type InvalidJobError struct {
 }
 
 func (e *InvalidJobError) Error() string {
-	return "queue: invalid " + e.Job.Name + " v" + strconv.Itoa(e.Job.Version) + ": " + e.Reason
+	return "queue: invalid job " + e.Job.Name + " v" + strconv.Itoa(e.Job.Version) + ": " + e.Reason
 }
 
 // IsInvalidJobError reports whether err's tree contains an *InvalidJobError.

@@ -3,7 +3,10 @@ package handlers_test
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"html"
 	"io"
 	"log"
 	"net/http"
@@ -284,7 +287,7 @@ func TestWebhookHandler_DeliveriesTestRetryAndAttempts(t *testing.T) {
 	rec = x.do(t, http.MethodPost, detail+"/retry-failed", nil)
 	require.Equal(t, http.StatusOK, rec.Code)
 	assert.Contains(t, rec.Body.String(), "webhooks.retried")
-	got, ok := x.Outbox.ByID(entries[0].ID)
+	got, ok := x.Outbox.Entry(entries[0].ID)
 	require.True(t, ok)
 	assert.Equal(t, outbox.StatusPending, got.Status)
 }
@@ -303,6 +306,27 @@ func TestWebhookHandler_RetryOnADeliveredRowShowsWHK005(t *testing.T) {
 	assert.Contains(t, rec.Body.String(), "webhooks.error.not_retryable")
 	assert.Contains(t, rec.Body.String(), apperror.CodeWebhookDeliveryNotRetryable)
 	assert.Equal(t, "WHK005", apperror.CodeWebhookDeliveryNotRetryable)
+}
+
+func TestWebhookHandler_RotateRacingARotateShowsWHK008(t *testing.T) {
+	t.Parallel()
+	x := newWebhookFixture(t, false)
+	e := x.create(t)
+	loads := 0
+	x.Store.AfterByID = func() {
+		loads++
+		if loads == 2 {
+			_, err := x.Hooks.Rotate(x.ctx(), e.ID)
+			require.NoError(t, err)
+		}
+	}
+
+	rec := x.do(t, http.MethodPost, webhookBase+"/"+e.ID.String()+"/rotate", nil)
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Contains(t, rec.Body.String(), "webhooks.error.secret_conflict")
+	assert.Contains(t, rec.Body.String(), apperror.CodeWebhookSecretConflict)
+	assert.Equal(t, "WHK008", apperror.CodeWebhookSecretConflict)
+	assert.Empty(t, reSecret.FindString(rec.Body.String()), "a refused rotation must not reveal a secret")
 }
 
 func webhookRoutes(id, did string) []struct{ method, path string } {
@@ -466,6 +490,98 @@ func TestWebhookHandler_AttemptCopy(t *testing.T) {
 	assert.Less(t, strings.Index(body, "data-attempt-run-break"), strings.LastIndex(body, "2/8"))
 }
 
+func TestWebhookHandler_DeliveryShowsThePayloadAndHeaders(t *testing.T) {
+	t.Parallel()
+	x := newWebhookFixture(t, false)
+	e := x.create(t)
+	require.NoError(t, x.Hooks.SendTest(x.ctx(), e.ID))
+	entry := x.Outbox.Entries()[0]
+
+	rec := x.do(t, http.MethodGet, webhookBase+"/"+e.ID.String()+"/deliveries/"+entry.ID.String(), nil)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	body := html.UnescapeString(rec.Body.String())
+
+	var pretty bytes.Buffer
+	require.NoError(t, json.Indent(&pretty, entry.Payload, "", "  "))
+	require.Contains(t, pretty.String(), "\n", "the fixture payload must pretty-print onto several lines")
+	assert.Contains(t, body, pretty.String(), "the body is pretty-printed server-side")
+	assert.Contains(t, body, `data-copy="`+pretty.String()+`"`, "the copy button carries the shown body")
+	for _, want := range []string{
+		"X-Altempl-Event-Id", "evt_" + entry.EventID.String(),
+		"X-Altempl-Event-Type", string(events.WebhookPing),
+		"X-Altempl-Delivery-Id", "dlv_" + entry.ID.String(),
+		"Content-Type", "application/json",
+		"User-Agent", "Altempl-Webhooks/1",
+		"webhooks.headers_signature_note",
+	} {
+		assert.Contains(t, body, want)
+	}
+	assert.NotContains(t, body, "X-Altempl-Signature", "per-attempt headers are never shown")
+	assert.Less(t, strings.Index(body, "webhooks.payload_heading"), strings.Index(body, "webhooks.attempts_heading"),
+		"the payload sits above the attempts")
+
+	page := x.do(t, http.MethodGet, webhookBase+"/"+e.ID.String(), nil)
+	assert.Contains(t, page.Body.String(), "altemplCopyBound", "the detail page binds the copy handler the fragment's button needs")
+}
+
+func TestWebhookHandler_DeliveryFallsBackToTheRawBody(t *testing.T) {
+	t.Parallel()
+	x := newWebhookFixture(t, false)
+	e := x.create(t)
+	id := uuid.Must(uuid.NewV7())
+	require.NoError(t, x.Outbox.Enqueue(x.ctx(), outbox.Entry{
+		ID: id, EventID: uuid.Must(uuid.NewV7()), ProjectID: x.project.ID, Target: e.ID.String(),
+		Payload: []byte("not json <b>raw</b>"),
+	}))
+
+	rec := x.do(t, http.MethodGet, webhookBase+"/"+e.ID.String()+"/deliveries/"+id.String(), nil)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	body := rec.Body.String()
+	assert.Contains(t, body, "not json &lt;b&gt;raw&lt;/b&gt;", "the raw body is shown, escaped")
+	assert.NotContains(t, body, "<b>raw</b>")
+	assert.NotContains(t, body, "webhooks.headers_heading", "an undecodable envelope was never sent, so no headers to show")
+	assert.NotContains(t, body, "X-Altempl-Event-Id")
+}
+
+func TestWebhookHandler_DeliveryOutsideTheListedWindowStillLoads(t *testing.T) {
+	t.Parallel()
+	x := newWebhookFixture(t, false)
+	e := x.create(t)
+	for range webhook.MaxDeliveriesListed + 1 {
+		require.NoError(t, x.Hooks.SendTest(x.ctx(), e.ID))
+	}
+	all, err := x.Outbox.ListByTarget(x.ctx(), e.ID.String(), outbox.MaxListLimit)
+	require.NoError(t, err)
+	oldest := all[len(all)-1]
+
+	rec := x.do(t, http.MethodGet, webhookBase+"/"+e.ID.String()+"/deliveries/"+oldest.ID.String(), nil)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Contains(t, rec.Body.String(), "dlv_"+oldest.ID.String())
+}
+
+func TestWebhookHandler_DeliveryOfAnotherScopeIs404(t *testing.T) {
+	t.Parallel()
+	x := newWebhookFixture(t, false)
+	e := x.create(t)
+	other := x.create(t)
+	require.NoError(t, x.Hooks.SendTest(x.ctx(), e.ID))
+	entry := x.Outbox.Entries()[0]
+	path := webhookBase + "/" + e.ID.String() + "/deliveries/" + entry.ID.String()
+
+	outsider := uuid.New()
+	org := x.seedOrg(t, "other", outsider)
+	rec := x.doAs(t, http.MethodGet, path, nil, session.Principal{UserID: outsider, ActiveOrgID: org.ID})
+	assert.Equal(t, http.StatusNotFound, rec.Code, "another org")
+	assert.NotContains(t, rec.Body.String(), "dlv_"+entry.ID.String())
+
+	rec = x.do(t, http.MethodGet, webhookBase+"/"+other.ID.String()+"/deliveries/"+entry.ID.String(), nil)
+	assert.Equal(t, http.StatusNotFound, rec.Code, "another endpoint's delivery")
+	assert.NotContains(t, rec.Body.String(), "dlv_"+entry.ID.String())
+
+	rec = x.do(t, http.MethodGet, webhookBase+"/"+e.ID.String()+"/deliveries/"+uuid.NewString(), nil)
+	assert.Equal(t, http.StatusNotFound, rec.Code, "an unknown delivery")
+}
+
 // TestWebhookHandler_RetryOfAnUnlistedRowRetargetsTheDeliveries avoids swapping a bare row for one the page does not show.
 func TestWebhookHandler_RetryOfAnUnlistedRowRetargetsTheDeliveries(t *testing.T) {
 	t.Parallel()
@@ -520,4 +636,40 @@ func TestWebhookHandler_RefusalsAreNotLoggedAsErrors(t *testing.T) {
 	x.Outbox.EnqueueErr = errors.New("outbox down")
 	x.do(t, http.MethodPost, webhookBase+"/"+e.ID.String()+"/test", nil)
 	assert.Contains(t, buf.String(), "web webhook: send test")
+}
+
+// TestWebhookErrorRules pins every rule of the webhook error table: its key, whether it is a refusal, and its max.
+func TestWebhookErrorRules(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		err     error
+		key     string
+		refusal bool
+		max     int
+	}{
+		{&webhook.InvalidURLError{Reason: "r"}, "webhooks.error.invalid_url", true, webhook.MaxURLLen},
+		{&webhook.InvalidEventTypesError{Reason: "r"}, "webhooks.error.invalid_event_types", true, 0},
+		{&webhook.InvalidDescriptionError{Reason: "r"}, "webhooks.error.invalid_description", true, webhook.MaxDescriptionRunes},
+		{&webhook.EndpointLimitError{Limit: webhook.MaxEndpointsPerProject}, "webhooks.error.limit", true, webhook.MaxEndpointsPerProject},
+		{&webhook.NotFoundError{ID: "x"}, "webhooks.error.not_found", true, 0},
+		{&webhook.DeliveryNotFoundError{ID: "x"}, "webhooks.error.delivery_not_found", true, 0},
+		{&webhook.DeliveryNotRetryableError{ID: "x"}, "webhooks.error.not_retryable", true, 0},
+		{&webhook.EndpointInactiveError{ID: "x"}, "webhooks.error.inactive", true, 0},
+		{&webhook.SecretConflictError{ID: "x"}, "webhooks.error.secret_conflict", true, 0},
+		{&sealer.UnavailableError{}, "webhooks.error.sealer_unavailable", false, 0},
+	}
+	require.Len(t, tests, handlers.WebhookErrorRuleCount(), "every rule needs a case here")
+	for _, tt := range tests {
+		t.Run(tt.key, func(t *testing.T) {
+			key, refusal, maxLen := handlers.WebhookErrorRuleOf(fmt.Errorf("wrapped: %w", tt.err))
+			assert.Equal(t, tt.key, key)
+			assert.Equal(t, tt.refusal, refusal)
+			assert.Equal(t, tt.max, maxLen)
+		})
+	}
+
+	key, refusal, maxLen := handlers.WebhookErrorRuleOf(errors.New("boom"))
+	assert.Equal(t, "webhooks.error.failed", key)
+	assert.False(t, refusal)
+	assert.Zero(t, maxLen)
 }

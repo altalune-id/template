@@ -266,14 +266,14 @@ tenant:
   # env: ALT_TENANT_PERSONAL_ORG_SLUG_FALLBACK
   personalOrgSlugFallback: personal
   # env: ALT_TENANT_PERSONAL_PROJECT_SLUG
-  personalProjectSlug: default
+  personalProjectSlug: ""
   # [bootstrap] env: ALT_TENANT_RLS_ENFORCE
   rlsEnforce: true
   singletonOrg:
     # [bootstrap] env: ALT_TENANT_SINGLETON_ORG_NAME
     name: Default Organization
     # [bootstrap] env: ALT_TENANT_SINGLETON_ORG_SLUG
-    slug: default
+    slug: ""
   # [bootstrap] env: ALT_TENANT_TENANT_SCOPED_TABLES
   tenantScopedTables: ""
 
