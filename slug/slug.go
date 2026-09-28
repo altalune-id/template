@@ -7,6 +7,9 @@ import (
 	"strings"
 )
 
+// MaxAttempts bounds how many generated slugs a caller tries before giving up.
+const MaxAttempts = 5
+
 const (
 	suffixMin = 1000
 	suffixMax = 9999
@@ -46,4 +49,21 @@ func Generate() string {
 // Combinations reports how many distinct slugs Generate can produce.
 func Combinations() int {
 	return len(adjectives) * len(nouns) * (suffixMax - suffixMin + 1)
+}
+
+// Retry calls create with fresh generated slugs until one is not taken, trying at most attempts times.
+func Retry[T any](attempts int, taken func(error) bool, create func(candidate string) (T, error)) (T, error) {
+	var zero T
+	var last error
+	for range max(attempts, 1) {
+		v, err := create(Generate())
+		if err == nil {
+			return v, nil
+		}
+		if !taken(err) {
+			return zero, err
+		}
+		last = err
+	}
+	return zero, last
 }

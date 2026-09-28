@@ -24,6 +24,7 @@ import (
 	"altalune.id/template/internal/platform/db"
 	"altalune.id/template/internal/platform/session"
 	"altalune.id/template/internal/platform/tenant"
+	"altalune.id/template/internal/testutil/fakes"
 	"altalune.id/template/internal/testutil/pgtest"
 	"altalune.id/template/internal/todo"
 	"altalune.id/template/schema"
@@ -218,7 +219,7 @@ func newTodoServiceFixture(t *testing.T) todoServiceFixture {
 			&apperrorv1.ErrorDetail{Code: "altempl.unexpected"}).WithCause(err)
 	}
 	return todoServiceFixture{
-		svc:      todo.NewService(todoStore, log, unexpected),
+		svc:      todo.NewService(todoStore, log, unexpected, &fakes.Queue{}),
 		keyStore: keyStore,
 		orgID:    orgID,
 		projID:   projID,

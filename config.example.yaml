@@ -208,6 +208,16 @@ onboard:
   # [secret] env: ALT_ONBOARD_SETUP_TOKEN
   setupToken: ""
 
+queue:
+  # env: ALT_QUEUE_CONNECT_TIMEOUT
+  connectTimeout: 10s
+  # env: ALT_QUEUE_ENABLED
+  enabled: false
+  # [secret] env: ALT_QUEUE_TOKEN
+  token: ""
+  # [secret] env: ALT_QUEUE_URL
+  url: ""
+
 scheduler:
   # [bootstrap] env: ALT_SCHEDULER_ENABLED
   enabled: true
@@ -256,14 +266,14 @@ tenant:
   # env: ALT_TENANT_PERSONAL_ORG_SLUG_FALLBACK
   personalOrgSlugFallback: personal
   # env: ALT_TENANT_PERSONAL_PROJECT_SLUG
-  personalProjectSlug: default
+  personalProjectSlug: ""
   # [bootstrap] env: ALT_TENANT_RLS_ENFORCE
   rlsEnforce: true
   singletonOrg:
     # [bootstrap] env: ALT_TENANT_SINGLETON_ORG_NAME
     name: Default Organization
     # [bootstrap] env: ALT_TENANT_SINGLETON_ORG_SLUG
-    slug: default
+    slug: ""
   # [bootstrap] env: ALT_TENANT_TENANT_SCOPED_TABLES
   tenantScopedTables: ""
 

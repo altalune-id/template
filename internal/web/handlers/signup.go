@@ -11,12 +11,12 @@ import (
 	"altalune.id/template/internal/org"
 	"altalune.id/template/internal/platform/config"
 	"altalune.id/template/internal/platform/session"
-	slugs "altalune.id/template/internal/platform/slug"
 	"altalune.id/template/internal/platform/tenant"
 	"altalune.id/template/internal/project"
 	"altalune.id/template/internal/user"
 	"altalune.id/template/internal/web"
 	"altalune.id/template/internal/web/templates"
+	slugs "altalune.id/template/slug"
 )
 
 // SignupHandler owns /signup/complete — cloud-only workspace bootstrap for new OIDC users without a pre-existing membership.
@@ -85,12 +85,8 @@ func (h *SignupHandler) PostSignup(w http.ResponseWriter, r *http.Request) {
 	view.ProjectName = strings.TrimSpace(r.PostForm.Get("project_name"))
 	view.ProjectSlug = strings.TrimSpace(r.PostForm.Get("project_slug"))
 	view.Name = strings.TrimSpace(r.PostForm.Get("name"))
-	if view.ProjectName == "" {
-		view.ProjectName = "Default Project"
-	}
-	if view.ProjectSlug == "" {
-		view.ProjectSlug = h.defaultProjectSlug()
-	}
+	view.ProjectName = cmp.Or(view.ProjectName, defaultProjectName)
+	view.ProjectSlug = cmp.Or(view.ProjectSlug, strings.TrimSpace(h.Cfg.Tenant.PersonalProjectSlug))
 
 	view.FieldErrors = map[string]string{}
 	if view.OrgName == "" {
@@ -181,13 +177,6 @@ func (h *SignupHandler) hasMembership(r *http.Request, userID uuid.UUID) bool {
 	return len(orgs) > 0
 }
 
-func (h *SignupHandler) defaultProjectSlug() string {
-	if s := strings.TrimSpace(h.Cfg.Tenant.PersonalProjectSlug); s != "" {
-		return s
-	}
-	return "default"
-}
-
 func (h *SignupHandler) defaultView(p session.Principal) templates.SignupCompleteView {
 	return templates.SignupCompleteView{
 		Email:          p.Email,
@@ -197,8 +186,8 @@ func (h *SignupHandler) defaultView(p session.Principal) templates.SignupComplet
 		TermsURL:       cmp.Or(strings.TrimSpace(h.Cfg.Compliance.TermsURL), web.Path(h.Cfg.HTTP.BasePath, "/terms")),
 		PrivacyURL:     cmp.Or(strings.TrimSpace(h.Cfg.Compliance.PrivacyURL), web.Path(h.Cfg.HTTP.BasePath, "/privacy")),
 		OrgSlug:        slugs.Generate(),
-		ProjectName:    "Default Project",
-		ProjectSlug:    h.defaultProjectSlug(),
+		ProjectName:    defaultProjectName,
+		ProjectSlug:    firstRunSlug(h.Cfg.Tenant.PersonalProjectSlug),
 		FieldErrors:    map[string]string{},
 	}
 }
@@ -206,6 +195,9 @@ func (h *SignupHandler) defaultView(p session.Principal) templates.SignupComplet
 func (h *SignupHandler) render(w http.ResponseWriter, r *http.Request, view templates.SignupCompleteView) {
 	if view.OrgSlug == "" {
 		view.OrgSlug = slugs.Generate()
+	}
+	if view.ProjectSlug == "" {
+		view.ProjectSlug = firstRunSlug(h.Cfg.Tenant.PersonalProjectSlug)
 	}
 	Render(w, r, templates.SignupCompleteLayout(h.Base(r, "Complete signup"), view))
 }

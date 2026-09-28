@@ -321,13 +321,6 @@ func (h *BlogHandler) tagsView(sc ProjectScope, errKind string, inUseID uuid.UUI
 	}, nil
 }
 
-// NOTE: Deps.Base alone leaves ActiveOrg nil, which collapses every project path to /orgs.
-func (h *BlogHandler) fragmentBase(sc ProjectScope) web.LayoutData {
-	d := h.Base(sc.req, "")
-	d.ActiveOrg = &web.ActiveOrg{ID: sc.org.ID.String(), Slug: sc.org.Slug, Name: sc.org.Name}
-	return d
-}
-
 func (h *BlogHandler) writeCategoryList(w http.ResponseWriter, sc ProjectScope, errKind string, inUseID uuid.UUID, code string) {
 	v, err := h.categoriesView(sc, errKind, inUseID, code)
 	if err != nil {
@@ -335,7 +328,7 @@ func (h *BlogHandler) writeCategoryList(w http.ResponseWriter, sc ProjectScope, 
 		h.ErrorPage(w, sc.req, http.StatusInternalServerError, "List failed", "Could not load categories.", err)
 		return
 	}
-	Render(w, sc.req, templates.CategoryList(h.fragmentBase(sc), v))
+	Render(w, sc.req, templates.CategoryList(h.ProjectFragmentBase(sc), v))
 }
 
 func (h *BlogHandler) writeTagList(w http.ResponseWriter, sc ProjectScope, errKind string, inUseID uuid.UUID, code string) {
@@ -345,7 +338,7 @@ func (h *BlogHandler) writeTagList(w http.ResponseWriter, sc ProjectScope, errKi
 		h.ErrorPage(w, sc.req, http.StatusInternalServerError, "List failed", "Could not load tags.", err)
 		return
 	}
-	Render(w, sc.req, templates.TagList(h.fragmentBase(sc), v))
+	Render(w, sc.req, templates.TagList(h.ProjectFragmentBase(sc), v))
 }
 
 func categoryErrorKind(err error) string {
@@ -576,7 +569,7 @@ func (h *BlogHandler) PostPostPreview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// SECURITY: blog.RenderHTML runs goldmark without WithUnsafe, so raw HTML in the body is dropped.
-	Render(w, sc.req, templates.PostPreviewFragment(h.fragmentBase(sc), blog.RenderHTML(r.PostForm.Get("body"))))
+	Render(w, sc.req, templates.PostPreviewFragment(h.ProjectFragmentBase(sc), blog.RenderHTML(r.PostForm.Get("body"))))
 }
 
 func (h *BlogHandler) requirePost(w http.ResponseWriter, r *http.Request) (ProjectScope, *blog.Post, bool) {
@@ -754,7 +747,7 @@ func (h *BlogHandler) writePostList(w http.ResponseWriter, sc ProjectScope, errK
 		h.ErrorPage(w, sc.req, http.StatusInternalServerError, "List failed", "Could not load posts.", err)
 		return
 	}
-	Render(w, sc.req, templates.PostList(h.fragmentBase(sc), v))
+	Render(w, sc.req, templates.PostList(h.ProjectFragmentBase(sc), v))
 }
 
 func (h *BlogHandler) writePostForm(w http.ResponseWriter, sc ProjectScope, d postDraft, errKind, code string) {
@@ -781,12 +774,11 @@ func (h *BlogHandler) writePostTagPicker(w http.ResponseWriter, sc ProjectScope,
 		h.ErrorPage(w, sc.req, http.StatusInternalServerError, "List failed", "Could not load tags.", err)
 		return
 	}
-	Render(w, sc.req, templates.PostTagPicker(h.fragmentBase(sc), v))
+	Render(w, sc.req, templates.PostTagPicker(h.ProjectFragmentBase(sc), v))
 }
 
 func (h *BlogHandler) redirectToPosts(w http.ResponseWriter, sc ProjectScope) {
-	target := web.Path(h.Cfg.HTTP.BasePath, projectPath(sc.org.Slug, sc.project.Slug, "/posts"))
-	http.Redirect(w, sc.req, target, http.StatusSeeOther) //nolint:gosec // G710: both slugs come from rows already resolved by their own slug patterns
+	http.Redirect(w, sc.req, h.ProjectURL(sc, "/posts"), http.StatusSeeOther) //nolint:gosec // G710: both slugs come from rows already resolved by their own slug patterns
 }
 
 func parseUUID(s string) uuid.UUID {

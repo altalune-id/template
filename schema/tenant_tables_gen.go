@@ -15,6 +15,8 @@ var TenantTableSuffixes = []string{
 	"outbox_entries",
 	"projects",
 	"todos",
+	"webhook_deliveries",
+	"webhook_endpoints",
 }
 
 // TenantTableNames returns TenantTableSuffixes prefixed with the given TablePrefix.

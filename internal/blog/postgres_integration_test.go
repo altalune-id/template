@@ -5,8 +5,11 @@ package blog_test
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -25,6 +28,7 @@ import (
 
 type pgFixture struct {
 	store  blog.Store
+	uow    tenant.UnitOfWork
 	sqlDB  *sql.DB
 	prefix string
 	tc     tenant.Context
@@ -46,13 +50,12 @@ func newPgFixture(t *testing.T) pgFixture {
 
 	pfx := cfg.DB.TablePrefix
 	tc := seedPgTenant(t, sqlDB, pfx)
-	store := blog.NewStore(
-		db.DBConfig{Driver: db.DriverPostgres, Schema: h.Schema, TablePrefix: pfx},
-		db.Pool{W: sqlDB, R: sqlDB},
-		tenant.NewPgConn(sqlDB),
-	)
+	dbCfg := db.DBConfig{Driver: db.DriverPostgres, Schema: h.Schema, TablePrefix: pfx}
+	pool := db.Pool{W: sqlDB, R: sqlDB}
+	pc := tenant.NewPgConn(sqlDB)
 	return pgFixture{
-		store:  store,
+		store:  blog.NewStore(dbCfg, pool, pc),
+		uow:    tenant.NewUnitOfWork(dbCfg, pool, pc),
 		sqlDB:  sqlDB,
 		prefix: pfx,
 		tc:     tc,
@@ -673,7 +676,7 @@ func TestPostgres_CrossTenantConditionalWriteIsNotFound(t *testing.T) {
 func TestPostgres_UpdateWithTagsHonoursThePreconditionWhole(t *testing.T) {
 	f := newPgFixture(t)
 	ctx := tenant.Into(t.Context(), f.tc)
-	svc, _ := newSvc(t, f.store)
+	svc, _, _ := newHooked(t, f.store, f.uow)
 	tagA := seedPgTag(t, f.sqlDB, f.prefix, f.tc)
 	tagB := seedPgTag(t, f.sqlDB, f.prefix, f.tc)
 
@@ -755,4 +758,55 @@ func TestPostgres_RefusedConditionalDeleteLeavesTagLinksIntact(t *testing.T) {
 		"SELECT count(*) FROM "+f.prefix+"blog_post_tags WHERE post_id = $1 AND org_id = $2",
 		p.ID, f.tc.OrgID).Scan(&rows))
 	assert.Equal(t, 1, rows)
+}
+
+type loadBarrier struct {
+	blog.Store
+	arrived atomic.Int32
+	both    chan struct{}
+}
+
+func (b *loadBarrier) ByID(ctx context.Context, id uuid.UUID) (*blog.Post, error) {
+	p, err := b.Store.ByID(ctx, id)
+	if n := b.arrived.Add(1); n <= 2 {
+		if n == 2 {
+			close(b.both)
+		}
+		select {
+		case <-b.both:
+		case <-time.After(5 * time.Second):
+			return nil, errors.New("loadBarrier: the second publisher never loaded")
+		}
+	}
+	return p, err
+}
+
+func TestPostgres_ConcurrentPublishesEmitOnce(t *testing.T) {
+	f := newPgFixture(t)
+	ctx := tenant.Into(t.Context(), f.tc)
+	draft, err := blog.New(f.tc.OrgID, f.tc.ProjectID, f.cat, "Race", "", "body")
+	require.NoError(t, err)
+	require.NoError(t, f.store.Save(ctx, draft, 0))
+
+	barrier := &loadBarrier{Store: f.store, both: make(chan struct{})}
+	svc, unex, hooks := newHooked(t, barrier, f.uow)
+
+	var wg sync.WaitGroup
+	errs := make([]error, 2)
+	for i := range errs {
+		wg.Go(func() {
+			_, errs[i] = svc.Publish(ctx, draft.ID, 0)
+		})
+	}
+	wg.Wait()
+
+	for _, err := range errs {
+		require.NoError(t, err)
+	}
+	assert.Len(t, hooks.Recorded(), 1, "two concurrent publishes must emit exactly one event")
+	got, err := f.store.ByID(ctx, draft.ID)
+	require.NoError(t, err)
+	assert.Equal(t, blog.StatusPublished, got.Status)
+	assert.Equal(t, draft.Version+1, got.Version, "the losing publisher must not write")
+	assert.Zero(t, *unex)
 }

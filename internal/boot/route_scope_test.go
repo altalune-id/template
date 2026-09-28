@@ -66,6 +66,10 @@ func probeRoutes() []probeRoute {
 		{http.MethodGet, pbase + "/categories", nil},
 		{http.MethodGet, pbase + "/tags", nil},
 		{http.MethodGet, pbase + "/apikeys", nil},
+		{http.MethodGet, pbase + "/webhooks", nil},
+		{http.MethodGet, pbase + "/webhooks/new", nil},
+		{http.MethodGet, pbase + "/webhooks/" + id, nil},
+		{http.MethodGet, pbase + "/webhooks/" + id + "/deliveries/" + id, nil},
 		{http.MethodGet, "/signup/complete", nil},
 		{http.MethodGet, "/onboard", nil},
 		{http.MethodGet, "/onboard/oidc", nil},
@@ -105,6 +109,19 @@ func probeRoutes() []probeRoute {
 		{http.MethodPost, pbase + "/tags/" + id + "/delete", url.Values{}},
 		{http.MethodPost, pbase + "/apikeys", url.Values{"name": {"Probe Key"}, "scopes": {"posts:read"}}},
 		{http.MethodPost, pbase + "/apikeys/" + id + "/revoke", url.Values{}},
+		{http.MethodPost, pbase + "/webhooks", url.Values{
+			"url": {"https://example.com/hooks/probe"}, "description": {"Probe"},
+			"event_types": {"blog.post.published"},
+		}},
+		{http.MethodPost, pbase + "/webhooks/" + id, url.Values{
+			"url": {"https://example.com/hooks/probe"}, "event_types": {"blog.post.published"}, "active": {"1"},
+		}},
+		{http.MethodPost, pbase + "/webhooks/" + id + "/delete", url.Values{}},
+		{http.MethodPost, pbase + "/webhooks/" + id + "/rotate", url.Values{}},
+		{http.MethodPost, pbase + "/webhooks/" + id + "/retire", url.Values{}},
+		{http.MethodPost, pbase + "/webhooks/" + id + "/test", url.Values{}},
+		{http.MethodPost, pbase + "/webhooks/" + id + "/deliveries/" + id + "/retry", url.Values{}},
+		{http.MethodPost, pbase + "/webhooks/" + id + "/retry-failed", url.Values{}},
 		{http.MethodPost, "/onboarding", url.Values{"name": {"Probe"}}},
 		{http.MethodPost, "/welcome", url.Values{"name": {"Probe"}}},
 		{http.MethodPost, "/signup/complete", url.Values{
@@ -262,6 +279,7 @@ func templatize(path string) string {
 	if strings.HasPrefix(path, "/orgs/{org}/members/{id}/") {
 		path = strings.Replace(path, "/members/{id}/", "/members/{user}/", 1)
 	}
+	path = strings.Replace(path, "/deliveries/{id}", "/deliveries/{did}", 1)
 	if path == "/" {
 		return "/{$}"
 	}

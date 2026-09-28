@@ -25,17 +25,15 @@ func TestBootServer_OutboxIsOnTheKernel(t *testing.T) {
 	}
 }
 
-func TestBootServer_DispatchWorkerFollowsTheDeliverer(t *testing.T) {
+func TestBootServer_DispatchWorkerIsAlwaysRegistered(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		opts []boot.Option
-		want bool
 	}{
-		{name: "no-deliverer", opts: []boot.Option{boot.WithScheduler(false)}},
+		{name: "webhook-deliverer", opts: []boot.Option{boot.WithScheduler(false)}},
 		{
-			name: "deliverer",
+			name: "injected-deliverer",
 			opts: []boot.Option{boot.WithScheduler(false), boot.WithDispatch(noopDeliverer{}, outbox.WorkerOpts{})},
-			want: true,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -49,8 +47,8 @@ func TestBootServer_DispatchWorkerFollowsTheDeliverer(t *testing.T) {
 			for _, w := range srv.Supervisor.Workers() {
 				names = append(names, w.Name())
 			}
-			if got := slices.Contains(names, outbox.WorkerName); got != tc.want {
-				t.Fatalf("supervisor workers = %v, want %q registered = %v", names, outbox.WorkerName, tc.want)
+			if !slices.Contains(names, outbox.WorkerName) {
+				t.Fatalf("supervisor workers = %v, want %q registered", names, outbox.WorkerName)
 			}
 		})
 	}

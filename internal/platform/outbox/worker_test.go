@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"slices"
 	"sync"
 	"testing"
 	"testing/synctest"
@@ -18,8 +19,8 @@ import (
 	"altalune.id/template/internal/testutil/fakes"
 )
 
-// NOTE: the sum of 2^(k-1) seconds over k = 2..MaxAttempts.
-const minTotalBackoff = 1022 * time.Second
+// NOTE: 0.9 * sum of Backoff's base durations over attempts 2..8 (30s+5m+30m+2h+5h+10h+10h).
+const minTotalBackoff = 89397 * time.Second
 
 func workerScope() tenant.Context {
 	return tenant.Context{OrgID: uuid.New(), ProjectID: uuid.New(), UserID: uuid.New()}
@@ -102,10 +103,10 @@ func TestWorkerRetriesWithBackoffThenSettlesTerminally(t *testing.T) {
 
 		d := newRecordingDeliverer(errors.New("endpoint refused"))
 		w := outbox.NewWorker(store, d, singleTenant{tc: tc}, slog.New(slog.DiscardHandler),
-			outbox.WorkerOpts{Tick: time.Second, Batch: 10, Concurrency: 2})
+			outbox.WorkerOpts{Tick: time.Minute, Batch: 10, Concurrency: 2})
 
 		cancel, done := runWorker(t, w)
-		time.Sleep(time.Hour)
+		time.Sleep(34 * time.Hour)
 		cancel()
 		require.NoError(t, <-done)
 
@@ -114,7 +115,7 @@ func TestWorkerRetriesWithBackoffThenSettlesTerminally(t *testing.T) {
 		assert.GreaterOrEqual(t, d.span(), minTotalBackoff,
 			"retries did not back off; the worker is spinning on the failing entry")
 
-		got, ok := store.ByID(e.ID)
+		got, ok := store.Entry(e.ID)
 		require.True(t, ok)
 		assert.Equal(t, outbox.StatusFailed, got.Status, "the entry never reached a terminal state")
 		assert.Equal(t, "endpoint refused", got.LastError)
@@ -151,7 +152,7 @@ func TestTwoWorkersNeverDeliverAnEntryTwice(t *testing.T) {
 
 		for _, id := range ids {
 			assert.Equal(t, 1, d.count(id), "entry %s was delivered more than once", id)
-			got, ok := store.ByID(id)
+			got, ok := store.Entry(id)
 			require.True(t, ok)
 			assert.Equal(t, outbox.StatusDelivered, got.Status, "entry %s", id)
 		}
@@ -182,12 +183,77 @@ func TestWorkerSettlesInFlightWorkBeforeShutdown(t *testing.T) {
 		close(d.release)
 		require.NoError(t, <-done)
 
-		got, ok := store.ByID(e.ID)
+		got, ok := store.Entry(e.ID)
 		require.True(t, ok)
 		assert.Equal(t, 1, got.Attempt)
 		assert.Equal(t, outbox.StatusPending, got.Status)
 		assert.Equal(t, "transport closed mid-flight", got.LastError,
 			"the in-flight delivery was dropped at shutdown without recording its outcome")
+	})
+}
+
+type firstBlocksDeliverer struct {
+	mu      sync.Mutex
+	calls   []uuid.UUID
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (d *firstBlocksDeliverer) Deliver(_ context.Context, e outbox.Entry) error {
+	d.mu.Lock()
+	d.calls = append(d.calls, e.ID)
+	first := len(d.calls) == 1
+	d.mu.Unlock()
+	if first {
+		close(d.entered)
+		<-d.release
+	}
+	return errors.New("transport closed mid-flight")
+}
+
+func (d *firstBlocksDeliverer) delivered() []uuid.UUID {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return slices.Clone(d.calls)
+}
+
+func TestWorkerLeavesUnstartedClaimsToTheLeaseOnCancel(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		tc := workerScope()
+		store := fakes.NewOutbox()
+		ids := make([]uuid.UUID, 0, 3)
+		for range 3 {
+			e := entry(tc, uuid.New())
+			require.NoError(t, store.Enqueue(tenant.Into(t.Context(), tc), e))
+			ids = append(ids, e.ID)
+		}
+
+		d := &firstBlocksDeliverer{entered: make(chan struct{}), release: make(chan struct{})}
+		w := outbox.NewWorker(store, d, singleTenant{tc: tc}, slog.New(slog.DiscardHandler),
+			outbox.WorkerOpts{Tick: time.Second, Batch: 10, Concurrency: 1})
+
+		start := time.Now()
+		cancel, done := runWorker(t, w)
+		<-d.entered
+		cancel()
+		close(d.release)
+		require.NoError(t, <-done)
+
+		delivered := d.delivered()
+		require.Len(t, delivered, 1, "an entry not yet started must not be delivered after cancel")
+		for _, id := range ids {
+			got, ok := store.Entry(id)
+			require.True(t, ok)
+			assert.Equal(t, 1, got.Attempt, "entry %s", id)
+			assert.Equal(t, outbox.StatusPending, got.Status, "entry %s", id)
+			if id == delivered[0] {
+				assert.Equal(t, "transport closed mid-flight", got.LastError, "the in-flight entry still settles")
+				continue
+			}
+			assert.Empty(t, got.LastError, "entry %s: no Fail may be recorded for an unstarted claim", id)
+			assert.False(t, got.NextAttemptAt.After(start.Add(time.Second+outbox.ClaimLease)),
+				"entry %s: the claim lease, not a backoff, must release it", id)
+		}
 	})
 }
 
@@ -219,7 +285,7 @@ func TestWorkerWithoutDelivererIsIdle(t *testing.T) {
 		outbox.WorkerOpts{Tick: time.Millisecond})
 	require.NoError(t, w.Run(t.Context()))
 
-	got, ok := store.ByID(e.ID)
+	got, ok := store.Entry(e.ID)
 	require.True(t, ok)
 	assert.Equal(t, 0, got.Attempt, "an unconfigured worker claimed an entry it cannot deliver")
 }

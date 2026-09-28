@@ -132,6 +132,18 @@ func (d Deps) orgIDForSlug(r *http.Request, slug string) uuid.UUID {
 	return o.ID
 }
 
+// ProjectFragmentBase builds the LayoutData for an htmx fragment of a project page. NOTE: Deps.Base alone leaves ActiveOrg nil, which collapses every project path to /orgs.
+func (d Deps) ProjectFragmentBase(sc ProjectScope) web.LayoutData {
+	l := d.Base(sc.req, "")
+	l.ActiveOrg = &web.ActiveOrg{ID: sc.org.ID.String(), Slug: sc.org.Slug, Name: sc.org.Name}
+	return l
+}
+
+// ProjectURL returns the base-path-qualified URL of suffix under the scope's project.
+func (d Deps) ProjectURL(sc ProjectScope, suffix string) string {
+	return web.Path(d.Cfg.HTTP.BasePath, projectPath(sc.org.Slug, sc.project.Slug, suffix))
+}
+
 // LayoutForProject tags a page as project-scoped and pins both switchers to the org and project the path names.
 func (d Deps) LayoutForProject(r *http.Request, title, orgSlug string, proj *project.Project, projectKey string) web.LayoutData {
 	nav := web.ActiveNav{Scope: web.NavScopeProject, ProjectKey: projectKey}

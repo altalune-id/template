@@ -91,6 +91,7 @@ linters:
             - "**/internal/*/auth.go"
             - "**/internal/onboard/onboard.go"
             - "**/internal/*/blog.go"
+            - "**/internal/*/webhook.go"
             - "**/internal/blog/*/{category,tag,store,errors}.go"
             - "**/internal/*/store.go"
             - "**/internal/*/errors.go"
@@ -106,6 +107,7 @@ linters:
             - $gostd
             - github.com/google/uuid
             - altalune.id/template/internal/platform/tenant
+            - altalune.id/template/internal/platform/events
             - altalune.id/template/internal/apperror
             - altalune.id/template/gen/go/apperror/v1
             - altalune.id/template/reqid
@@ -172,6 +174,7 @@ linters:
             - "**/authl/**"
             - "**/reqid/**"
             - "**/nanoid/**"
+            - "**/slug/**"
             - "**/worker/**"
             - "**/logger/**"
             - "**/telemetry/**"

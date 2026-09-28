@@ -7,18 +7,20 @@ factory, one field on `Kernel`.
 
 ## What counts
 
-- **Adapter over an external system** — `internal/platform/{db,session,tokens,outbox,notify}`,
+- **Adapter over an external system** — `internal/platform/{db,session,tokens,outbox,notify,queue}`,
   `mailer/`, `authl/`.
-- **Cross-cutting primitive** — `logger/`, `telemetry/`, `reqid/`, `nanoid/`, `httpclient/`,
+- **Cross-cutting primitive** — `logger/`, `telemetry/`, `reqid/`, `nanoid/`, `slug/`, `httpclient/`,
   `internal/platform/{tenant,capabilities,sealer,authn}`.
 - **Long-running loop** — `worker/` (the Supervisor), `scheduler/`, `outbox.Worker`,
-  `db.HealthMonitor`.
+  `db.HealthMonitor`, `queue.Consumer`, `queue.Listen`.
+- **Public contract** — `internal/platform/events`: the webhook event catalog and payloads.
+  Stdlib and uuid only; additive within a version ([`webhooks`](../webhooks/README.md#versioning)).
 - **Not one** — domain logic (`internal/<name>/`), a surface
   (`internal/{web,controlplane,dataplane,ingest,mcp,cli}/`), a helper with one caller.
 
 ## Root or `internal/platform/`
 
-- **Root** — `authl/ httpclient/ logger/ mailer/ mcp/ nanoid/ reqid/ scheduler/ telemetry/ worker/`.
+- **Root** — `authl/ httpclient/ logger/ mailer/ mcp/ nanoid/ reqid/ scheduler/ slug/ telemetry/ worker/`.
   Downstream forks copy them verbatim, so signature changes cost every fork.
 - **`internal/platform/<name>/`** — everything only this app's internals need.
 - **An exported root carries no `mapstructure` tags and no deployment policy.** It takes a plain
@@ -104,17 +106,17 @@ one errgroup and returns the first non-nil error.
 
 depguard in `.golangci.yaml` is the source of truth.
 
-| Rule                     | Scope                                                                       | Effect                                                                 |
-| ------------------------ | --------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
-| `platform-boundary`      | `internal/platform/**`                                                      | Denies `internal/{todo,user,org,project,invite,auth,api,web,cli,boot}` |
-| `platform-boundary-root` | `authl/ httpclient/ logger/ mailer/ mcp/ nanoid/ reqid/ telemetry/ worker/` | Denies all of `altalune.id/template/internal`                          |
-| `mcp-purity`             | root `mcp/` only                                                            | Allows only stdlib + the MCP Go SDK                                    |
-| `scheduler-purity`       | `scheduler/`                                                                | stdlib, otel, `robfig/cron/v3`, `reqid`                                |
-| `httpclient-purity`      | `httpclient/`                                                               | stdlib, `resty/v2`, `otelhttp`                                         |
+| Rule                     | Scope                                                                             | Effect                                                                 |
+| ------------------------ | --------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| `platform-boundary`      | `internal/platform/**`                                                            | Denies `internal/{todo,user,org,project,invite,auth,api,web,cli,boot}` |
+| `platform-boundary-root` | `authl/ httpclient/ logger/ mailer/ mcp/ nanoid/ reqid/ slug/ telemetry/ worker/` | Denies all of `altalune.id/template/internal`                          |
+| `mcp-purity`             | root `mcp/` only                                                                  | Allows only stdlib + the MCP Go SDK                                    |
+| `scheduler-purity`       | `scheduler/`                                                                      | stdlib, otel, `robfig/cron/v3`, `reqid`                                |
+| `httpclient-purity`      | `httpclient/`                                                                     | stdlib, `resty/v2`, `otelhttp`                                         |
 
 A platform package MAY import stdlib, the third-party library its adapter needs,
 `internal/apperror`, and a narrow set of siblings (`tenant`→`apperror`, `tokens`→`session`,
-`notify`→`apperror`+`mailer`).
+`notify`→`apperror`+`mailer`, `queue`→`apperror`+`tenant`+root `worker`).
 
 ## Adapters
 
@@ -129,19 +131,24 @@ One port, several backends, one factory. Reference: `internal/platform/session/`
 
 ## Shape variants
 
-| Variant             | Reference impl                                  | What differs                                                           |
-| ------------------- | ----------------------------------------------- | ---------------------------------------------------------------------- |
-| Single primitive    | `reqid/`                                        | One file + test. No config, no I/O, no `Close`                         |
-| Adapter             | `internal/platform/session/`                    | `factory.go` + the contract suite above                                |
-| Worker              | `internal/platform/outbox/`, `db.HealthMonitor` | Implements `worker.Worker`; `sup.Register` in boot                     |
-| Worker owning jobs  | `scheduler/`                                    | Many `Job`s; per-job config under `config.SchedulerConfig.Jobs`        |
-| Producer + consumer | `internal/platform/outbox/`                     | Producer is a `Store` registered as a Closer; consumer is the `Worker` |
+| Variant             | Reference impl                                  | What differs                                                                                                   |
+| ------------------- | ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| Single primitive    | `reqid/`                                        | One file + test. No config, no I/O, no `Close`                                                                 |
+| Adapter             | `internal/platform/session/`                    | `factory.go` + the contract suite above                                                                        |
+| Worker              | `internal/platform/outbox/`, `db.HealthMonitor` | Implements `worker.Worker`; `sup.Register` in boot                                                             |
+| Worker owning jobs  | `scheduler/`                                    | Many `Job`s; per-job config under `config.SchedulerConfig.Jobs`                                                |
+| Producer + consumer | `internal/platform/outbox/`                     | Producer is a `Store` registered as a Closer; consumer is the `Worker`, delivering through `webhook.Deliverer` |
+| Queue over NATS     | `internal/platform/queue/`                      | `Client.Submit`/`Emit`; `queue.Consumer` and `queue.Listen` workers. Contract: [`queue`](../queue/README.md)   |
 
 ## Boot — the Kernel
 
 Every primitive is one field on `platform.Kernel` (`internal/platform/platform.go`): `Pool`,
 `PgConn`, `Log`, `Reporter`, `Sessions`, `Sealer`, `Verifier`, `Mail`, `AltAuth`, `Tracer`,
-`Meter`, `Notify`, `Nano`, `Caps`, `Outbox`, plus an unexported `closers []io.Closer`.
+`Meter`, `Notify`, `Nano`, `Caps`, `Outbox`, `Queue`, plus an unexported `closers []io.Closer`.
+
+- **`Kernel.Queue` is never nil.** It is `queue.Disabled(log)` when `queue.enabled=false`, so a
+  service calls `Submit` unconditionally. Boot adds it with `AddCloser` right after `Connect`, so
+  it closes before the pool and every later boot failure closes it.
 
 - **`AddCloser` then `Close`** — `Close` walks `slices.Backward(closers)` and returns
   `errors.Join`. Reverse order means the last thing built is the first torn down, so a dependent

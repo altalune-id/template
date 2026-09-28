@@ -10,15 +10,15 @@ A **surface** is one way the outside world reaches the app, or one way the app r
 outside world on a tenant's behalf. There are seven. Rules and mount contracts live in
 [`surfaces`](docs/surfaces/README.md); this table is the naming authority.
 
-| Term            | Where                                                              | Mount                | What it is                                                            |
-| --------------- | ------------------------------------------------------------------ | -------------------- | --------------------------------------------------------------------- |
-| `console`       | `internal/web/handlers/`                                           | `/`                  | Browser surface: templ + HTMX, session-cookie auth, i18n, `/static/`. |
-| `control plane` | `internal/controlplane/`                                           | `/api/`              | Connect-RPC, contracts in `api/*/v1/*.proto`. Gated by `api.enabled`. |
-| `data plane`    | `internal/dataplane/`                                              | `/api/v1/`           | REST for integrators, API-key auth. Gated by `dataplane.enabled`.     |
-| `ingest`        | `internal/ingest/` — seam only, no provider registered             | `/hooks/{provider}/` | Inbound third-party pushes, verified by provider signature.           |
-| `dispatch`      | `internal/platform/outbox/` — primitive only, no sender registered | — (egress)           | Outbound tenant deliveries, durable and retried.                      |
-| `cli`           | `internal/cli/`                                                    | — (dual-mode)        | Operator surface. Contract in [`cli`](docs/cli/README.md).            |
-| `mcp`           | `internal/mcp/` + `mcp/` (root)                                    | `/mcp`               | Tools for an MCP host. See [`mcp`](docs/mcp/README.md).               |
+| Term            | Where                                                  | Mount                | What it is                                                                                  |
+| --------------- | ------------------------------------------------------ | -------------------- | ------------------------------------------------------------------------------------------- |
+| `console`       | `internal/web/handlers/`                               | `/`                  | Browser surface: templ + HTMX, session-cookie auth, i18n, `/static/`.                       |
+| `control plane` | `internal/controlplane/`                               | `/api/`              | Connect-RPC, contracts in `api/*/v1/*.proto`. Gated by `api.enabled`.                       |
+| `data plane`    | `internal/dataplane/`                                  | `/api/v1/`           | REST for integrators, API-key auth. Gated by `dataplane.enabled`.                           |
+| `ingest`        | `internal/ingest/` — seam only, no provider registered | `/hooks/{provider}/` | Inbound third-party pushes, verified by provider signature.                                 |
+| `dispatch`      | `internal/webhook/` on `internal/platform/outbox/`     | — (egress)           | Outbound tenant deliveries, durable and retried. See [`webhooks`](docs/webhooks/README.md). |
+| `cli`           | `internal/cli/`                                        | — (dual-mode)        | Operator surface. Contract in [`cli`](docs/cli/README.md).                                  |
+| `mcp`           | `internal/mcp/` + `mcp/` (root)                        | `/mcp`               | Tools for an MCP host. See [`mcp`](docs/mcp/README.md).                                     |
 
 NOTE: five of the seven speak HTTP and share one listener: console, control plane, data
 plane, ingest and mcp. `web.NewServer` owns the outer mux — it mounts `/healthz`, `/readyz`
@@ -41,24 +41,24 @@ Four names S7 introduces, all detailed in [`mcp`](docs/mcp/README.md):
 
 ## Architecture
 
-| Term                | Where                                                      | What it is                                                                                                                                                   |
-| ------------------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| domain module       | `internal/<name>/`                                         | A bounded context with business logic. Shape fixed by [`modules`](docs/modules/README.md); reference impl `internal/todo/`.                                  |
-| platform package    | see note                                                   | A cross-cutting primitive. Shape fixed by [`platform`](docs/platform/README.md).                                                                             |
-| aggregate           | `internal/<name>/<name>.go`                                | The root type plus `New(...)` enforcing creation invariants. Mutations are methods on it. No JSON tags.                                                      |
-| `Store`             | `internal/<name>/store.go`                                 | The driven port — persistence interface the domain declares and adapters implement. Verbs only: `Save`, `ByID`, `List`, `Delete`.                            |
-| `Service`           | `internal/<name>/service.go`                               | The driving port — application methods the surfaces call. Holds a `Store`, never SQL.                                                                        |
-| workflow            | e.g. `internal/user/onboard.go`                            | A stateful multi-step operation spanning more than one `Store` or an external system (`OnboardWorkflow`, `invite.SendWorkflow`).                             |
-| `Kernel`            | `internal/platform/platform.go:29`                         | The platform bag handed to every service: Pool, PgConn, Log, Reporter, Sessions, Sealer, Verifier, Mail, AltAuth, Tracer, Meter, Notify, Nano, Caps, Outbox. |
-| composition root    | `internal/boot/`                                           | The only place that knows the whole graph. `BootServer` wires Kernel + services + jobs + handlers onto one `worker.Supervisor`.                              |
-| `Capabilities`      | `internal/platform/capabilities/`                          | Config-derived feature flags handed to templates so views never read config directly.                                                                        |
-| awareness tag       | `awareness:"..."` on every `Config` field                  | Declares a field's operational role — `required`, `bootstrap`, `secret`, `mode:<x>`, or `-`. Drives `.env.example` generation and mode validation.           |
-| precondition        | `ifVersion int`, last param of a mutating `Service` method | Optimistic concurrency. `0` writes unconditionally; a non-zero value must match the stored row version or the write is refused.                              |
-| `StaleVersionError` | `internal/blog/errors.go:145`                              | The refusal a non-zero `ifVersion` returns when the row moved underneath the caller. Carries `Want` (asked for) and `Got` (stored).                          |
+| Term                | Where                                                      | What it is                                                                                                                                                          |
+| ------------------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| domain module       | `internal/<name>/`                                         | A bounded context with business logic. Shape fixed by [`modules`](docs/modules/README.md); reference impl `internal/todo/`.                                         |
+| platform package    | see note                                                   | A cross-cutting primitive. Shape fixed by [`platform`](docs/platform/README.md).                                                                                    |
+| aggregate           | `internal/<name>/<name>.go`                                | The root type plus `New(...)` enforcing creation invariants. Mutations are methods on it. No JSON tags.                                                             |
+| `Store`             | `internal/<name>/store.go`                                 | The driven port — persistence interface the domain declares and adapters implement. Verbs only: `Save`, `ByID`, `List`, `Delete`.                                   |
+| `Service`           | `internal/<name>/service.go`                               | The driving port — application methods the surfaces call. Holds a `Store`, never SQL.                                                                               |
+| workflow            | e.g. `internal/user/onboard.go`                            | A stateful multi-step operation spanning more than one `Store` or an external system (`OnboardWorkflow`, `invite.SendWorkflow`).                                    |
+| `Kernel`            | `internal/platform/platform.go:29`                         | The platform bag handed to every service: Pool, PgConn, Log, Reporter, Sessions, Sealer, Verifier, Mail, AltAuth, Tracer, Meter, Notify, Nano, Caps, Outbox, Queue. |
+| composition root    | `internal/boot/`                                           | The only place that knows the whole graph. `BootServer` wires Kernel + services + jobs + handlers onto one `worker.Supervisor`.                                     |
+| `Capabilities`      | `internal/platform/capabilities/`                          | Config-derived feature flags handed to templates so views never read config directly.                                                                               |
+| awareness tag       | `awareness:"..."` on every `Config` field                  | Declares a field's operational role — `required`, `bootstrap`, `secret`, `mode:<x>`, or `-`. Drives `.env.example` generation and mode validation.                  |
+| precondition        | `ifVersion int`, last param of a mutating `Service` method | Optimistic concurrency. `0` writes unconditionally; a non-zero value must match the stored row version or the write is refused.                                     |
+| `StaleVersionError` | `internal/blog/errors.go:145`                              | The refusal a non-zero `ifVersion` returns when the row moved underneath the caller. Carries `Want` (asked for) and `Got` (stored).                                 |
 
 NOTE: "platform package" is a **category, not a directory**. Some live under
-`internal/platform/<name>/` (`authn`, `capabilities`, `config`, `db`, `notify`,
-`outbox`, `sealer`, `session`, `surfaces`, `tenant`, `tokens`); others are exported
+`internal/platform/<name>/` (`authn`, `capabilities`, `config`, `db`, `events`, `notify`,
+`outbox`, `queue`, `sealer`, `session`, `surfaces`, `tenant`, `tokens`); others are exported
 roots (`worker/`, `scheduler/`, `logger/`, `telemetry/`, `mailer/`, `nanoid/`,
 `reqid/`, `authl/`, `httpclient/`, `mcp/`).
 
@@ -119,6 +119,37 @@ still exercised by tests (8 references in
 `internal/web/handlers/handlers_test.go`) — so it is unreachable, not dead
 code. **Canonical name for the per-user flow is `welcome`.** The duplicate is
 left in place deliberately — removing it touches auth flows.
+
+## Webhooks
+
+Receiver contract: [`webhooks`](docs/webhooks/README.md).
+
+| Term           | Where                                      | What it is                                                                                                                       |
+| -------------- | ------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------- |
+| event          | `events.Type` (`internal/platform/events`) | Always a **webhook** event sent to tenants, e.g. `blog.post.published`. Never a queue job or broadcast; they never share a type. |
+| catalog        | `internal/platform/events/catalog.go`      | The hardcoded list of event types, payload versions and which are subscribable. A public contract; additive within a version.    |
+| endpoint       | `webhook.Endpoint`, `webhook_endpoints`    | A tenant's HTTPS URL on one project, subscribed to a set of event types. At most 10 per project.                                 |
+| delivery       | `outbox.Entry`, `webhook.Delivery`         | One event bound for one endpoint: `dlv_<outbox entry id>`. The unit receivers dedupe on and the console retries.                 |
+| attempt        | `webhook.Attempt`, `webhook_deliveries`    | One POST of a delivery, with status code, error and duration. Up to `outbox.MaxAttempts` (8) per delivery.                       |
+| signing secret | `whsec_…`, sealed in `secret_primary`      | The HMAC key for `X-Altempl-Signature`. Shown once; a rotation keeps the old one as secondary until retired.                     |
+
+NOTE: the table `webhook_deliveries` holds **attempts**, one row per POST. "Delivery" always
+means the outbox row.
+
+## Queue
+
+Contract: [`queue`](docs/queue/README.md). Internal work only; nothing here is seen by tenants.
+
+| Term        | Where                                           | What it is                                                                                                   |
+| ----------- | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| job         | `queue.Job`, declared in `<domain>/consumer.go` | Internal work that must happen once, e.g. `todo.log_completion`. Not a `scheduler.Job`, not an event.        |
+| broadcast   | `queue.Broadcast`                               | A notice every running instance reacts to by refreshing in-memory state, e.g. `system.onboarding_completed`. |
+| `Submit`    | `(*queue.Client).Submit`                        | Publishes a job to `WORK`, after the commit. One instance runs it, with retries and a dead letter.           |
+| `Emit`      | `(*queue.Client).Emit`                          | Publishes a broadcast to `BROADCAST`, after the commit. Every instance hears it once; no retry.              |
+| consumer    | `queue.Consumer`, worker `queue.consumer`       | Runs each job's durable pull consumer and its `queue.Handler`. Off under `serve --no-consumer`.              |
+| listener    | `queue.Listener`, worker `queue.listener`       | Binds a broadcast to the code that refreshes this instance's state. Runs on every instance.                  |
+| dead letter | `DLQ` stream, `queue.DeadLetter`                | A job that failed permanently or ran out of attempts (5), moved to `dlq.<subject>` and reported.             |
+| subject     | `Job.Subject()`, `Broadcast.Subject()`          | The NATS address: `jobs.<name>.v<version>` or `broadcast.<name>.v<version>`.                                 |
 
 ## Scheduling
 

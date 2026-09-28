@@ -7,7 +7,7 @@ Reference impls: `internal/todo/` (flat) and `internal/blog/` (relations, plus `
 subdomains). Infrastructure primitives are not modules — see [`platform`](../platform/README.md).
 
 This doc is the **shape** and is canonical for it. Ordered steps: [`howto/module.md`](../howto/module.md). The
-`.agents/skills/altalune-go-convention/` skill routes to both and adds scaffolding, step order and the review traps that make a test vacuous.
+`altalune-go-convention` skill routes to both and adds scaffolding and the review traps.
 
 ## 1. Files
 
@@ -25,9 +25,8 @@ This doc is the **shape** and is canonical for it. Ordered steps: [`howto/module
 | `sqlite_test.go`               | `:memory:` DB + SQLite migrations                          |
 | `postgres_integration_test.go` | `//go:build integration`, `pgtest.New(t)` or `TEST_PG_DSN` |
 
-Those names are fixed; extra files are free — `pgreader.go` / `pgwriter.go` when `postgres.go` grows (it
-keeps the struct and tx helpers), `scheduler.go` (Section 6), a workflow file (Section 7), a pure domain
-helper like `blog/markdown.go`.
+Those names are fixed; extra files are free — `pgreader.go` / `pgwriter.go` when `postgres.go` grows,
+`scheduler.go` (Section 6), a workflow file (Section 7), a pure helper like `blog/markdown.go`.
 
 ## 2. Inside a module
 
@@ -50,7 +49,7 @@ flowchart TB
 
 - One package per bounded context; the name **is** the domain term — `todo`, never `todoservice`.
 - `<name>.go`, `store.go` and `errors.go` are import-starved, enforced by depguard's `domain-purity` rule:
-  stdlib, `github.com/google/uuid`, `google.golang.org/grpc/codes`, plus `internal/platform/tenant`,
+  stdlib, `github.com/google/uuid`, `google.golang.org/grpc/codes`, plus `internal/platform/{tenant,events}`,
   `internal/apperror`, `gen/go/apperror/v1`, `reqid`. Nothing else.
 - `service.go` adds `log/slog` and OTel and may name another module's aggregate **by ID only**; depguard's
   `application-purity` rule denies it `database/sql` and `net/http`.
@@ -63,7 +62,8 @@ No `*sql.Tx` in a signature — atomicity comes from the unit-of-work helpers be
 total order (`created_at DESC, id DESC`); `created_at` alone is not one.
 
 **Service.** Fields are `store`, `log`, `unexpected apperror.UnexpectedFunc` (a func type, not an
-interface), module-specific deps after.
+interface), module-specific deps after — `uow tenant.UnitOfWork` first when a method writes across stores
+atomically (`blog.NewService`).
 
 - Every method opens `ctx, span := tracer.Start(ctx, "<name>.<Method>")`, off a package-level
   `otel.Tracer("altalune.id/template/internal/<name>")`. Expected failures return the typed error; unexpected
@@ -102,10 +102,10 @@ interface), module-specific deps after.
   `make tenant-tables` that registers it: [`multitenancy`](../multitenancy/README.md#adding-a-tenant-scoped-table).
 - **A guard's test must run where the guard is the only protection** — on an RLS-enforcing fixture a hijack test
   passes with or without the code under test. Put those on SQLite or a superuser fixture; prove each by reverting the guard.
-- **Unit of work.** `db.RunInTx(ctx, pool, fn)` for flows with no tenant, `tenant.RunInTx(ctx, pc, tc, fn)` for
-  scoped ones; both fill the same `db.CurrentTx` slot and nesting returns `db.ErrNestedUnitOfWork`. A store
-  method joins an outer transaction when `db.CurrentTx(ctx)` holds one and opens its own otherwise
-  (`todo.postgresStore.txAcquire`). Primitives table: [`multitenancy`](../multitenancy/README.md#unit-of-work).
+- **Unit of work.** A service opens one through its `uow` field, built in boot by `tenant.NewUnitOfWork(cfg, pool, pc)`
+  (`tenant.RunInTx` with `set_config` on Postgres, `db.RunInTx` on SQLite). Stores join `db.CurrentTx(ctx)`
+  when set, else open their own (`todo.postgresStore.txAcquire`). Nesting returns `db.ErrNestedUnitOfWork`: a retry is a
+  second `s.uow` call. `fakes.UnitOfWork` puts a nil tx on ctx — fake stores only. [`multitenancy`](../multitenancy/README.md#unit-of-work)
 
 How a request acquires its scope: [`request scope`](../multitenancy/request-scope.md).
 
@@ -115,8 +115,8 @@ Only if the module needs it — `blog` does, `todo` does not.
 
 - `Store.Save(ctx, p, ifVersion)` and `Delete(ctx, id, ifVersion)` take the expected version. **`0` writes
   unconditionally**; a mismatch returns `*StaleVersionError`.
-- `ifVersion` threads from the surface down to the store. It is a request field, never a value the service
-  invents.
+- `ifVersion` threads from the surface down to the store. It is a request field; when it is `0` a service may
+  still guard its own load-then-write on the loaded version (`blog.Service.transition`).
 - **A conditional write must be one write** — `blog.Service.UpdateWithTags`, pinned by
   `internal/blog/update_atomic_test.go`. What interleaves without it: [`howto/service-method.md`](../howto/service-method.md).
 
@@ -184,8 +184,7 @@ go under Go's own `internal/` at `internal/<name>/<sub>/internal/<helper>/`, imp
 
 ## 10. Adding a module
 
-Steps, in order: [`howto/module.md`](../howto/module.md). Sections 1–9 are the contract that procedure has to
-satisfy; Section 11 is what a reviewer checks once it is done.
+Steps: [`howto/module.md`](../howto/module.md). Sections 1–9 are its contract; Section 11 is the review.
 
 ## 11. Review checklist
 

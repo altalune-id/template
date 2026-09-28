@@ -1,11 +1,10 @@
 # Configuration
 
-Typed in `internal/platform/config/`; `.env.example` and `config.example.yaml` are generated
-from its struct tags and list **every** key. This page is the contract — precedence, awareness
-tags, modes, first boot, and the keys whose behavior does not follow from the name. Adding one
-is a procedure: [`howto/config-key.md`](../howto/config-key.md). Operating them:
-[`deployment`](../deployment/README.md). `make config-examples` regenerates both files;
-`make config-examples-check` fails CI on drift.
+Typed in `internal/platform/config/`; `.env.example` and `config.example.yaml` are generated from
+its struct tags and list **every** key. This page is the contract — precedence, awareness tags,
+modes, first boot, and the keys whose behavior does not follow from the name. Adding one:
+[`howto/config-key.md`](../howto/config-key.md); operating: [`deployment`](../deployment/README.md).
+`make config-examples` regenerates both files; `make config-examples-check` fails CI on drift.
 
 ## Precedence
 
@@ -18,10 +17,9 @@ prefixed `ALT`, `.` and `-` → `_`, upper-cased:
 | `http.basePath: /altempl`        | `ALT_HTTP_BASE_PATH=/altempl`        |
 | `tenant.singletonOrg.slug: main` | `ALT_TENANT_SINGLETON_ORG_SLUG=main` |
 
-Each segment comes from the **`mapstructure`** tag — `segmentFor` in
-`internal/platform/config/env.go` keys on nothing else; `yaml` mirrors it and is decorative. The
-config file is `-c/--config <path>`, else `altempl.<ext>` in the working directory, then `$HOME`;
-a missing file is not an error unless the caller passes `config.WithRequireFile()`.
+Each segment is the **`mapstructure`** tag (`segmentFor` in `internal/platform/config/env.go`);
+`yaml` mirrors it and is decorative. The config file is `-c/--config <path>`, else `altempl.<ext>`
+in the working directory, then `$HOME`; missing is fine unless `config.WithRequireFile()` is passed.
 
 ## Awareness tags
 
@@ -54,7 +52,7 @@ never changes a wire contract.
 | `oidc.*`                 | optional                                         | `issuer` + `clientID` + `clientSecret`  |
 | `genesis.email`          | optional                                         | required                                |
 | `security.encryptionKey` | required under `postgres`                        | always required                         |
-| `tenant.singletonOrg.*`  | optional                                         | `slug` + `name` required                |
+| `tenant.singletonOrg.*`  | optional                                         | `name` required; `slug` optional        |
 | Local password form      | shown once a local user exists, or genesis creds | hidden unless `genesis.breakGlass=true` |
 | Org creation from UI     | disabled                                         | enabled                                 |
 | Public signup            | disabled                                         | enabled (needs OIDC)                    |
@@ -79,10 +77,12 @@ one account once and never overwrite it. Boot writes nothing — it reconciles t
 
 - Re-evaluated every boot, so a typo in `genesis.email` is fixed by fixing the env var. An
   already-promoted admin keeps `is_admin` — demote it in the app.
-- The first org, its owner membership and the bootstrap row are created on first login or
-  through `/onboard`, not at boot: `orgs.created_by` is `NOT NULL REFERENCES users(id)`, so
-  there is no org to create until a user exists. Seeds: `tenant.singletonOrg.slug` (`default`),
-  `tenant.singletonOrg.name` (`Default Organization`), `tenant.personalProjectSlug` (`default`).
+- `/onboard` or `altempl init` (never boot: `orgs.created_by` needs a user) creates the first org,
+  owner and bootstrap row. Seeds: `tenant.singletonOrg.name` (`Default Organization`);
+  `tenant.singletonOrg.slug` and `tenant.personalProjectSlug` default to `""`: a slug is generated
+  (`/onboard` shows it read-only with Edit; cloud signup's first project too); a set value wins.
+  Logins find the org by `orgs.system`, not slug; a unique index allows one system org, and a
+  second onboarding joins it. **Upgrade:** set both keys to `default` to keep the old slugs.
 - **`/onboard` is gated by a one-time setup token.** With `onboard.setupToken` unset, boot mints
   one and logs `boot: setup required — open this one-time onboarding URL url=…/onboard?token=…`.
   Pin it with `ALT_ONBOARD_SETUP_TOKEN` for automated installs; a pinned token is never echoed.
@@ -122,11 +122,11 @@ one account once and never overwrite it. Boot writes nothing — it reconciles t
   exists is itself a disclosure — and every write route requires a key regardless of the flag.
   Scope strings a key or token can carry: [`scopes`](../scopes/README.md).
 
-## MCP
+## MCP and queue
 
-`mcp.enabled` mounts S7 at `basePath + /mcp`. It fails boot without `tokens.issuer` and without
-either `http.baseURL` or an explicit `mcp.audience`. Keys, defaults, the enforced setup order
-and the Apps UI bundle: [`mcp`](../mcp/README.md).
+- `mcp.enabled` mounts S7 at `basePath + /mcp`; boot fails without `tokens.issuer` and without
+  `http.baseURL` or `mcp.audience`. Keys, defaults, setup order, Apps UI: [`mcp`](../mcp/README.md).
+- `queue.*` is the NATS connection behind `Submit` and `Emit`: [`queue`](../queue/README.md#config).
 
 ## Database
 
@@ -172,9 +172,9 @@ Boot fails if the runtime role holds `BYPASSRLS` and `db.allowBypassRLS` is `fal
 
 ## Encryption at rest
 
-| Key                      | Default | Awareness                     | Meaning                                                        |
-| ------------------------ | ------- | ----------------------------- | -------------------------------------------------------------- |
-| `security.encryptionKey` | `""`    | `required, secret, bootstrap` | 32 bytes as hex or standard base64. Seals the session payload. |
+| Key                      | Default | Awareness                     | Meaning                                                                         |
+| ------------------------ | ------- | ----------------------------- | ------------------------------------------------------------------------------- |
+| `security.encryptionKey` | `""`    | `required, secret, bootstrap` | 32 bytes as hex or standard base64. Seals sessions and webhook signing secrets. |
 
 Web sessions are rows in `sessions`; the payload holds the `Principal`, which carries a live IdP
 ID token. The row is sealed with AES-256-GCM bound to its session id, so a row copied under
@@ -182,11 +182,11 @@ another id will not open. The table carries no `org_id` and no RLS policy: a ses
 before any tenant scope exists, so a policy on it would reject every login under
 `db.allowBypassRLS=false`.
 
-`db.driver=postgres` and `mode=cloud` both require the key. Under `sqlite` it is optional and
-boot mints an **ephemeral** one — sessions then last for the life of the process, not across a
-restart, and boot warns `security.encryptionKey is empty — using an ephemeral key; …`. Rotating
-the key corrupts nothing: rows sealed with the old key stop opening, so their holders are signed
-out and the `session-sweep` job reaps the rows at expiry.
+`db.driver=postgres` and `mode=cloud` both require the key. Under `sqlite` boot mints an **ephemeral** one
+and warns `security.encryptionKey is empty — using an ephemeral key; sessions and webhook signing secrets
+will not survive a restart; …`. After a restart or a key rotation nothing old opens: users are signed out
+(`session-sweep` reaps the rows) and deliveries fail with `webhook.SecretUnavailableError` until the tenant
+rotates the endpoint secret. The endpoint page shows a banner (`capabilities.EphemeralEncryptionKey`).
 
 ## Validation
 

@@ -30,9 +30,9 @@ an `attest-build-provenance` attestation. `<owner>` comes from `GHCR_OWNER` on r
 
 ## Local dev stack (compose)
 
-`compose.yaml` starts Postgres 17 + [Mailpit](https://mailpit.axllent.org/) + altempl, under
-`docker compose` or `podman-compose`. altempl is at `http://127.0.0.1:5150/login`; every outbound
-email lands in Mailpit at `http://127.0.0.1:8025`.
+`compose.yaml` starts Postgres 17 + [Mailpit](https://mailpit.axllent.org/) + NATS (JetStream,
+token `altempl-dev`) + altempl, under `docker compose` or `podman-compose`. altempl is at
+`http://127.0.0.1:5150/login`; every outbound email lands in Mailpit at `http://127.0.0.1:8025`.
 
 ```bash
 make compose-up          # build + start everything
@@ -41,9 +41,10 @@ make compose-down        # stop, keep volumes
 make compose-nuke        # stop + wipe docker/data/pg
 ```
 
-Postgres data lives at `./docker/data/pg` (bind-mounted, `.gitignore`d). The stack runs `selfhosted`
-with `ALT_DB_ALLOW_BYPASS_RLS=true` (RLS off) and Mailpit's open SMTP; production mail goes under
-`mail.smtp.*` (or `mail.resend.*` with `mail.driver=resend`), and the role graph below.
+Postgres data lives at `./docker/data/pg` and NATS data at `./docker/data/nats` (bind-mounted,
+`.gitignore`d). The stack runs `selfhosted` with `ALT_DB_ALLOW_BYPASS_RLS=true` (RLS off),
+Mailpit's open SMTP and the queue on; production mail goes under `mail.smtp.*` (or `mail.resend.*`
+with `mail.driver=resend`), and the role graph below.
 
 ## Postgres
 
@@ -118,35 +119,10 @@ notification sinks and never fails the process.
 - Pre-deploy smoke test: `bash scripts/verify-serve-smoke.sh` boots `serve` on ephemeral SQLite,
   curls `/healthz`, sends SIGTERM and asserts clean shutdown.
 
-## Scheduler
+## Scheduler and queue
 
-Jobs run in-process, registered as one `Worker` on the same `Supervisor` as the HTTP listener.
-`altempl scheduler list` prints what is registered; cadence and timezone keys:
-[`config`](../config/README.md#scheduler).
-
-**Multiple replicas.** Singleton is per job, not per deployment:
-
-| Job                       | Scope  | Schedule              | Singleton |
-| ------------------------- | ------ | --------------------- | --------- |
-| `todo-autocomplete-stale` | tenant | cron `0 */6 * * *`    | yes       |
-| `session-sweep`           | system | every 1h (±5m jitter) | yes       |
-
-Scale replicas freely. Do not designate a "scheduler replica" for correctness; leader election is
-per tick, via `pg_try_advisory_lock` on the writer handle — no migration, no lock table. Under
-`driver: sqlite` the locker is a no-op, since there is one writing process.
-
-**Pool sizing caveat.** An advisory lock is session-scoped, so each in-flight singleton job **pins
-one writer connection** for its whole run. If `db.maxOpenConns` is capped at all, it must exceed the
-number of concurrent singleton jobs, or a job blocks waiting for a connection it can never get while
-holding none. `0` (unlimited) is unaffected.
-
-**Deployment shapes.** `serve --no-scheduler` and `serve --scheduler-only` are mutually exclusive
-flags. In-process everywhere (the default) costs job load on the latency path; `--no-scheduler` serving
-replicas plus one `--scheduler-only` replica costs one more deployment unit. `--scheduler-only` still
-binds `http.addr` and still serves `/healthz` and `/readyz` — the `db-health` worker runs there too —
-so the same probes work unchanged. Combined with `scheduler.enabled=false` it is rejected at boot: the
-process would serve probes and do no work. Readiness is not a factor in the choice; `db-health` is a
-worker, not a job.
+Scheduler singletons, pool sizing, NATS on Railway, the `serve` deployment shapes and what
+multiple replicas need: [`workers`](workers.md).
 
 ## MCP
 

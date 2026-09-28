@@ -24,6 +24,7 @@ func TestNullHelpersCarryTheColumnType(t *testing.T) {
 		{"NullTimestampz", pgent.NullTimestampz(), `SELECT NULL::timestamp with time zone AS "v";`},
 		{"NullUUID", pgent.NullUUID(), `SELECT NULL::uuid AS "v";`},
 		{"NullJSONB", pgent.NullJSONB(), `SELECT NULL::jsonb AS "v";`},
+		{"NullBytea", pgent.NullBytea(), `SELECT NULL::bytea AS "v";`},
 	}
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {
@@ -47,6 +48,7 @@ func TestNullHelpersAreConcurrencySafe(t *testing.T) {
 		func() jetpg.Expression { return pgent.NullTimestampz() },
 		func() jetpg.Expression { return pgent.NullUUID() },
 		func() jetpg.Expression { return pgent.NullJSONB() },
+		func() jetpg.Expression { return pgent.NullBytea() },
 	}
 
 	var wg sync.WaitGroup

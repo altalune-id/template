@@ -6,7 +6,7 @@ Guide for AI coding agents (Claude Code, Codex, Cursor, …). Read before touchi
 
 Multitenant Go template — Templ + HTMX + Connect-RPC on one HTTP listener. Downstream
 services fork it and swap the domain modules. Signatures under `authl/`, `httpclient/`,
-`logger/`, `mailer/`, `mcp/`, `nanoid/`, `reqid/`, `scheduler/`, `telemetry/`, `worker/`
+`logger/`, `mailer/`, `mcp/`, `nanoid/`, `reqid/`, `scheduler/`, `slug/`, `telemetry/`, `worker/`
 and `internal/platform/` are copied verbatim into forks — a signature change costs every
 fork churn, so land tests first. `mcp/` is held to that boundary by the `mcp-purity`
 depguard rule: stdlib and the MCP Go SDK only.
@@ -30,8 +30,11 @@ depguard rule: stdlib and the MCP Go SDK only.
 
 `.agents/skills/` holds the real files and sets the review bar. `.claude/skills/` is
 symlinks into it — edit `.agents/skills/`, never the links. Loaded automatically on task
-match: `go` (idiomatic Go, through 1.25/1.26) · `cobra-viper` · `go-release` ·
-`go-spec-reviewer` · `altalune-go-convention` (module shape, tenant scoping, surfaces) ·
+match: `go` (idiomatic Go, through 1.25/1.26) · `go-concurrency` (goroutine ownership and
+lifecycle) · `cobra-viper` · `go-release` · `go-spec-reviewer` ·
+`altalune-go-convention` (module shape, tenant scoping, surfaces) ·
+`altalune-go-review` (review a change: convention, reuse, extensibility, scalability) ·
+`comment-discipline` (when a comment earns its place; gate is `make comment-check`) ·
 `htmx-guidance`, `htmx-debugging`, `htmx-upgrade-from-htmx2`, `htmx-extension-authoring`.
 
 ## Rules that override defaults

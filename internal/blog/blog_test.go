@@ -2,6 +2,7 @@ package blog_test
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"io"
@@ -16,7 +17,9 @@ import (
 	apperrorv1 "altalune.id/template/gen/go/apperror/v1"
 	"altalune.id/template/internal/apperror"
 	"altalune.id/template/internal/blog"
+	"altalune.id/template/internal/platform/db"
 	"altalune.id/template/internal/platform/tenant"
+	"altalune.id/template/internal/testutil/fakes"
 )
 
 func newTestPost(t *testing.T) *blog.Post {
@@ -298,13 +301,18 @@ func (s testService) BySlug(ctx context.Context, slug string) (*blog.Post, error
 
 func newTestService(t *testing.T) testService {
 	t.Helper()
-	store, _, tc, cat := newBlogStoreForTest(t)
+	store, sqlDB, tc, cat := newBlogStoreForTest(t)
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	unexpected := func(_ context.Context, _ string, err error, _ ...any) *apperror.AppError {
 		return apperror.New("altempl.unexpected", err.Error(), codes.Internal,
 			&apperrorv1.ErrorDetail{Code: "altempl.unexpected"}).WithCause(err)
 	}
-	return testService{Service: blog.NewService(store, log, unexpected), tc: tc, cat: cat}
+	svc := blog.NewService(store, log, unexpected, sqliteUnitOfWork(sqlDB), &fakes.Webhooks{})
+	return testService{Service: svc, tc: tc, cat: cat}
+}
+
+func sqliteUnitOfWork(sqlDB *sql.DB) tenant.UnitOfWork {
+	return tenant.NewUnitOfWork(db.DBConfig{Driver: db.DriverSQLite}, db.Pool{W: sqlDB, R: sqlDB}, nil)
 }
 
 // NOTE: int(1<<32)+1 is a constant-overflow compile error on a 32-bit GOARCH, where no int can exceed MaxInt32.

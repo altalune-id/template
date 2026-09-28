@@ -22,7 +22,7 @@ const (
 	defaultSettleGrace = 5 * time.Second
 )
 
-// Deliverer hands one claimed entry to the outbound transport; the template ships no implementation.
+// Deliverer hands one claimed entry to the outbound transport; the webhook module ships the implementation.
 type Deliverer interface {
 	Deliver(ctx context.Context, e Entry) error
 }
@@ -127,8 +127,14 @@ func (w *Worker) drain(ctx context.Context, tenantID string) {
 	g := new(errgroup.Group)
 	g.SetLimit(w.opts.Concurrency)
 	for _, e := range claimed {
+		if ctx.Err() != nil {
+			break
+		}
 		g.Go(func() error {
-			w.deliverOne(ctx, e)
+			// NOTE: a claim not yet started at cancel skips Deliver and Fail; its lease releases it.
+			if ctx.Err() == nil {
+				w.deliverOne(ctx, e)
+			}
 			return nil
 		})
 	}

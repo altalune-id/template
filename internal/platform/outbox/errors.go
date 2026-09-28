@@ -46,6 +46,22 @@ func IsStaleClaimError(err error) bool {
 	return ok
 }
 
+// NotFailedError reports a requeue refused because the entry is not in StatusFailed.
+type NotFailedError struct {
+	ID     string
+	Status Status
+}
+
+func (e *NotFailedError) Error() string {
+	return "outbox: entry " + e.ID + " is " + string(e.Status) + ", not failed"
+}
+
+// IsNotFailedError reports whether err's tree contains a *NotFailedError.
+func IsNotFailedError(err error) bool {
+	_, ok := errors.AsType[*NotFailedError](err)
+	return ok
+}
+
 // InvalidEntryError reports an entry field that cannot be persisted.
 type InvalidEntryError struct {
 	Field  string

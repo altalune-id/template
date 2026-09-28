@@ -1,8 +1,10 @@
 package blog
 
 import (
+	"cmp"
 	"context"
 	"log/slog"
+	"time"
 
 	"github.com/google/uuid"
 	"go.opentelemetry.io/otel"
@@ -10,22 +12,40 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"altalune.id/template/internal/apperror"
+	"altalune.id/template/internal/platform/events"
 	"altalune.id/template/internal/platform/tenant"
 )
 
 //nolint:gochecknoglobals // OTel tracer is a package-level fixture, not runtime state.
 var tracer = otel.Tracer("altalune.id/template/internal/blog")
 
+// Webhooks is the port a post transition enqueues its outbound event through, inside the write's unit of work.
+type Webhooks interface {
+	Enqueue(ctx context.Context, t events.Type, data any) error
+}
+
 // Service is the posts driving port.
 type Service struct {
 	store      Store
 	log        *slog.Logger
 	unexpected apperror.UnexpectedFunc
+	uow        tenant.UnitOfWork
+	hooks      Webhooks
 }
 
 // NewService binds the service to its dependencies.
-func NewService(store Store, log *slog.Logger, unexpected apperror.UnexpectedFunc) *Service {
-	return &Service{store: store, log: log.With("module", "blog"), unexpected: unexpected}
+func NewService(store Store, log *slog.Logger, unexpected apperror.UnexpectedFunc, uow tenant.UnitOfWork, hooks Webhooks) *Service {
+	return &Service{store: store, log: log.With("module", "blog"), unexpected: unexpected, uow: uow, hooks: hooks}
+}
+
+// Locate returns one post in the caller's org, for callers whose authority is org-wide.
+func (s *Service) Locate(ctx context.Context, id uuid.UUID) (*Post, error) {
+	ctx, span := tracer.Start(ctx, "blog.Locate")
+	defer span.End()
+	span.SetAttributes(attribute.String("post.id", id.String()))
+
+	_, p, err := s.locate(ctx, span, "blog.Locate", id)
+	return p, err
 }
 
 // Create constructs a draft post in the caller's tenant scope and persists it.
@@ -108,32 +128,22 @@ func (s *Service) SetTags(ctx context.Context, id uuid.UUID, tagIDs []uuid.UUID)
 	return s.persist(ctx, span, "blog.SetTags", p, 0)
 }
 
-// Publish marks the post published, recording the first publication once; ifVersion 0 writes unconditionally.
+// Publish marks the post published and emits PostPublished, recording the first publication once; ifVersion 0 guards on the loaded version.
 func (s *Service) Publish(ctx context.Context, id uuid.UUID, ifVersion int) (*Post, error) {
 	ctx, span := tracer.Start(ctx, "blog.Publish")
 	defer span.End()
 	span.SetAttributes(attribute.String("post.id", id.String()))
 
-	p, err := s.load(ctx, span, "blog.Publish", id)
-	if err != nil {
-		return nil, err
-	}
-	p.Publish()
-	return s.persist(ctx, span, "blog.Publish", p, ifVersion)
+	return s.transition(ctx, span, "blog.Publish", id, ifVersion, StatusPublished)
 }
 
-// Unpublish returns the post to draft, retaining its first publication time; ifVersion 0 writes unconditionally.
+// Unpublish returns the post to draft and emits PostUnpublished, retaining its first publication time; ifVersion 0 guards on the loaded version.
 func (s *Service) Unpublish(ctx context.Context, id uuid.UUID, ifVersion int) (*Post, error) {
 	ctx, span := tracer.Start(ctx, "blog.Unpublish")
 	defer span.End()
 	span.SetAttributes(attribute.String("post.id", id.String()))
 
-	p, err := s.load(ctx, span, "blog.Unpublish", id)
-	if err != nil {
-		return nil, err
-	}
-	p.Unpublish()
-	return s.persist(ctx, span, "blog.Unpublish", p, ifVersion)
+	return s.transition(ctx, span, "blog.Unpublish", id, ifVersion, StatusDraft)
 }
 
 // List returns the posts in the caller's tenant scope, filtered by opts.
@@ -194,20 +204,31 @@ func (s *Service) BySlug(ctx context.Context, slug string) (*Post, error) {
 	return p, nil
 }
 
-// Delete removes a post together with its tag links; ifVersion 0 writes unconditionally.
+// Delete removes a post together with its tag links and emits PostDeleted; ifVersion 0 guards on the loaded version.
 func (s *Service) Delete(ctx context.Context, id uuid.UUID, ifVersion int) error {
 	ctx, span := tracer.Start(ctx, "blog.Delete")
 	defer span.End()
 	span.SetAttributes(attribute.String("post.id", id.String()))
 
-	if err := s.store.Delete(ctx, id, ifVersion); err != nil {
-		span.RecordError(err)
-		if IsNotFoundError(err) || IsStaleVersionError(err) {
+	const op = "blog.Delete"
+	return s.atomically(ctx, span, op, id, ifVersion, func(ctx context.Context) error {
+		p, err := s.load(ctx, span, op, id)
+		if err != nil {
 			return err
 		}
-		return s.unexpected(ctx, "blog.Delete: delete", err, "post_id", id)
-	}
-	return nil
+		if delErr := s.store.Delete(ctx, id, cmp.Or(ifVersion, p.Version)); delErr != nil {
+			span.RecordError(delErr)
+			if IsNotFoundError(delErr) || IsStaleVersionError(delErr) {
+				return delErr
+			}
+			return s.unexpected(ctx, op+": delete", delErr, "post_id", id)
+		}
+		return s.enqueue(ctx, span, op, id, events.PostDeleted, events.PostDeletedV1{
+			ID:           p.ID,
+			Slug:         p.Slug,
+			WasPublished: p.Status == StatusPublished,
+		})
+	})
 }
 
 // CountByCategory returns the project's post count per category; a category with no posts is absent.
@@ -247,15 +268,139 @@ func (s *Service) CountByTag(ctx context.Context) (map[uuid.UUID]int, error) {
 }
 
 func (s *Service) load(ctx context.Context, span trace.Span, op string, id uuid.UUID) (*Post, error) {
+	tc, p, err := s.locate(ctx, span, op, id)
+	if err != nil {
+		return nil, err
+	}
+	if p.ProjectID != tc.ProjectID {
+		err := &NotFoundError{ID: id.String()}
+		span.RecordError(err)
+		return nil, err
+	}
+	return p, nil
+}
+
+func (s *Service) locate(ctx context.Context, span trace.Span, op string, id uuid.UUID) (tenant.Context, *Post, error) {
+	tc, err := tenant.From(ctx)
+	if err != nil {
+		span.RecordError(err)
+		return tenant.Context{}, nil, err
+	}
 	p, err := s.store.ByID(ctx, id)
 	if err != nil {
 		span.RecordError(err)
 		if IsNotFoundError(err) {
-			return nil, err
+			return tenant.Context{}, nil, err
 		}
-		return nil, s.unexpected(ctx, op+": load", err, "post_id", id)
+		return tenant.Context{}, nil, s.unexpected(ctx, op+": load", err, "post_id", id)
 	}
-	return p, nil
+	if p.OrgID != tc.OrgID {
+		err := &NotFoundError{ID: id.String()}
+		span.RecordError(err)
+		return tenant.Context{}, nil, err
+	}
+	return tc, p, nil
+}
+
+func (s *Service) transition(ctx context.Context, span trace.Span, op string, id uuid.UUID, ifVersion int, target Status) (*Post, error) {
+	var out *Post
+	err := s.atomically(ctx, span, op, id, ifVersion, func(ctx context.Context) error {
+		p, err := s.load(ctx, span, op, id)
+		if err != nil {
+			return err
+		}
+		if ifVersion != 0 && ifVersion != p.Version {
+			err := &StaleVersionError{Want: ifVersion, Got: p.Version}
+			span.RecordError(err)
+			return err
+		}
+		if p.Status == target {
+			out = p
+			return nil
+		}
+		effective := cmp.Or(ifVersion, p.Version)
+		t := apply(p, target)
+		if _, err := s.persist(ctx, span, op, p, effective); err != nil {
+			return err
+		}
+		if err := s.enqueue(ctx, span, op, id, t, payload(t, p)); err != nil {
+			return err
+		}
+		out = p
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (s *Service) atomically(ctx context.Context, span trace.Span, op string, id uuid.UUID, ifVersion int, fn func(ctx context.Context) error) error {
+	if _, err := tenant.From(ctx); err != nil {
+		span.RecordError(err)
+		return err
+	}
+	err := s.inUnitOfWork(ctx, span, op, id, fn)
+	if ifVersion == 0 && IsStaleVersionError(err) {
+		return s.inUnitOfWork(ctx, span, op, id, fn)
+	}
+	return err
+}
+
+func (s *Service) inUnitOfWork(ctx context.Context, span trace.Span, op string, id uuid.UUID, fn func(ctx context.Context) error) error {
+	var inner error
+	err := s.uow(ctx, func(ctx context.Context) error {
+		inner = fn(ctx)
+		return inner
+	})
+	if err == nil || inner != nil {
+		return inner
+	}
+	span.RecordError(err)
+	return s.unexpected(ctx, op+": unit of work", err, "post_id", id)
+}
+
+func (s *Service) enqueue(ctx context.Context, span trace.Span, op string, id uuid.UUID, t events.Type, data any) error {
+	if err := s.hooks.Enqueue(ctx, t, data); err != nil {
+		span.RecordError(err)
+		return s.unexpected(ctx, op+": enqueue", err, "post_id", id)
+	}
+	return nil
+}
+
+func apply(p *Post, target Status) events.Type {
+	if target == StatusPublished {
+		p.Publish()
+		return events.PostPublished
+	}
+	p.Unpublish()
+	return events.PostUnpublished
+}
+
+func payload(t events.Type, p *Post) any {
+	if t == events.PostPublished {
+		return events.PostPublishedV1(snapshot(p))
+	}
+	return events.PostUnpublishedV1(snapshot(p))
+}
+
+func snapshot(p *Post) events.PostSnapshotV1 {
+	var firstPublishedAt *time.Time
+	if p.FirstPublishedAt != nil {
+		t := p.FirstPublishedAt.UTC().Truncate(time.Second)
+		firstPublishedAt = &t
+	}
+	return events.PostSnapshotV1{
+		ID:               p.ID,
+		Slug:             p.Slug,
+		Title:            p.Title,
+		BodyMarkdown:     p.BodyMarkdown,
+		CategoryID:       p.CategoryID,
+		TagIDs:           append([]uuid.UUID{}, p.TagIDs...),
+		FirstPublishedAt: firstPublishedAt,
+		UpdatedAt:        p.UpdatedAt.UTC().Truncate(time.Second),
+		Version:          p.Version,
+	}
 }
 
 func (s *Service) persist(ctx context.Context, span trace.Span, op string, p *Post, ifVersion int) (*Post, error) {

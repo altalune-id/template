@@ -165,6 +165,34 @@ button[data-color-mode][aria-current="true"] [data-check] {
 	opacity: 1;
 }
 
+/* Tab bar: a row of role="tab" buttons; aria-selected="true" marks the active one. */
+.tab-bar {
+	display: flex;
+	gap: 0.25rem;
+	padding-inline: 0.5rem;
+	border-bottom: 1px solid hsl(var(--border));
+}
+.tab-bar [role="tab"] {
+	margin-bottom: -1px;
+	padding: 0.5rem 0.75rem;
+	border-bottom: 2px solid transparent;
+	font-size: 0.875rem;
+	font-weight: 500;
+	color: hsl(var(--muted-foreground));
+	cursor: pointer;
+}
+.tab-bar [role="tab"]:hover {
+	color: hsl(var(--foreground));
+}
+.tab-bar [role="tab"][aria-selected="true"] {
+	border-bottom-color: hsl(var(--primary));
+	color: hsl(var(--foreground));
+}
+.tab-bar [role="tab"]:focus-visible {
+	outline: 2px solid hsl(var(--ring));
+	outline-offset: -2px;
+}
+
 /* SSO handoff button. Auth0/Clerk/Google convention: brand logo left, arrow right, neutral until hover. Hover tints border + shadow with the theme's primary. */
 .btn-sso {
 	display: flex;

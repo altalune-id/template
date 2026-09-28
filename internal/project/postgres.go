@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -75,6 +76,11 @@ func (s *postgresStore) endTx(tx *sql.Tx, owned bool, err error) error {
 		return fmt.Errorf("project.postgres: commit: %w", cerr)
 	}
 	return nil
+}
+
+func isPgOneSystemViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == pgUniqueViolation && strings.HasSuffix(pgErr.ConstraintName, "projects_one_system")
 }
 
 func isPgUniqueViolation(err error) bool {

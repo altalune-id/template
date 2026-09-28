@@ -8,3 +8,8 @@ import "github.com/go-jet/jet/v2/sqlite"
 func NullText() sqlite.StringExpression {
 	return sqlite.CAST(sqlite.NULL).AS_TEXT()
 }
+
+// NullBlob returns a fresh SQL NULL typed as BLOB.
+func NullBlob() sqlite.BlobExpression {
+	return sqlite.CAST(sqlite.NULL).AS_BLOB()
+}

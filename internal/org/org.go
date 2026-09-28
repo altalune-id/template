@@ -116,6 +116,11 @@ func NewMembership(orgID, userID uuid.UUID, role Role) (*Membership, error) {
 	}, nil
 }
 
+// ValidateSlug reports whether s is usable as an org slug, as an InvalidSlugError when it is not.
+func ValidateSlug(s string) error {
+	return validateSlug(s)
+}
+
 func validateSlug(s string) error {
 	if len(s) < slugMinLen || len(s) > slugMaxLen {
 		return &InvalidSlugError{Slug: s, Reason: "length out of range"}
@@ -132,6 +137,11 @@ func validateSlug(s string) error {
 // NOTE: ServeMux prefers a literal pattern over the wildcard beside it, so a row slugged like a literal segment under /orgs/ would be unreachable.
 func reservedSlug(s string) bool {
 	return s == "new"
+}
+
+// ValidateName reports whether n is usable as an org name, as an InvalidNameError when it is not.
+func ValidateName(n string) error {
+	return validateName(n)
 }
 
 func validateName(n string) error {

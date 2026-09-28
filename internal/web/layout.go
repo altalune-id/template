@@ -14,6 +14,15 @@ import (
 // IsHTMXRequest reports whether r was issued by htmx rather than a browser navigation.
 func IsHTMXRequest(r *http.Request) bool { return r.Header.Get("HX-Request") == "true" }
 
+// HeaderPushURL is the htmx response header that pushes a URL onto the browser history after the swap.
+const HeaderPushURL = "HX-Push-Url"
+
+// HeaderRetarget is the htmx response header that replaces the requesting element's swap target.
+const HeaderRetarget = "HX-Retarget"
+
+// HeaderReswap is the htmx response header that replaces the requesting element's swap style.
+const HeaderReswap = "HX-Reswap"
+
 // NavScope selects which sidebars the shell renders.
 type NavScope string
 

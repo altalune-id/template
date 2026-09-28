@@ -11,15 +11,10 @@ import (
 )
 
 // SingletonOrgMissingError signals the selfhosted singleton org has not been provisioned yet — the caller (typically OnboardWorkflow) should treat it as "onboarding still needs to run".
-type SingletonOrgMissingError struct {
-	Slug string
-}
+type SingletonOrgMissingError struct{}
 
 func (e *SingletonOrgMissingError) Error() string {
-	if e == nil || e.Slug == "" {
-		return "user: singleton org not provisioned"
-	}
-	return fmt.Sprintf("user: singleton org not provisioned: slug=%q", e.Slug)
+	return "user: singleton org not provisioned"
 }
 
 // IsSingletonOrgMissingError reports whether err's tree contains a *SingletonOrgMissingError.

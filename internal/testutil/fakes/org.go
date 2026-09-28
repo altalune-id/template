@@ -1,6 +1,7 @@
 package fakes
 
 import (
+	"bytes"
 	"context"
 	"sync"
 
@@ -35,6 +36,9 @@ func (r *Org) Save(_ context.Context, o *org.Org) error {
 		if existing.Slug == o.Slug && id != o.ID {
 			return &org.AlreadyExistsError{Slug: o.Slug}
 		}
+		if o.System && existing.System && id != o.ID {
+			return &org.SystemOrgExistsError{Slug: o.Slug}
+		}
 	}
 	c := *o
 	r.orgs[o.ID] = &c
@@ -62,6 +66,27 @@ func (r *Org) BySlug(_ context.Context, slug string) (*org.Org, error) {
 		}
 	}
 	return nil, &org.NotFoundError{Slug: slug}
+}
+
+// SystemOrg mirrors the real stores: the earliest system org by created_at, then id.
+func (r *Org) SystemOrg(_ context.Context) (*org.Org, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var found *org.Org
+	for _, o := range r.orgs {
+		if !o.System {
+			continue
+		}
+		if found == nil || o.CreatedAt.Before(found.CreatedAt) ||
+			(o.CreatedAt.Equal(found.CreatedAt) && bytes.Compare(o.ID[:], found.ID[:]) < 0) {
+			found = o
+		}
+	}
+	if found == nil {
+		return nil, &org.NotFoundError{System: true}
+	}
+	c := *found
+	return &c, nil
 }
 
 func (r *Org) ByID(_ context.Context, id uuid.UUID) (*org.Org, error) {

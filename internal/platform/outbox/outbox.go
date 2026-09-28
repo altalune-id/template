@@ -28,18 +28,15 @@ func (s Status) Terminal() bool { return s == StatusDelivered || s == StatusFail
 
 const (
 	// MaxAttempts bounds delivery tries; an entry that reaches it moves to StatusFailed.
-	MaxAttempts = 10
+	MaxAttempts = 8
 	// ClaimLease is how far ClaimDue pushes next_attempt_at, releasing an entry whose dispatcher died.
 	ClaimLease = 5 * time.Minute
 	// MaxTargetLen bounds the target identifier a caller may enqueue.
 	MaxTargetLen = 255
 	// MaxClaimLimit caps one ClaimDue batch.
 	MaxClaimLimit = 1000
-)
-
-const (
-	backoffBase     = 2 * time.Second
-	backoffShiftCap = 12
+	// MaxListLimit caps one ListByTarget call.
+	MaxListLimit = 100
 )
 
 // Entry is one durable delivery record.
@@ -54,13 +51,32 @@ type Entry struct {
 	NextAttemptAt time.Time
 	Status        Status
 	LastError     string
+	CreatedAt     time.Time
+}
+
+// BackoffBase returns the unjittered wait before the given attempt.
+func BackoffBase(attempt int) time.Duration {
+	switch {
+	case attempt <= 2:
+		return 30 * time.Second
+	case attempt == 3:
+		return 5 * time.Minute
+	case attempt == 4:
+		return 30 * time.Minute
+	case attempt == 5:
+		return 2 * time.Hour
+	case attempt == 6:
+		return 5 * time.Hour
+	default:
+		return 10 * time.Hour
+	}
 }
 
 // Backoff returns the jittered wait before the given attempt.
 func Backoff(attempt int) time.Duration {
-	shift := min(max(attempt, 1)-1, backoffShiftCap)
-	half := (backoffBase << shift) / 2
-	return half + rand.N(half)
+	base := BackoffBase(attempt)
+	spread := base / 10
+	return base - spread + rand.N(2*spread+1)
 }
 
 func (e Entry) validate() error {
@@ -83,6 +99,10 @@ func (e Entry) validate() error {
 	return nil
 }
 
-func claimBatch(limit int) int64 {
-	return int64(min(max(limit, 1), MaxClaimLimit))
+func clampLimit(limit, limitCap int) int64 {
+	return int64(min(max(limit, 1), limitCap))
 }
+
+func claimBatch(limit int) int64 { return clampLimit(limit, MaxClaimLimit) }
+
+func listBatch(limit int) int64 { return clampLimit(limit, MaxListLimit) }

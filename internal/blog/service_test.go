@@ -2,10 +2,13 @@ package blog_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/google/uuid"
@@ -16,11 +19,18 @@ import (
 	apperrorv1 "altalune.id/template/gen/go/apperror/v1"
 	"altalune.id/template/internal/apperror"
 	"altalune.id/template/internal/blog"
+	"altalune.id/template/internal/platform/events"
 	"altalune.id/template/internal/platform/tenant"
 	"altalune.id/template/internal/testutil/fakes"
 )
 
 func newSvc(t *testing.T, store blog.Store) (*blog.Service, *int) {
+	t.Helper()
+	svc, calls, _ := newHooked(t, store, fakes.UnitOfWork)
+	return svc, calls
+}
+
+func newHooked(t *testing.T, store blog.Store, uow tenant.UnitOfWork) (*blog.Service, *int, *fakes.Webhooks) {
 	t.Helper()
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	calls := 0
@@ -29,7 +39,8 @@ func newSvc(t *testing.T, store blog.Store) (*blog.Service, *int) {
 		return apperror.New("altempl.unexpected", err.Error(), codes.Internal,
 			&apperrorv1.ErrorDetail{Code: "altempl.unexpected"}).WithCause(err)
 	}
-	return blog.NewService(store, log, unexpected), &calls
+	hooks := &fakes.Webhooks{}
+	return blog.NewService(store, log, unexpected, uow, hooks), &calls, hooks
 }
 
 func tenantCtx(t *testing.T) (context.Context, tenant.Context) {
@@ -347,7 +358,9 @@ func TestService_Delete(t *testing.T) {
 		svc, unex := newSvc(t, store)
 		ctx, _ := tenantCtx(t)
 
-		require.Error(t, svc.Delete(ctx, uuid.New(), 0))
+		created, err := svc.Create(ctx, uuid.New(), "Gone", "", "body")
+		require.NoError(t, err)
+		require.Error(t, svc.Delete(ctx, created.ID, 0))
 		assert.Equal(t, 1, *unex)
 	})
 }
@@ -410,4 +423,306 @@ func TestErrors_AppErrorCodes(t *testing.T) {
 	assert.Equal(t, apperror.CodePostInvalidBody, (&blog.InvalidBodyError{}).ToAppError().Code())
 	assert.Equal(t, apperror.CodePostCategoryRequired, (&blog.CategoryRequiredError{}).ToAppError().Code())
 	assert.Equal(t, codes.InvalidArgument, (&blog.CategoryRequiredError{}).ToAppError().GRPCCode())
+}
+
+type recordingStore struct {
+	*fakes.Blog
+	mu        sync.Mutex
+	saves     []int
+	raceFirst bool
+}
+
+func (r *recordingStore) Save(ctx context.Context, p *blog.Post, ifVersion int) error {
+	r.mu.Lock()
+	r.saves = append(r.saves, ifVersion)
+	race := r.raceFirst
+	r.raceFirst = false
+	r.mu.Unlock()
+	if !race {
+		return r.Blog.Save(ctx, p, ifVersion)
+	}
+	winner := *p
+	if err := r.Blog.Save(ctx, &winner, 0); err != nil {
+		return err
+	}
+	return &blog.StaleVersionError{Want: ifVersion, Got: ifVersion + 1}
+}
+
+func (r *recordingStore) savedVersions() []int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Clone(r.saves)
+}
+
+func seedDraft(t *testing.T, store *fakes.Blog, tc tenant.Context) *blog.Post {
+	t.Helper()
+	p, err := blog.New(tc.OrgID, tc.ProjectID, uuid.New(), "Hello", "", "body")
+	require.NoError(t, err)
+	store.Seed(p)
+	return p
+}
+
+func seedPublished(t *testing.T, store *fakes.Blog, tc tenant.Context) *blog.Post {
+	t.Helper()
+	p, err := blog.New(tc.OrgID, tc.ProjectID, uuid.New(), "Live", "", "body")
+	require.NoError(t, err)
+	p.Publish()
+	p.Version = 3
+	store.Seed(p)
+	return p
+}
+
+func TestService_TransitionsEmitInTheUnitOfWork(t *testing.T) {
+	t.Run("publish on a draft emits one PostPublished carrying the stored version", func(t *testing.T) {
+		store := fakes.NewBlog()
+		svc, unex, hooks := newHooked(t, store, fakes.UnitOfWork)
+		ctx, tc := tenantCtx(t)
+		p := seedDraft(t, store, tc)
+
+		got, err := svc.Publish(ctx, p.ID, 0)
+		require.NoError(t, err)
+
+		stored, err := store.ByID(ctx, p.ID)
+		require.NoError(t, err)
+		calls := hooks.Recorded()
+		require.Len(t, calls, 1)
+		assert.Equal(t, events.PostPublished, calls[0].Type)
+		assert.True(t, calls[0].InTx, "Enqueue must run inside the unit of work")
+		data, ok := calls[0].Data.(events.PostPublishedV1)
+		require.True(t, ok, "got %T", calls[0].Data)
+		assert.Equal(t, p.ID, data.ID)
+		assert.Equal(t, p.Slug, data.Slug)
+		assert.Equal(t, stored.Version, data.Version)
+		assert.Equal(t, stored.Version, got.Version)
+		assert.Zero(t, *unex)
+	})
+
+	t.Run("publish on a published post writes nothing and emits nothing", func(t *testing.T) {
+		store := fakes.NewBlog()
+		rec := &recordingStore{Blog: store}
+		svc, unex, hooks := newHooked(t, rec, fakes.UnitOfWork)
+		ctx, tc := tenantCtx(t)
+		p := seedPublished(t, store, tc)
+
+		got, err := svc.Publish(ctx, p.ID, 0)
+		require.NoError(t, err)
+		assert.Equal(t, 3, got.Version)
+		assert.Empty(t, rec.savedVersions(), "a no-op publish must not save")
+		assert.Empty(t, hooks.Recorded())
+		assert.Zero(t, *unex)
+	})
+
+	t.Run("unpublish emits one PostUnpublished, only on a transition", func(t *testing.T) {
+		store := fakes.NewBlog()
+		svc, unex, hooks := newHooked(t, store, fakes.UnitOfWork)
+		ctx, tc := tenantCtx(t)
+		draft := seedDraft(t, store, tc)
+		live := seedPublished(t, store, tc)
+
+		_, err := svc.Unpublish(ctx, draft.ID, 0)
+		require.NoError(t, err)
+		require.Empty(t, hooks.Recorded(), "unpublishing a draft is a no-op")
+
+		_, err = svc.Unpublish(ctx, live.ID, 0)
+		require.NoError(t, err)
+		calls := hooks.Recorded()
+		require.Len(t, calls, 1)
+		assert.Equal(t, events.PostUnpublished, calls[0].Type)
+		assert.True(t, calls[0].InTx)
+		data, ok := calls[0].Data.(events.PostUnpublishedV1)
+		require.True(t, ok, "got %T", calls[0].Data)
+		assert.Equal(t, live.ID, data.ID)
+		assert.Equal(t, 4, data.Version)
+		assert.Zero(t, *unex)
+	})
+
+	t.Run("delete emits PostDeleted with WasPublished", func(t *testing.T) {
+		store := fakes.NewBlog()
+		svc, unex, hooks := newHooked(t, store, fakes.UnitOfWork)
+		ctx, tc := tenantCtx(t)
+		live := seedPublished(t, store, tc)
+		draft := seedDraft(t, store, tc)
+
+		require.NoError(t, svc.Delete(ctx, live.ID, 0))
+		require.NoError(t, svc.Delete(ctx, draft.ID, 0))
+
+		calls := hooks.Recorded()
+		require.Len(t, calls, 2)
+		for _, c := range calls {
+			assert.Equal(t, events.PostDeleted, c.Type)
+			assert.True(t, c.InTx)
+		}
+		assert.Equal(t, events.PostDeletedV1{ID: live.ID, Slug: live.Slug, WasPublished: true}, calls[0].Data)
+		assert.Equal(t, events.PostDeletedV1{ID: draft.ID, Slug: draft.Slug, WasPublished: false}, calls[1].Data)
+		assert.Zero(t, store.Len())
+		assert.Zero(t, *unex)
+	})
+
+	t.Run("update emits nothing", func(t *testing.T) {
+		store := fakes.NewBlog()
+		svc, unex, hooks := newHooked(t, store, fakes.UnitOfWork)
+		ctx, tc := tenantCtx(t)
+		p := seedPublished(t, store, tc)
+
+		_, err := svc.Update(ctx, p.ID, "Edited", "", "body", p.CategoryID, 0)
+		require.NoError(t, err)
+		_, err = svc.UpdateWithTags(ctx, p.ID, "Edited", "", "body", p.CategoryID, []uuid.UUID{uuid.New()}, 0)
+		require.NoError(t, err)
+		_, err = svc.SetTags(ctx, p.ID, nil)
+		require.NoError(t, err)
+		assert.Empty(t, hooks.Recorded())
+		assert.Zero(t, *unex)
+	})
+
+	t.Run("a post with no tags marshals an empty tag_ids array", func(t *testing.T) {
+		store := fakes.NewBlog()
+		svc, _, hooks := newHooked(t, store, fakes.UnitOfWork)
+		ctx, tc := tenantCtx(t)
+		p := seedDraft(t, store, tc)
+		require.Nil(t, p.TagIDs)
+
+		_, err := svc.Publish(ctx, p.ID, 0)
+		require.NoError(t, err)
+		calls := hooks.Recorded()
+		require.Len(t, calls, 1)
+		raw, err := json.Marshal(calls[0].Data)
+		require.NoError(t, err)
+		assert.Contains(t, string(raw), `"tag_ids":[]`)
+	})
+
+	t.Run("an Enqueue failure fails the transition as unexpected", func(t *testing.T) {
+		store := fakes.NewBlog()
+		svc, unex, hooks := newHooked(t, store, fakes.UnitOfWork)
+		hooks.Err = errors.New("outbox down")
+		ctx, tc := tenantCtx(t)
+		p := seedDraft(t, store, tc)
+
+		_, err := svc.Publish(ctx, p.ID, 0)
+		require.Error(t, err)
+		assert.Equal(t, 1, *unex)
+	})
+}
+
+func TestService_SnapshotTimesAreWholeSeconds(t *testing.T) {
+	store := fakes.NewBlog()
+	svc, _, hooks := newHooked(t, store, fakes.UnitOfWork)
+	ctx, tc := tenantCtx(t)
+	p := seedDraft(t, store, tc)
+
+	_, err := svc.Publish(ctx, p.ID, 0)
+	require.NoError(t, err)
+	calls := hooks.Recorded()
+	require.Len(t, calls, 1)
+	data, ok := calls[0].Data.(events.PostPublishedV1)
+	require.True(t, ok, "got %T", calls[0].Data)
+
+	assert.Zero(t, data.UpdatedAt.Nanosecond(), "UpdatedAt must be whole seconds, matching the envelope's created_at precision")
+	require.NotNil(t, data.FirstPublishedAt)
+	assert.Zero(t, data.FirstPublishedAt.Nanosecond(), "FirstPublishedAt must be whole seconds, matching the envelope's created_at precision")
+}
+
+func TestService_TransitionVersionGuard(t *testing.T) {
+	t.Run("a stale caller version fails before the no-op check", func(t *testing.T) {
+		store := fakes.NewBlog()
+		svc, unex, hooks := newHooked(t, store, fakes.UnitOfWork)
+		ctx, tc := tenantCtx(t)
+		p := seedDraft(t, store, tc)
+
+		_, err := svc.Unpublish(ctx, p.ID, p.Version+1)
+		assert.True(t, blog.IsStaleVersionError(err), "got %T: %v", err, err)
+		assert.Empty(t, hooks.Recorded())
+		assert.Zero(t, *unex)
+	})
+
+	t.Run("ifVersion 0 saves against the loaded version", func(t *testing.T) {
+		store := fakes.NewBlog()
+		rec := &recordingStore{Blog: store}
+		svc, _, _ := newHooked(t, rec, fakes.UnitOfWork)
+		ctx, tc := tenantCtx(t)
+		p := seedDraft(t, store, tc)
+
+		_, err := svc.Publish(ctx, p.ID, 0)
+		require.NoError(t, err)
+		assert.Equal(t, []int{p.Version}, rec.savedVersions())
+
+		live := seedPublished(t, store, tc)
+		require.NoError(t, svc.Delete(ctx, live.ID, 0))
+		_, err = store.ByID(ctx, live.ID)
+		assert.True(t, blog.IsNotFoundError(err))
+	})
+
+	t.Run("a lost race with ifVersion 0 reloads once and emits nothing", func(t *testing.T) {
+		store := fakes.NewBlog()
+		rec := &recordingStore{Blog: store, raceFirst: true}
+		svc, unex, hooks := newHooked(t, rec, fakes.UnitOfWork)
+		ctx, tc := tenantCtx(t)
+		p := seedDraft(t, store, tc)
+
+		got, err := svc.Publish(ctx, p.ID, 0)
+		require.NoError(t, err)
+		assert.Equal(t, blog.StatusPublished, got.Status)
+		assert.Equal(t, p.Version+1, got.Version)
+		assert.Equal(t, []int{p.Version}, rec.savedVersions(), "the retry must see the post published and not save")
+		assert.Empty(t, hooks.Recorded())
+		assert.Zero(t, *unex)
+	})
+
+	t.Run("a lost race with a caller version is stale", func(t *testing.T) {
+		store := fakes.NewBlog()
+		rec := &recordingStore{Blog: store, raceFirst: true}
+		svc, unex, hooks := newHooked(t, rec, fakes.UnitOfWork)
+		ctx, tc := tenantCtx(t)
+		p := seedDraft(t, store, tc)
+
+		_, err := svc.Publish(ctx, p.ID, p.Version)
+		assert.True(t, blog.IsStaleVersionError(err), "got %T: %v", err, err)
+		assert.Len(t, rec.savedVersions(), 1, "a caller version is never retried")
+		assert.Empty(t, hooks.Recorded())
+		assert.Zero(t, *unex)
+	})
+}
+
+func TestService_BareIDChecksProject(t *testing.T) {
+	store := fakes.NewBlog()
+	svc, unex, hooks := newHooked(t, store, fakes.UnitOfWork)
+	ctx, tc := tenantCtx(t)
+	sibling := tc
+	sibling.ProjectID = uuid.New()
+	p := seedPublished(t, store, sibling)
+
+	_, err := store.ByID(ctx, p.ID)
+	require.NoError(t, err, "the fake must not filter by project, or this test cannot fail")
+
+	_, err = svc.ByID(ctx, p.ID)
+	assert.True(t, blog.IsNotFoundError(err), "ByID: got %T: %v", err, err)
+	_, err = svc.Publish(ctx, p.ID, 0)
+	assert.True(t, blog.IsNotFoundError(err), "Publish: got %T: %v", err, err)
+	_, err = svc.Unpublish(ctx, p.ID, 0)
+	assert.True(t, blog.IsNotFoundError(err), "Unpublish: got %T: %v", err, err)
+	err = svc.Delete(ctx, p.ID, 0)
+	assert.True(t, blog.IsNotFoundError(err), "Delete: got %T: %v", err, err)
+
+	assert.Equal(t, 1, store.Len())
+	assert.Empty(t, hooks.Recorded())
+	assert.Zero(t, *unex)
+}
+
+func TestService_Locate(t *testing.T) {
+	store := fakes.NewBlog()
+	svc, unex := newSvc(t, store)
+	_, tc := tenantCtx(t)
+	p := seedDraft(t, store, tc)
+
+	orgOnly := tenant.Into(context.Background(), tenant.Context{OrgID: tc.OrgID, UserID: tc.UserID})
+	got, err := svc.Locate(orgOnly, p.ID)
+	require.NoError(t, err)
+	assert.Equal(t, p.ID, got.ID)
+
+	_, err = svc.ByID(orgOnly, p.ID)
+	assert.True(t, blog.IsNotFoundError(err), "ByID keeps the project check: got %T: %v", err, err)
+
+	otherOrg := tenant.Into(context.Background(), tenant.Context{OrgID: uuid.New(), UserID: tc.UserID})
+	_, err = svc.Locate(otherOrg, p.ID)
+	assert.True(t, blog.IsNotFoundError(err), "got %T: %v", err, err)
+	assert.Zero(t, *unex)
 }

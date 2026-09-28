@@ -25,7 +25,7 @@ func NewProject() *Project {
 
 var _ project.Store = (*Project)(nil)
 
-// Save upserts the project by ID; a slug collision inside the same org returns AlreadyExistsError.
+// Save upserts the project by ID; it mirrors the per-org slug and one-system-project unique indexes.
 func (r *Project) Save(_ context.Context, p *project.Project) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -35,6 +35,9 @@ func (r *Project) Save(_ context.Context, p *project.Project) error {
 		}
 		if existing.OrgID == p.OrgID && existing.Slug == p.Slug {
 			return &project.AlreadyExistsError{Field: "slug", Value: p.Slug}
+		}
+		if p.System && existing.System && existing.OrgID == p.OrgID {
+			return &project.SystemProjectExistsError{OrgID: p.OrgID.String(), Slug: p.Slug}
 		}
 	}
 	c := *p

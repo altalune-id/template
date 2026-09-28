@@ -45,6 +45,7 @@ type Config struct {
 	Log           logger.Config       `yaml:"log"           mapstructure:"log"`
 	Telemetry     telemetry.Config    `yaml:"telemetry"     mapstructure:"telemetry"`
 	Scheduler     SchedulerConfig     `yaml:"scheduler"     mapstructure:"scheduler"`
+	Queue         QueueConfig         `yaml:"queue"         mapstructure:"queue"`
 	Observability ObservabilityConfig `yaml:"observability" mapstructure:"observability"`
 	Mail          MailConfig          `yaml:"mail"          mapstructure:"mail"`
 	I18n          I18nConfig          `yaml:"i18n"          mapstructure:"i18n"`
@@ -120,7 +121,7 @@ type TenantConfig struct {
 	RLSEnforce              bool               `yaml:"rlsEnforce"              mapstructure:"rlsEnforce"               awareness:"bootstrap"`
 	SingletonOrg            SingletonOrgConfig `yaml:"singletonOrg"            mapstructure:"singletonOrg"`
 	PersonalOrgSlugFallback string             `yaml:"personalOrgSlugFallback" mapstructure:"personalOrgSlugFallback"`
-	PersonalProjectSlug     string             `yaml:"personalProjectSlug"     mapstructure:"personalProjectSlug"`
+	PersonalProjectSlug     string             `yaml:"personalProjectSlug"     mapstructure:"personalProjectSlug"      awareness:"-"`
 	TenantScopedTables      []string           `yaml:"tenantScopedTables"      mapstructure:"tenantScopedTables"       awareness:"bootstrap"`
 }
 
@@ -217,6 +218,14 @@ type SchedulerJobConfig struct {
 	Timezone string `yaml:"timezone" mapstructure:"timezone" awareness:"-"`
 }
 
+// QueueConfig configures the NATS JetStream connection behind queue.Submit and the consumer.
+type QueueConfig struct {
+	Enabled        bool          `yaml:"enabled"        mapstructure:"enabled"        awareness:"-"`
+	URL            string        `yaml:"url"            mapstructure:"url"            awareness:"secret"`
+	Token          string        `yaml:"token"          mapstructure:"token"          awareness:"secret"`
+	ConnectTimeout time.Duration `yaml:"connectTimeout" mapstructure:"connectTimeout" awareness:"-"      validate:"gte=0"`
+}
+
 // GetTimezone resolves Timezone via time.LoadLocation; empty returns time.UTC.
 func (s *SchedulerConfig) GetTimezone() (*time.Location, error) {
 	if s == nil || s.Timezone == "" {
@@ -286,6 +295,9 @@ func validateInvariants(c *Config) error {
 	if err := validateMCP(c); err != nil {
 		return err
 	}
+	if err := validateQueueNeedsURL(c); err != nil {
+		return err
+	}
 	switch c.Mode {
 	case ModeSelfhosted:
 		if err := validateSelfhosted(c); err != nil {
@@ -350,6 +362,13 @@ func validateCloudGenesisEmail(c *Config) error {
 	return nil
 }
 
+func validateQueueNeedsURL(c *Config) error {
+	if c.Queue.Enabled && c.Queue.URL == "" {
+		return errors.New("config: queue.enabled=true requires queue.url (set ALT_QUEUE_URL)")
+	}
+	return nil
+}
+
 func validatePostgresNeedsEncryptionKey(c *Config) error {
 	if c.DB.Driver == db.DriverPostgres && c.Security.EncryptionKey == "" {
 		return errors.New("config: db.driver=postgres requires security.encryptionKey — 32 bytes hex or base64; without it persisted sessions cannot be sealed and every login fails (set ALT_SECURITY_ENCRYPTION_KEY)")
@@ -379,9 +398,6 @@ func validateCloudGenesisPasswordBreakGlass(c *Config) error {
 }
 
 func validateCloudSingletonOrg(c *Config) error {
-	if c.Tenant.SingletonOrg.Slug == "" {
-		return errors.New("config: mode=cloud requires tenant.singletonOrg.slug — the first organization created at bootstrap (set ALT_TENANT_SINGLETON_ORG_SLUG)")
-	}
 	if c.Tenant.SingletonOrg.Name == "" {
 		return errors.New("config: mode=cloud requires tenant.singletonOrg.name — the display name of the first organization (set ALT_TENANT_SINGLETON_ORG_NAME)")
 	}

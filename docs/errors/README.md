@@ -172,3 +172,16 @@ write's expected version no longer matches. On the data plane the same failure a
 `WWW-Authenticate` and an `mcp.ErrorPayload` body. A failure inside a tool call goes through
 `mcp.TranslateError` instead and carries `GEN002` for a rejected credential, and `GEN003` — the
 scope-denial code, returned by `internal/mcp/auth.go` — for a denied or undeclared scope.
+
+## WHK — Webhooks
+
+| Code     | Constant                                   | Status               | Meaning                        |
+| -------- | ------------------------------------------ | -------------------- | ------------------------------ |
+| `WHK001` | `apperror.CodeWebhookEndpointNotFound`     | `NotFound`           | Webhook Endpoint Not Found     |
+| `WHK002` | `apperror.CodeWebhookInvalidURL`           | `InvalidArgument`    | Webhook Invalid URL            |
+| `WHK003` | `apperror.CodeWebhookInvalidEventTypes`    | `InvalidArgument`    | Webhook Invalid Event Types    |
+| `WHK004` | `apperror.CodeWebhookEndpointLimit`        | `FailedPrecondition` | Webhook Endpoint Limit         |
+| `WHK005` | `apperror.CodeWebhookDeliveryNotRetryable` | `FailedPrecondition` | Webhook Delivery Not Retryable |
+| `WHK006` | `apperror.CodeWebhookDeliveryNotFound`     | `NotFound`           | Webhook Delivery Not Found     |
+| `WHK007` | `apperror.CodeWebhookEndpointInactive`     | `FailedPrecondition` | Webhook Endpoint Inactive      |
+| `WHK008` | `apperror.CodeWebhookSecretConflict`       | `FailedPrecondition` | Webhook Secret Conflict        |

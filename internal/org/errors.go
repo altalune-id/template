@@ -13,8 +13,9 @@ import (
 
 // NotFoundError signals a missing org row.
 type NotFoundError struct {
-	ID   string
-	Slug string
+	ID     string
+	Slug   string
+	System bool
 }
 
 func (e *NotFoundError) Error() string {
@@ -25,6 +26,8 @@ func (e *NotFoundError) Error() string {
 		return fmt.Sprintf("org: not found: slug=%q", e.Slug)
 	case e.ID != "":
 		return fmt.Sprintf("org: not found: id=%s", e.ID)
+	case e.System:
+		return "org: not found: system org"
 	default:
 		return "org: not found"
 	}
@@ -348,4 +351,19 @@ func (e *UnreadableExistingOrgError) Error() string {
 func IsUnreadableExistingOrgError(err error) bool {
 	var target *UnreadableExistingOrgError
 	return errors.As(err, &target)
+}
+
+// SystemOrgExistsError signals a write that would leave more than one system org.
+type SystemOrgExistsError struct {
+	Slug string
+}
+
+func (e *SystemOrgExistsError) Error() string {
+	return fmt.Sprintf("org: a system org already exists; %q cannot be a second one", e.Slug)
+}
+
+// IsSystemOrgExistsError reports whether err's tree contains a *SystemOrgExistsError.
+func IsSystemOrgExistsError(err error) bool {
+	_, ok := errors.AsType[*SystemOrgExistsError](err)
+	return ok
 }

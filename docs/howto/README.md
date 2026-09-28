@@ -17,7 +17,7 @@ Pick the surface first — it decides the mount, the credential and the middlewa
 | add an RPC the console or our own clients call | S2 control plane | [internal-api](internal-api.md) |
 | expose a REST endpoint to a customer's script  | S3 data plane    | [external-api](external-api.md) |
 | receive a webhook from a third party           | S4 ingest        | [webhook-in](webhook-in.md)     |
-| send an event out to a tenant's endpoint       | S5 dispatch      | [webhook-out](webhook-out.md)   |
+| add an event sent to a tenant's endpoint       | S5 dispatch      | [webhook-out](webhook-out.md)   |
 | add a terminal command                         | S6 cli           | [cli-command](cli-command.md)   |
 | let an MCP host call a verb                    | S7 mcp           | [mcp-tool](mcp-tool.md)         |
 
@@ -36,10 +36,11 @@ promise to someone outside.
 
 ## Platform and configuration
 
-| I want to                                           | Recipe                                      |
-| --------------------------------------------------- | ------------------------------------------- |
-| add a cache, queue, rate limiter or background loop | [platform-primitive](platform-primitive.md) |
-| add a config key                                    | [config-key](config-key.md)                 |
+| I want to                                             | Recipe                                      |
+| ----------------------------------------------------- | ------------------------------------------- |
+| add a cache, queue, rate limiter or background loop   | [platform-primitive](platform-primitive.md) |
+| run work on the queue, or broadcast to every instance | [queue-consumer](queue-consumer.md)         |
+| add a config key                                      | [config-key](config-key.md)                 |
 
 ## Errors
 
@@ -64,6 +65,8 @@ wrong. [`multitenancy`](../multitenancy/README.md) is the model;
 | [`surfaces`](../surfaces/README.md)         | surfaces, mounts, credentials, R1–R11      |
 | [`scopes`](../scopes/README.md)             | the scope catalog                          |
 | [`mcp`](../mcp/README.md)                   | the MCP surface                            |
+| [`webhooks`](../webhooks/README.md)         | the webhook receiver contract              |
+| [`queue`](../queue/README.md)               | jobs, broadcasts, retries and the DLQ      |
 | [`modules`](../modules/README.md)           | the domain-module shape                    |
 | [`platform`](../platform/README.md)         | the platform-primitive shape               |
 | [`error codes`](../errors/README.md)        | the code registry and where each travels   |

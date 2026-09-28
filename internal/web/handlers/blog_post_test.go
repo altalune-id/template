@@ -42,7 +42,7 @@ func newBlogFixture(t *testing.T) *blogFixture {
 	f := newFixture(t)
 
 	postStore := fakes.NewBlog()
-	posts := blog.NewService(postStore, discardLogger(), passthroughUnexpected())
+	posts := blog.NewService(postStore, discardLogger(), passthroughUnexpected(), fakes.UnitOfWork, &fakes.Webhooks{})
 	cats := category.NewService(fakes.NewCategory(), discardLogger(), passthroughUnexpected())
 	tags := tag.NewService(fakes.NewTag(), discardLogger(), passthroughUnexpected())
 
