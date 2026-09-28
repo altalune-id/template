@@ -43,6 +43,9 @@ type Attempt struct {
 	Attempt                                               int
 	StatusCode                                            int
 	Error                                                 string
+	ResponseBody                                          string
+	ResponseTruncated                                     bool
+	ResponseHeaders                                       []Header
 	Duration                                              time.Duration
 	CreatedAt                                             time.Time
 }

@@ -68,35 +68,45 @@ func (r *pgEndpointRow) toEndpoint() (*Endpoint, error) {
 }
 
 type pgAttemptRow struct {
-	ID         uuid.UUID `alias:"webhook_deliveries.id"`
-	OrgID      uuid.UUID `alias:"webhook_deliveries.org_id"`
-	ProjectID  uuid.UUID `alias:"webhook_deliveries.project_id"`
-	EndpointID uuid.UUID `alias:"webhook_deliveries.endpoint_id"`
-	DeliveryID uuid.UUID `alias:"webhook_deliveries.delivery_id"`
-	EventID    uuid.UUID `alias:"webhook_deliveries.event_id"`
-	EventType  string    `alias:"webhook_deliveries.event_type"`
-	Attempt    int       `alias:"webhook_deliveries.attempt"`
-	StatusCode int       `alias:"webhook_deliveries.status_code"`
-	Error      string    `alias:"webhook_deliveries.error"`
-	DurationMs int64     `alias:"webhook_deliveries.duration_ms"`
-	CreatedAt  time.Time `alias:"webhook_deliveries.created_at"`
+	ID                uuid.UUID `alias:"webhook_deliveries.id"`
+	OrgID             uuid.UUID `alias:"webhook_deliveries.org_id"`
+	ProjectID         uuid.UUID `alias:"webhook_deliveries.project_id"`
+	EndpointID        uuid.UUID `alias:"webhook_deliveries.endpoint_id"`
+	DeliveryID        uuid.UUID `alias:"webhook_deliveries.delivery_id"`
+	EventID           uuid.UUID `alias:"webhook_deliveries.event_id"`
+	EventType         string    `alias:"webhook_deliveries.event_type"`
+	Attempt           int       `alias:"webhook_deliveries.attempt"`
+	StatusCode        int       `alias:"webhook_deliveries.status_code"`
+	Error             string    `alias:"webhook_deliveries.error"`
+	ResponseBody      string    `alias:"webhook_deliveries.response_body"`
+	ResponseTruncated bool      `alias:"webhook_deliveries.response_truncated"`
+	ResponseHeaders   string    `alias:"webhook_deliveries.response_headers"`
+	DurationMs        int64     `alias:"webhook_deliveries.duration_ms"`
+	CreatedAt         time.Time `alias:"webhook_deliveries.created_at"`
 }
 
-func (r *pgAttemptRow) toAttempt() Attempt {
-	return Attempt{
-		ID:         r.ID,
-		OrgID:      r.OrgID,
-		ProjectID:  r.ProjectID,
-		EndpointID: r.EndpointID,
-		DeliveryID: r.DeliveryID,
-		EventID:    r.EventID,
-		EventType:  events.Type(r.EventType),
-		Attempt:    r.Attempt,
-		StatusCode: r.StatusCode,
-		Error:      r.Error,
-		Duration:   time.Duration(r.DurationMs) * time.Millisecond,
-		CreatedAt:  r.CreatedAt.UTC(),
+func (r *pgAttemptRow) toAttempt() (Attempt, error) {
+	headers, err := unmarshalHeaders(r.ResponseHeaders)
+	if err != nil {
+		return Attempt{}, fmt.Errorf("webhook.postgres: attempt %w", err)
 	}
+	return Attempt{
+		ID:                r.ID,
+		OrgID:             r.OrgID,
+		ProjectID:         r.ProjectID,
+		EndpointID:        r.EndpointID,
+		DeliveryID:        r.DeliveryID,
+		EventID:           r.EventID,
+		EventType:         events.Type(r.EventType),
+		Attempt:           r.Attempt,
+		StatusCode:        r.StatusCode,
+		Error:             r.Error,
+		ResponseBody:      r.ResponseBody,
+		ResponseTruncated: r.ResponseTruncated,
+		ResponseHeaders:   headers,
+		Duration:          time.Duration(r.DurationMs) * time.Millisecond,
+		CreatedAt:         r.CreatedAt.UTC(),
+	}, nil
 }
 
 func (s *postgresStore) txAcquire(ctx context.Context) (*sql.Tx, bool, tenant.Context, error) {
@@ -318,10 +328,15 @@ func (s *postgresStore) saveAttempt(ctx context.Context, tx *sql.Tx, tc tenant.C
 	if err != nil {
 		return err
 	}
+	headers, err := marshalHeaders(a.ResponseHeaders)
+	if err != nil {
+		return err
+	}
 	stmt := s.attempts.INSERT(s.attempts.AllColumns).
 		VALUES(
 			a.ID, a.OrgID, a.ProjectID, a.EndpointID, a.DeliveryID, a.EventID,
 			string(a.EventType), a.Attempt, a.StatusCode, a.Error,
+			a.ResponseBody, a.ResponseTruncated, headers,
 			a.Duration.Milliseconds(), a.CreatedAt,
 		)
 	if _, err := stmt.ExecContext(ctx, tx); err != nil {
@@ -353,7 +368,11 @@ func (s *postgresStore) ListAttempts(ctx context.Context, endpointID, deliveryID
 	}
 	out := make([]Attempt, 0, len(rows))
 	for i := range rows {
-		out = append(out, rows[i].toAttempt())
+		a, err := rows[i].toAttempt()
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, a)
 	}
 	return out, nil
 }

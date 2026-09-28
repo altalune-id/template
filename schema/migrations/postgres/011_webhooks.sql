@@ -30,6 +30,9 @@ CREATE TABLE {{.Schema}}.{{.TablePrefix}}webhook_deliveries (
   attempt             INTEGER NOT NULL,
   status_code         INTEGER NOT NULL DEFAULT 0,
   error               TEXT NOT NULL DEFAULT '',
+  response_body       TEXT NOT NULL DEFAULT '',
+  response_truncated  BOOLEAN NOT NULL DEFAULT false,
+  response_headers    TEXT NOT NULL DEFAULT '[]',
   duration_ms         INTEGER NOT NULL,
   created_at          TIMESTAMPTZ NOT NULL
 );

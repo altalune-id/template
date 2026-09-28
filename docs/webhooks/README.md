@@ -176,6 +176,7 @@ After attempt 8 the delivery is `failed` and stays in the console. Source: `outb
 - A `pending` or `delivered` delivery cannot be retried (`WHK005`): no race with the automatic retry.
 - A retried delivery reuses its delivery id: if you already processed it, answer 2xx.
 - Each delivery's row shows the exact body sent and its headers; the timestamp and signature are per attempt and not stored.
+- Each attempt keeps your response: the first 4 KiB of the body (`webhook.MaxResponseBodyBytes`) and its headers, minus cookies and credential-like headers.
 
 ## Rotation
 

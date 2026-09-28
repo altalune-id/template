@@ -5,9 +5,11 @@ import (
 	"io"
 	"log/slog"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -108,7 +110,27 @@ func newAttempt(tc tenant.Context, endpointID, deliveryID uuid.UUID, n int, at t
 		Error:      "boom",
 		Duration:   1234 * time.Millisecond,
 		CreatedAt:  at,
+
+		ResponseBody:      `{"error":"<b>x</b>"}`,
+		ResponseTruncated: true,
+		ResponseHeaders:   []webhook.Header{{Name: "Content-Type", Value: "application/json"}, {Name: "X-Request-Id", Value: "req_1"}},
 	}
+}
+
+func assertSameResponse(t *testing.T, want, got webhook.Attempt) {
+	t.Helper()
+	assert.Equal(t, want.ResponseBody, got.ResponseBody)
+	assert.Equal(t, want.ResponseTruncated, got.ResponseTruncated)
+	assert.Equal(t, want.ResponseHeaders, got.ResponseHeaders)
+}
+
+func noResponse(a webhook.Attempt) webhook.Attempt {
+	a.StatusCode = 0
+	a.Error = "dial tcp: connection refused"
+	a.ResponseBody = ""
+	a.ResponseTruncated = false
+	a.ResponseHeaders = nil
+	return a
 }
 
 func assertSameEndpoint(t *testing.T, want, got *webhook.Endpoint) {
@@ -258,9 +280,7 @@ func TestSQLite_SaveAttemptAndListAttempts(t *testing.T) {
 	delivery, otherDelivery := uuid.New(), uuid.New()
 	base := time.Date(2026, 2, 1, 12, 0, 0, 0, time.UTC)
 	first := newAttempt(tc, e.ID, delivery, 1, base)
-	second := newAttempt(tc, e.ID, delivery, 2, base.Add(30*time.Second))
-	second.StatusCode = 0
-	second.Error = "dial tcp: connection refused"
+	second := noResponse(newAttempt(tc, e.ID, delivery, 2, base.Add(30*time.Second)))
 	for _, a := range []webhook.Attempt{
 		first, second,
 		newAttempt(tc, e.ID, otherDelivery, 1, base),
@@ -289,6 +309,10 @@ func TestSQLite_SaveAttemptAndListAttempts(t *testing.T) {
 	assert.True(t, first.CreatedAt.Equal(a.CreatedAt))
 	assert.Equal(t, time.UTC, a.CreatedAt.Location())
 	assert.Equal(t, "dial tcp: connection refused", got[0].Error)
+	assertSameResponse(t, first, a)
+	assert.Empty(t, got[0].ResponseBody)
+	assert.False(t, got[0].ResponseTruncated)
+	assert.Empty(t, got[0].ResponseHeaders)
 }
 
 func TestSQLite_SaveAttemptFillsIDAndTimeAndTruncatesError(t *testing.T) {
@@ -336,4 +360,55 @@ func TestSQLite_SaveAttemptRefusesAnotherScope(t *testing.T) {
 	got, err := store.ListAttempts(ctx, e.ID, delivery)
 	require.NoError(t, err)
 	assert.Empty(t, got, "a refused attempt must not land")
+}
+
+func TestSQLite_SaveAttemptBoundsAndCleansTheResponse(t *testing.T) {
+	store, _, tc := newSQLiteStore(t)
+	ctx := tenant.Into(t.Context(), tc)
+	e := newSealedEndpoint(t, tc)
+	require.NoError(t, store.Save(ctx, e))
+
+	manyHeaders := make([]webhook.Header, 0, webhook.MaxResponseHeaders*2)
+	for i := range webhook.MaxResponseHeaders * 2 {
+		manyHeaders = append(manyHeaders, webhook.Header{Name: "X-Filler-" + strconv.Itoa(i), Value: "v"})
+	}
+	cases := []struct {
+		name          string
+		body          string
+		headers       []webhook.Header
+		wantBody      string
+		wantTruncated bool
+		wantHeaders   int
+	}{
+		{name: "NUL and invalid UTF-8", body: "ok\x00\xffend", wantBody: "ok��end"},
+		{name: "oversized body", body: strings.Repeat("a", webhook.MaxResponseBodyBytes*2), wantBody: strings.Repeat("a", webhook.MaxResponseBodyBytes), wantTruncated: true},
+		{name: "cleaning grows the body past the cap", body: strings.Repeat("\x00", webhook.MaxResponseBodyBytes/2), wantTruncated: true},
+		{name: "credential header dropped", headers: []webhook.Header{{Name: "Set-Cookie", Value: "s=1"}, {Name: "X-Ok", Value: "\x00"}}, wantHeaders: 1},
+		{name: "header count capped", headers: manyHeaders, wantHeaders: webhook.MaxResponseHeaders},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			delivery := uuid.New()
+			a := newAttempt(tc, e.ID, delivery, 1, time.Now())
+			a.ResponseBody, a.ResponseTruncated, a.ResponseHeaders = c.body, false, c.headers
+			require.NoError(t, store.SaveAttempt(ctx, a))
+
+			got, err := store.ListAttempts(ctx, e.ID, delivery)
+			require.NoError(t, err)
+			require.Len(t, got, 1)
+			r := got[0]
+			assert.True(t, utf8.ValidString(r.ResponseBody))
+			assert.NotContains(t, r.ResponseBody, "\x00")
+			assert.LessOrEqual(t, len(r.ResponseBody), webhook.MaxResponseBodyBytes)
+			if c.wantBody != "" {
+				assert.Equal(t, c.wantBody, r.ResponseBody)
+			}
+			assert.Equal(t, c.wantTruncated, r.ResponseTruncated)
+			assert.Len(t, r.ResponseHeaders, c.wantHeaders)
+			for _, h := range r.ResponseHeaders {
+				assert.NotContains(t, h.Value, "\x00")
+				assert.NotEqual(t, "Set-Cookie", h.Name)
+			}
+		})
+	}
 }

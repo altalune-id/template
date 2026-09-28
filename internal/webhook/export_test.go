@@ -23,3 +23,5 @@ func SealSecret(sl sealer.Sealer, endpointID uuid.UUID, slot, secret string) ([]
 func OpenSecret(sl sealer.Sealer, endpointID uuid.UUID, slot string, sealed []byte) (string, error) {
 	return openSecret(sl, endpointID, slot, sealed)
 }
+
+const ResponseDrainLimit = responseDrainLimit

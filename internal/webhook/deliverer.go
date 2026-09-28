@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -23,19 +22,21 @@ import (
 	"altalune.id/template/internal/platform/tenant"
 )
 
+// Delivery header names a receiver reads.
+const (
+	HeaderEventID    = "X-Altempl-Event-Id"
+	HeaderEventType  = "X-Altempl-Event-Type"
+	HeaderDeliveryID = "X-Altempl-Delivery-Id"
+	HeaderTimestamp  = "X-Altempl-Timestamp"
+	HeaderSignature  = "X-Altempl-Signature"
+)
+
 const (
 	headerContentType = "Content-Type"
 	headerUserAgent   = "User-Agent"
-	headerEventID     = "X-Altempl-Event-Id"
-	headerEventType   = "X-Altempl-Event-Type"
-	headerDeliveryID  = "X-Altempl-Delivery-Id"
-	headerTimestamp   = "X-Altempl-Timestamp"
-	headerSignature   = "X-Altempl-Signature"
 
 	contentTypeJSON = "application/json"
 	userAgent       = "Altempl-Webhooks/1"
-
-	responseDrainLimit = 1 << 10
 
 	attemptSaveTimeout = 5 * time.Second
 )
@@ -55,9 +56,9 @@ func DeliveryHeaders(d Delivery) []Header {
 
 func deliveryHeaders(e outbox.Entry, eventType events.Type) []Header {
 	return []Header{
-		{Name: headerEventID, Value: eventIDPrefix + e.EventID.String()},
-		{Name: headerEventType, Value: string(eventType)},
-		{Name: headerDeliveryID, Value: deliveryIDPrefix + e.ID.String()},
+		{Name: HeaderEventID, Value: eventIDPrefix + e.EventID.String()},
+		{Name: HeaderEventType, Value: string(eventType)},
+		{Name: HeaderDeliveryID, Value: deliveryIDPrefix + e.ID.String()},
 		{Name: headerContentType, Value: contentTypeJSON},
 		{Name: headerUserAgent, Value: userAgent},
 	}
@@ -132,18 +133,21 @@ func (d *Deliverer) deliver(ctx context.Context, e outbox.Entry) error {
 	}
 
 	start := time.Now()
-	status, sendErr := d.post(ctx, ep.URL, e, eventType, secrets)
+	rc, sendErr := d.post(ctx, ep.URL, e, eventType, secrets)
 	d.saveAttempt(ctx, Attempt{
-		OrgID:      e.OrgID,
-		ProjectID:  e.ProjectID,
-		EndpointID: ep.ID,
-		DeliveryID: e.ID,
-		EventID:    e.EventID,
-		EventType:  eventType,
-		Attempt:    e.Attempt,
-		StatusCode: status,
-		Error:      errorText(sendErr),
-		Duration:   time.Since(start),
+		OrgID:             e.OrgID,
+		ProjectID:         e.ProjectID,
+		EndpointID:        ep.ID,
+		DeliveryID:        e.ID,
+		EventID:           e.EventID,
+		EventType:         eventType,
+		Attempt:           e.Attempt,
+		StatusCode:        rc.status,
+		Error:             errorText(sendErr),
+		ResponseBody:      rc.body,
+		ResponseTruncated: rc.truncated,
+		ResponseHeaders:   rc.headers,
+		Duration:          time.Since(start),
 	}, e)
 	return sendErr
 }
@@ -163,10 +167,10 @@ func (d *Deliverer) openSecrets(ep *Endpoint) ([]string, error) {
 	return []string{primary, secondary}, nil
 }
 
-func (d *Deliverer) post(ctx context.Context, endpointURL string, e outbox.Entry, eventType events.Type, secrets []string) (int, error) {
+func (d *Deliverer) post(ctx context.Context, endpointURL string, e outbox.Entry, eventType events.Type, secrets []string) (receipt, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpointURL, bytes.NewReader(e.Payload))
 	if err != nil {
-		return 0, fmt.Errorf("webhook.Deliver: build request: %w", err)
+		return receipt{}, fmt.Errorf("webhook.Deliver: build request: %w", err)
 	}
 	timestamp := strconv.FormatInt(time.Now().Unix(), 10)
 	signatures := make([]string, len(secrets))
@@ -176,19 +180,19 @@ func (d *Deliverer) post(ctx context.Context, endpointURL string, e outbox.Entry
 	for _, h := range deliveryHeaders(e, eventType) {
 		req.Header.Set(h.Name, h.Value)
 	}
-	req.Header.Set(headerTimestamp, timestamp)
-	req.Header.Set(headerSignature, strings.Join(signatures, " "))
+	req.Header.Set(HeaderTimestamp, timestamp)
+	req.Header.Set(HeaderSignature, strings.Join(signatures, " "))
 
 	resp, err := d.client.Do(req)
 	if err != nil {
-		return 0, fmt.Errorf("webhook.Deliver: post: %w", err)
+		return receipt{}, fmt.Errorf("webhook.Deliver: post: %w", err)
 	}
-	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, responseDrainLimit))
+	rc := readReceipt(resp)
 	_ = resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		return resp.StatusCode, &DeliveryFailedError{StatusCode: resp.StatusCode}
+	if rc.status < 200 || rc.status > 299 {
+		return rc, &DeliveryFailedError{StatusCode: rc.status}
 	}
-	return resp.StatusCode, nil
+	return rc, nil
 }
 
 func (d *Deliverer) saveAttempt(ctx context.Context, a Attempt, e outbox.Entry) {

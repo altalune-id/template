@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -492,4 +493,192 @@ func TestDeliverer_LogsNeverCarryTheEndpointURL(t *testing.T) {
 	attempts := x.store.Attempts()
 	require.Len(t, attempts, 1)
 	assert.NotEmpty(t, attempts[0].Error)
+}
+
+func respondingReceiver(t *testing.T, status int, headers http.Header, body []byte) *httptest.Server {
+	t.Helper()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/hook", func(w http.ResponseWriter, req *http.Request) {
+		_, _ = io.Copy(io.Discard, req.Body)
+		for name, values := range headers {
+			w.Header()[name] = values
+		}
+		w.WriteHeader(status)
+		_, _ = w.Write(body)
+	})
+	srv := httptest.NewTLSServer(mux)
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func deliverOnce(t *testing.T, srv *httptest.Server, client *http.Client) webhook.Attempt {
+	t.Helper()
+	x := newDelivery(t, client)
+	e, _ := x.endpoint(t, srv.URL+"/hook")
+	_ = x.d.Deliver(x.orgCtx(t), x.entry(t, e))
+	attempts := x.store.Attempts()
+	require.Len(t, attempts, 1)
+	return attempts[0]
+}
+
+func headerValue(hs []webhook.Header, name string) (string, bool) {
+	for _, h := range hs {
+		if strings.EqualFold(h.Name, name) {
+			return h.Value, true
+		}
+	}
+	return "", false
+}
+
+func TestDeliverer_RecordsASmallResponseWhole(t *testing.T) {
+	srv := respondingReceiver(t, http.StatusOK, http.Header{"X-Request-Id": {"req_1"}}, []byte(`{"ok":true}`))
+
+	a := deliverOnce(t, srv, srv.Client())
+
+	assert.Equal(t, `{"ok":true}`, a.ResponseBody)
+	assert.False(t, a.ResponseTruncated)
+	v, ok := headerValue(a.ResponseHeaders, "X-Request-Id")
+	assert.True(t, ok)
+	assert.Equal(t, "req_1", v)
+}
+
+func TestDeliverer_RecordsTheResponseOfAFailedAttempt(t *testing.T) {
+	srv := respondingReceiver(t, http.StatusBadRequest, nil, []byte("bad signature"))
+
+	a := deliverOnce(t, srv, srv.Client())
+
+	assert.Equal(t, http.StatusBadRequest, a.StatusCode)
+	assert.Equal(t, "bad signature", a.ResponseBody)
+	assert.NotEmpty(t, a.Error)
+}
+
+func TestDeliverer_TruncatesALargeResponseBody(t *testing.T) {
+	srv := respondingReceiver(t, http.StatusOK, nil, bytes.Repeat([]byte("a"), webhook.MaxResponseBodyBytes*3))
+
+	a := deliverOnce(t, srv, srv.Client())
+
+	assert.Len(t, a.ResponseBody, webhook.MaxResponseBodyBytes)
+	assert.True(t, a.ResponseTruncated)
+}
+
+func TestDeliverer_BodyOfExactlyTheCapIsNotTruncated(t *testing.T) {
+	srv := respondingReceiver(t, http.StatusOK, nil, bytes.Repeat([]byte("a"), webhook.MaxResponseBodyBytes))
+
+	a := deliverOnce(t, srv, srv.Client())
+
+	assert.Len(t, a.ResponseBody, webhook.MaxResponseBodyBytes)
+	assert.False(t, a.ResponseTruncated)
+}
+
+func TestDeliverer_DropsCredentialResponseHeaders(t *testing.T) {
+	srv := respondingReceiver(t, http.StatusOK, http.Header{
+		"Set-Cookie":         {"session=secret"},
+		"Authorization":      {"Bearer secret"},
+		"Www-Authenticate":   {"Basic realm=secret"},
+		"Proxy-Authenticate": {"Basic secret"},
+		"X-Api-Key":          {"secret"},
+		"X-Auth-Token":       {"secret"},
+		"X-Trace":            {"kept"},
+	}, nil)
+
+	a := deliverOnce(t, srv, srv.Client())
+
+	for _, h := range a.ResponseHeaders {
+		assert.NotContains(t, h.Value, "secret", "header %s leaked", h.Name)
+	}
+	_, ok := headerValue(a.ResponseHeaders, "X-Trace")
+	assert.True(t, ok)
+}
+
+func TestDeliverer_BoundsResponseHeaders(t *testing.T) {
+	headers := http.Header{}
+	for i := range webhook.MaxResponseHeaders * 2 {
+		headers.Set("X-Filler-"+strconv.Itoa(i), strings.Repeat("v", 200))
+	}
+	srv := respondingReceiver(t, http.StatusOK, headers, nil)
+
+	a := deliverOnce(t, srv, srv.Client())
+
+	assert.LessOrEqual(t, len(a.ResponseHeaders), webhook.MaxResponseHeaders)
+	total := 0
+	for _, h := range a.ResponseHeaders {
+		total += len(h.Name) + len(h.Value)
+	}
+	assert.LessOrEqual(t, total, webhook.MaxResponseHeaderBytes)
+	assert.NotEmpty(t, a.ResponseHeaders)
+}
+
+func TestDeliverer_SanitizesInvalidUTF8AndNUL(t *testing.T) {
+	srv := respondingReceiver(t, http.StatusOK, nil, []byte("ok\xff\xfe\x00end"))
+
+	a := deliverOnce(t, srv, srv.Client())
+
+	assert.True(t, utf8.ValidString(a.ResponseBody))
+	assert.NotContains(t, a.ResponseBody, "\x00")
+	assert.True(t, strings.HasPrefix(a.ResponseBody, "ok"))
+	assert.True(t, strings.HasSuffix(a.ResponseBody, "end"))
+}
+
+func TestDeliverer_TruncationNeverSplitsARune(t *testing.T) {
+	body := append(bytes.Repeat([]byte("a"), webhook.MaxResponseBodyBytes-1), []byte("€€€")...)
+	srv := respondingReceiver(t, http.StatusOK, nil, body)
+
+	a := deliverOnce(t, srv, srv.Client())
+
+	assert.True(t, utf8.ValidString(a.ResponseBody))
+	assert.Equal(t, strings.Repeat("a", webhook.MaxResponseBodyBytes-1), a.ResponseBody)
+	assert.True(t, a.ResponseTruncated)
+}
+
+type countingTransport struct {
+	base http.RoundTripper
+	read *atomic.Int64
+}
+
+func (c countingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	resp, err := c.base.RoundTrip(req)
+	if err != nil {
+		return nil, err
+	}
+	resp.Body = countingBody{ReadCloser: resp.Body, read: c.read}
+	return resp, nil
+}
+
+type countingBody struct {
+	io.ReadCloser
+	read *atomic.Int64
+}
+
+func (b countingBody) Read(p []byte) (int, error) {
+	n, err := b.ReadCloser.Read(p)
+	b.read.Add(int64(n))
+	return n, err
+}
+
+func TestDeliverer_NeverReadsAHugeResponseFully(t *testing.T) {
+	const huge = 10 << 20
+	srv := respondingReceiver(t, http.StatusOK, nil, bytes.Repeat([]byte("a"), huge))
+	read := &atomic.Int64{}
+	client := srv.Client()
+	client.Transport = countingTransport{base: client.Transport, read: read}
+
+	a := deliverOnce(t, srv, client)
+
+	assert.True(t, a.ResponseTruncated)
+	assert.LessOrEqual(t, read.Load(), int64(webhook.MaxResponseBodyBytes+webhook.ResponseDrainLimit+1))
+}
+
+func TestDeliverer_AnOversizedHeaderDoesNotDropTheRest(t *testing.T) {
+	srv := respondingReceiver(t, http.StatusOK, http.Header{
+		"A-Huge-Policy": {strings.Repeat("p", webhook.MaxResponseHeaderBytes)},
+		"X-Request-Id":  {"req_1"},
+	}, nil)
+
+	a := deliverOnce(t, srv, srv.Client())
+
+	_, huge := headerValue(a.ResponseHeaders, "A-Huge-Policy")
+	assert.False(t, huge, "a header over the byte budget is skipped")
+	v, ok := headerValue(a.ResponseHeaders, "X-Request-Id")
+	assert.True(t, ok, "headers after an oversized one are still kept")
+	assert.Equal(t, "req_1", v)
 }

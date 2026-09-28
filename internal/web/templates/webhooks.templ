@@ -21,6 +21,7 @@ type WebhooksView struct {
 	ProjectSlug string
 	Items       []WebhookRow
 	Limit       int
+	Guide       WebhookGuideView
 }
 
 templ webhookEphemeralBanner(d web.LayoutData) {
@@ -107,6 +108,7 @@ templ WebhooksPage(d web.LayoutData, v WebhooksView) {
 				</li>
 			}
 		</ul>
+		@WebhookGuide(d, v.Guide)
 	</section>
 }
 

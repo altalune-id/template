@@ -190,7 +190,7 @@ func TestPostgres_SaveAttemptAndListAttempts(t *testing.T) {
 	delivery, otherDelivery := uuid.New(), uuid.New()
 	base := time.Date(2026, 2, 1, 12, 0, 0, 0, time.UTC)
 	first := newAttempt(f.tc, e.ID, delivery, 1, base)
-	second := newAttempt(f.tc, e.ID, delivery, 2, base.Add(30*time.Second))
+	second := noResponse(newAttempt(f.tc, e.ID, delivery, 2, base.Add(30*time.Second)))
 	for _, a := range []webhook.Attempt{
 		first, second,
 		newAttempt(f.tc, e.ID, otherDelivery, 1, base),
@@ -210,6 +210,10 @@ func TestPostgres_SaveAttemptAndListAttempts(t *testing.T) {
 	assert.Equal(t, "boom", got[1].Error)
 	assert.Equal(t, 1234*time.Millisecond, got[1].Duration)
 	assert.True(t, first.CreatedAt.Equal(got[1].CreatedAt))
+	assertSameResponse(t, first, got[1])
+	assert.Empty(t, got[0].ResponseBody)
+	assert.False(t, got[0].ResponseTruncated)
+	assert.Empty(t, got[0].ResponseHeaders)
 }
 
 func TestPostgres_SaveAttemptTruncatesErrorToValidUTF8(t *testing.T) {

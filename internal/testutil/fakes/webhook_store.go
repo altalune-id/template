@@ -178,6 +178,7 @@ func (f *WebhookStore) SaveAttempt(ctx context.Context, a webhook.Attempt) error
 	}
 	a.CreatedAt = a.CreatedAt.UTC()
 	a.Error = apperror.TruncateCause(a.Error, outbox.MaxCauseLen)
+	a = webhook.BoundResponse(a)
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	// NOTE: mirrors the endpoint FK, which both real stores report as *NotFoundError.

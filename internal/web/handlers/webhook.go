@@ -68,6 +68,7 @@ func (h *WebhookHandler) GetWebhooks(w http.ResponseWriter, r *http.Request) {
 		ProjectSlug: sc.project.Slug,
 		Items:       rows,
 		Limit:       webhook.MaxEndpointsPerProject,
+		Guide:       webhookGuide(len(rows) == 0),
 	}
 	Render(w, sc.req, templates.WebhooksLayout(h.layout(sc, "Webhooks · "+sc.project.Name), v))
 }
@@ -223,6 +224,7 @@ func (h *WebhookHandler) GetWebhookDelivery(w http.ResponseWriter, r *http.Reque
 			Error:      a.Error,
 			Duration:   a.Duration.Round(time.Millisecond).String(),
 			CreatedAt:  a.CreatedAt.UTC().Format(time.RFC3339),
+			Response:   responseView(a),
 		})
 	}
 	Render(w, sc.req, templates.WebhookDeliveryDetail(h.ProjectFragmentBase(sc), payloadView(d), rows, outbox.MaxAttempts))
@@ -341,12 +343,21 @@ func (h *WebhookHandler) writeDetail(w http.ResponseWriter, sc ProjectScope, e *
 		form = *o.form
 	}
 	form.ProjectSlug, form.Error = sc.project.Slug, o.err
+	guide := webhookGuide(false)
+	snippets, err := webhook.VerifySnippets()
+	if err != nil {
+		h.LogErr("web webhook: verify snippets", err)
+	}
+	for _, s := range snippets {
+		guide.Snippets = append(guide.Snippets, templates.WebhookSnippet{Lang: s.Lang, Label: s.Label, Code: s.Code})
+	}
 	v := templates.WebhookDetailView{
 		ProjectSlug: sc.project.Slug,
 		Endpoint:    webhookRow(e),
 		Secret:      o.secret,
 		Form:        form,
 		Deliveries:  deliveries,
+		Guide:       guide,
 	}
 	if web.IsHTMXRequest(sc.req) {
 		Render(w, sc.req, templates.WebhookDetailPage(h.ProjectFragmentBase(sc), v))
@@ -395,6 +406,31 @@ func (h *WebhookHandler) deliveriesView(sc ProjectScope, e *webhook.Endpoint) (t
 		v.Items = append(v.Items, row)
 	}
 	return v, nil
+}
+
+func webhookGuide(open bool) templates.WebhookGuideView {
+	first, longest, total := retrySchedule()
+	return templates.WebhookGuideView{
+		EventIDHeader:    webhook.HeaderEventID,
+		DeliveryIDHeader: webhook.HeaderDeliveryID,
+		TimestampHeader:  webhook.HeaderTimestamp,
+		SignatureHeader:  webhook.HeaderSignature,
+		MaxAttempts:      outbox.MaxAttempts,
+		TotalRetryHours:  int(total.Round(time.Hour) / time.Hour),
+		FirstWaitSeconds: int(first / time.Second),
+		LongestWaitHours: int(longest.Round(time.Hour) / time.Hour),
+		Open:             open,
+	}
+}
+
+func retrySchedule() (first, longest, total time.Duration) { //nolint:nonamedreturns // three durations differ in role
+	first = outbox.BackoffBase(2)
+	for attempt := 2; attempt <= outbox.MaxAttempts; attempt++ {
+		wait := outbox.BackoffBase(attempt)
+		longest = max(longest, wait)
+		total += wait
+	}
+	return first, longest, total
 }
 
 func (h *WebhookHandler) layout(sc ProjectScope, title string) web.LayoutData {
@@ -485,13 +521,26 @@ func payloadView(d webhook.Delivery) templates.WebhookPayloadView {
 	if d.EventType == "" {
 		return v
 	}
-	headers := webhook.DeliveryHeaders(d)
+	v.Headers = headerRows(webhook.DeliveryHeaders(d))
+	return v
+}
+
+func responseView(a webhook.Attempt) templates.WebhookResponseView {
+	return templates.WebhookResponseView{
+		Body:      a.ResponseBody,
+		Pretty:    prettyPayload([]byte(a.ResponseBody)),
+		Truncated: a.ResponseTruncated,
+		LimitKiB:  webhook.MaxResponseBodyBytes >> 10,
+		Headers:   headerRows(a.ResponseHeaders),
+	}
+}
+
+func headerRows(headers []webhook.Header) []templates.WebhookHeaderRow {
 	rows := make([]templates.WebhookHeaderRow, len(headers))
 	for i, hd := range headers {
 		rows[i] = templates.WebhookHeaderRow{Name: hd.Name, Value: hd.Value}
 	}
-	v.Headers = rows
-	return v
+	return rows
 }
 
 func prettyPayload(b []byte) string {

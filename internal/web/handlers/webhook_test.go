@@ -13,6 +13,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -22,6 +23,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"altalune.id/template/internal/apperror"
+	"altalune.id/template/internal/i18n"
 	"altalune.id/template/internal/platform/events"
 	"altalune.id/template/internal/platform/outbox"
 	"altalune.id/template/internal/platform/sealer"
@@ -672,4 +674,114 @@ func TestWebhookErrorRules(t *testing.T) {
 	assert.Equal(t, "webhooks.error.failed", key)
 	assert.False(t, refusal)
 	assert.Zero(t, maxLen)
+}
+
+// TestWebhookHandler_IntegrationGuide opens the steps on an empty list and puts the verifiers on the endpoint page.
+func TestWebhookHandler_IntegrationGuide(t *testing.T) {
+	t.Parallel()
+	x := newWebhookFixture(t, false)
+
+	rec := x.do(t, http.MethodGet, webhookBase, nil)
+	require.Equal(t, http.StatusOK, rec.Code)
+	body := rec.Body.String()
+	assert.Contains(t, body, `data-webhook-guide open`, "an empty project lands on the open guide")
+	assert.Contains(t, body, "webhooks.guide_step_secret")
+	assert.Contains(t, body, webhook.HeaderDeliveryID)
+	assert.Contains(t, body, webhook.HeaderEventID)
+	assert.NotContains(t, body, "data-webhook-verify")
+
+	e := x.create(t)
+	rec = x.do(t, http.MethodGet, webhookBase, nil)
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Contains(t, rec.Body.String(), "data-webhook-guide")
+	assert.NotContains(t, rec.Body.String(), `data-webhook-guide open`, "the guide folds away once an endpoint exists")
+
+	rec = x.do(t, http.MethodGet, webhookBase+"/"+e.ID.String(), nil)
+	require.Equal(t, http.StatusOK, rec.Code)
+	body = rec.Body.String()
+	assert.Contains(t, body, `<details data-webhook-verify class=`, "the verify section is a collapsed <details>")
+	assert.Regexp(t, `<details data-webhook-verify[^>]*><summary[^>]*>webhooks.verify_heading</summary>`, body, "the summary is the section heading")
+	assert.NotContains(t, body, `<details data-webhook-verify open`)
+	assert.Regexp(t, `<nav role="tablist"[^>]*>`, body, "languages switch through a tab bar")
+	assert.NotContains(t, body, `name="webhook-verify-lang"`, "a language is a tab, not a <details>")
+	snippets, err := webhook.VerifySnippets()
+	require.NoError(t, err)
+	require.NotEmpty(t, snippets)
+	for i, s := range snippets {
+		tab := regexp.MustCompile(`<button type="button" role="tab" id="webhook-verify-tab-` + s.Lang + `" aria-controls="webhook-verify-panel-` + s.Lang + `" aria-selected="` + strconv.FormatBool(i == 0) + `"`)
+		assert.Regexp(t, tab, body, "%s tab", s.Lang)
+		assert.Contains(t, body, html.EscapeString(s.Code), "%s snippet renders escaped in <code>", s.Lang)
+	}
+	panels := regexp.MustCompile(`<div role="tabpanel"[^>]*>`).FindAllString(body, -1)
+	require.Len(t, panels, len(snippets))
+	visible := 0
+	for _, p := range panels {
+		if !strings.Contains(p, " hidden") {
+			visible++
+			assert.Contains(t, p, `data-snippet="`+webhook.SnippetGo+`"`, "Go shows first, with or without JS")
+		}
+	}
+	assert.Equal(t, 1, visible, "exactly one panel is visible")
+	assert.Contains(t, body, "window.altemplTabsBound", "the tab switcher script ships nonced with the panel")
+	assert.Contains(t, body, "(function() {\n\tif (window.altemplTabsBound) return;", "the tab switcher keeps its helpers out of window")
+	for _, h := range []string{webhook.HeaderTimestamp, webhook.HeaderSignature, webhook.HeaderDeliveryID, webhook.HeaderEventID} {
+		assert.Contains(t, body, ">"+h+"</code>", "%s is quoted from the webhook constant", h)
+	}
+}
+
+func TestWebhookHandler_DeliveryShowsEachAttemptsResponse(t *testing.T) {
+	t.Parallel()
+	x := newWebhookFixture(t, false)
+	e := x.create(t)
+	require.NoError(t, x.Hooks.SendTest(x.ctx(), e.ID))
+	entry := x.Outbox.Entries()[0]
+
+	base := time.Now().Add(-time.Hour)
+	for i, a := range []webhook.Attempt{
+		{Attempt: 1, Error: "dial tcp: connection refused"},
+		{Attempt: 2, StatusCode: 500, ResponseBody: "<b>x</b>", ResponseTruncated: true,
+			ResponseHeaders: []webhook.Header{{Name: "X-Request-Id", Value: "<i>req_1</i>"}}},
+		{Attempt: 3, StatusCode: 204},
+		{Attempt: 4, StatusCode: 200, ResponseBody: `{"ok":true}`},
+	} {
+		a.OrgID, a.ProjectID, a.EndpointID, a.DeliveryID, a.EventID = x.org, x.project.ID, e.ID, entry.ID, entry.EventID
+		a.EventType = events.WebhookPing
+		a.CreatedAt = base.Add(time.Duration(i) * time.Minute)
+		require.NoError(t, x.Store.SaveAttempt(x.ctx(), a))
+	}
+
+	rec := x.do(t, http.MethodGet, webhookBase+"/"+e.ID.String()+"/deliveries/"+entry.ID.String(), nil)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	body := rec.Body.String()
+
+	assert.Equal(t, 3, strings.Count(body, "data-attempt-response"), "an attempt without a response shows only its error")
+	assert.Contains(t, body, "&lt;b&gt;x&lt;/b&gt;", "the response body is escaped")
+	assert.NotContains(t, body, "<b>x</b>")
+	assert.Contains(t, body, "X-Request-Id")
+	assert.Contains(t, body, "&lt;i&gt;req_1&lt;/i&gt;", "header values are escaped")
+	assert.NotContains(t, body, "<i>req_1</i>")
+	assert.Equal(t, 1, strings.Count(body, "webhooks.response_truncated"), body)
+	assert.Equal(t, 1, strings.Count(body, "webhooks.response_empty"), body)
+	assert.Contains(t, html.UnescapeString(body), "{\n  \"ok\": true\n}", "a JSON response is pretty-printed")
+	assert.Contains(t, html.UnescapeString(body), `data-copy="<b>x</b>"`, "the copy button carries the raw body")
+	assert.Contains(t, body, "dial tcp: connection refused")
+}
+
+func TestWebhookCopy_NumbersComeFromParams(t *testing.T) {
+	t.Parallel()
+	b := i18n.NewEmbeddedBundle(i18n.EnUS)
+	for _, loc := range b.All() {
+		tr := b.For(loc)
+		truncated := tr.T("webhooks.response_truncated", "KiB", 97)
+		assert.Contains(t, truncated, "97", "%s: the cap comes from MaxResponseBodyBytes", loc)
+		assert.NotContains(t, truncated, "4", "%s: no hard-coded cap", loc)
+
+		retries := tr.T("webhooks.guide_retries", "Attempts", 91, "TotalHours", 92, "FirstSeconds", 93, "LongestHours", 94)
+		for _, n := range []string{"91", "92", "93", "94"} {
+			assert.Contains(t, retries, n, "%s: guide_retries", loc)
+		}
+		for _, hard := range []string{"30", "10"} {
+			assert.NotContains(t, retries, hard, "%s: no hard-coded schedule", loc)
+		}
+	}
 }

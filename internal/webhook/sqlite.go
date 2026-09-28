@@ -79,18 +79,21 @@ func (r *sqliteEndpointRow) toEndpoint() (*Endpoint, error) {
 }
 
 type sqliteAttemptRow struct {
-	ID         string `alias:"webhook_deliveries.id"`
-	OrgID      string `alias:"webhook_deliveries.org_id"`
-	ProjectID  string `alias:"webhook_deliveries.project_id"`
-	EndpointID string `alias:"webhook_deliveries.endpoint_id"`
-	DeliveryID string `alias:"webhook_deliveries.delivery_id"`
-	EventID    string `alias:"webhook_deliveries.event_id"`
-	EventType  string `alias:"webhook_deliveries.event_type"`
-	Attempt    int    `alias:"webhook_deliveries.attempt"`
-	StatusCode int    `alias:"webhook_deliveries.status_code"`
-	Error      string `alias:"webhook_deliveries.error"`
-	DurationMs int64  `alias:"webhook_deliveries.duration_ms"`
-	CreatedAt  string `alias:"webhook_deliveries.created_at"`
+	ID                string `alias:"webhook_deliveries.id"`
+	OrgID             string `alias:"webhook_deliveries.org_id"`
+	ProjectID         string `alias:"webhook_deliveries.project_id"`
+	EndpointID        string `alias:"webhook_deliveries.endpoint_id"`
+	DeliveryID        string `alias:"webhook_deliveries.delivery_id"`
+	EventID           string `alias:"webhook_deliveries.event_id"`
+	EventType         string `alias:"webhook_deliveries.event_type"`
+	Attempt           int    `alias:"webhook_deliveries.attempt"`
+	StatusCode        int    `alias:"webhook_deliveries.status_code"`
+	Error             string `alias:"webhook_deliveries.error"`
+	ResponseBody      string `alias:"webhook_deliveries.response_body"`
+	ResponseTruncated int64  `alias:"webhook_deliveries.response_truncated"`
+	ResponseHeaders   string `alias:"webhook_deliveries.response_headers"`
+	DurationMs        int64  `alias:"webhook_deliveries.duration_ms"`
+	CreatedAt         string `alias:"webhook_deliveries.created_at"`
 }
 
 func (r *sqliteAttemptRow) toAttempt() (Attempt, error) {
@@ -102,19 +105,26 @@ func (r *sqliteAttemptRow) toAttempt() (Attempt, error) {
 	if err != nil {
 		return Attempt{}, fmt.Errorf("webhook.sqlite: parse attempt created_at: %w", err)
 	}
+	headers, err := unmarshalHeaders(r.ResponseHeaders)
+	if err != nil {
+		return Attempt{}, fmt.Errorf("webhook.sqlite: attempt %w", err)
+	}
 	return Attempt{
-		ID:         ids[0],
-		OrgID:      ids[1],
-		ProjectID:  ids[2],
-		EndpointID: ids[3],
-		DeliveryID: ids[4],
-		EventID:    ids[5],
-		EventType:  events.Type(r.EventType),
-		Attempt:    r.Attempt,
-		StatusCode: r.StatusCode,
-		Error:      r.Error,
-		Duration:   time.Duration(r.DurationMs) * time.Millisecond,
-		CreatedAt:  ca.UTC(),
+		ID:                ids[0],
+		OrgID:             ids[1],
+		ProjectID:         ids[2],
+		EndpointID:        ids[3],
+		DeliveryID:        ids[4],
+		EventID:           ids[5],
+		EventType:         events.Type(r.EventType),
+		Attempt:           r.Attempt,
+		StatusCode:        r.StatusCode,
+		Error:             r.Error,
+		ResponseBody:      r.ResponseBody,
+		ResponseTruncated: r.ResponseTruncated != 0,
+		ResponseHeaders:   headers,
+		Duration:          time.Duration(r.DurationMs) * time.Millisecond,
+		CreatedAt:         ca.UTC(),
 	}, nil
 }
 
@@ -355,6 +365,10 @@ func (s *sqliteStore) saveAttempt(ctx context.Context, tx *sql.Tx, tc tenant.Con
 	if err != nil {
 		return err
 	}
+	headers, err := marshalHeaders(a.ResponseHeaders)
+	if err != nil {
+		return err
+	}
 	stmt := s.attempts.INSERT(s.attempts.AllColumns).
 		VALUES(
 			a.ID.String(),
@@ -367,6 +381,9 @@ func (s *sqliteStore) saveAttempt(ctx context.Context, tx *sql.Tx, tc tenant.Con
 			a.Attempt,
 			a.StatusCode,
 			a.Error,
+			a.ResponseBody,
+			sqliteBool(a.ResponseTruncated),
+			headers,
 			a.Duration.Milliseconds(),
 			sqliteent.SQLiteTime(a.CreatedAt),
 		)

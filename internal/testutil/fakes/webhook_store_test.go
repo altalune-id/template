@@ -2,6 +2,7 @@ package fakes_test
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -67,10 +68,17 @@ func TestWebhookStoreSaveAttemptHoldsTheProjectGuard(t *testing.T) {
 	assert.True(t, got[0].CreatedAt.After(got[1].CreatedAt), "newest first")
 	assert.NotEqual(t, uuid.Nil, got[0].ID)
 
+	a.ResponseBody = strings.Repeat("\x00", webhook.MaxResponseBodyBytes)
+	require.NoError(t, store.SaveAttempt(ctx, a))
+	bounded := store.Attempts()[2]
+	assert.Equal(t, webhook.BoundResponse(a).ResponseBody, bounded.ResponseBody, "the fake bounds the response like prepareAttempt")
+	assert.True(t, bounded.ResponseTruncated)
+	a.ResponseBody = ""
+
 	boom := errors.New("boom")
 	store.SaveAttemptErr = boom
 	assert.ErrorIs(t, store.SaveAttempt(ctx, a), boom)
-	assert.Len(t, store.Attempts(), 2)
+	assert.Len(t, store.Attempts(), 3)
 }
 
 // TestWebhookStoreSecretWritesMatchTheRealStores pins the fake to the real stores' secret contract: Save keeps them, SaveSecrets guards on the expected pair.

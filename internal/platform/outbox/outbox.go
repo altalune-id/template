@@ -54,7 +54,8 @@ type Entry struct {
 	CreatedAt     time.Time
 }
 
-func backoffBase(attempt int) time.Duration {
+// BackoffBase returns the unjittered wait before the given attempt.
+func BackoffBase(attempt int) time.Duration {
 	switch {
 	case attempt <= 2:
 		return 30 * time.Second
@@ -73,7 +74,7 @@ func backoffBase(attempt int) time.Duration {
 
 // Backoff returns the jittered wait before the given attempt.
 func Backoff(attempt int) time.Duration {
-	base := backoffBase(attempt)
+	base := BackoffBase(attempt)
 	spread := base / 10
 	return base - spread + rand.N(2*spread+1)
 }

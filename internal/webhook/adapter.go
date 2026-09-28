@@ -31,7 +31,7 @@ func prepareAttempt(tc tenant.Context, a Attempt) (Attempt, error) {
 	}
 	a.CreatedAt = a.CreatedAt.UTC()
 	a.Error = apperror.TruncateCause(a.Error, outbox.MaxCauseLen)
-	return a, nil
+	return BoundResponse(a), nil
 }
 
 func marshalEventTypes(types []events.Type) (string, error) {
@@ -51,4 +51,33 @@ func unmarshalEventTypes(raw string) ([]events.Type, error) {
 		return nil, fmt.Errorf("webhook: unmarshal event types: %w", err)
 	}
 	return types, nil
+}
+
+type storedHeader struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
+}
+
+func marshalHeaders(hs []Header) (string, error) {
+	stored := make([]storedHeader, len(hs))
+	for i, h := range hs {
+		stored[i] = storedHeader(h)
+	}
+	b, err := json.Marshal(stored)
+	if err != nil {
+		return "", fmt.Errorf("webhook: marshal response headers: %w", err)
+	}
+	return string(b), nil
+}
+
+func unmarshalHeaders(raw string) ([]Header, error) {
+	var stored []storedHeader
+	if err := json.Unmarshal([]byte(raw), &stored); err != nil {
+		return nil, fmt.Errorf("webhook: unmarshal response headers: %w", err)
+	}
+	hs := make([]Header, len(stored))
+	for i, h := range stored {
+		hs[i] = Header(h)
+	}
+	return hs, nil
 }
