@@ -15,6 +15,8 @@ func TestPrincipal_Reach(t *testing.T) {
 	narrow := key
 	narrow.ResourceIDs = []uuid.UUID{postA}
 	projectless := Principal{Source: SourceAPIKey, ActiveOrgID: orgID, ActiveProjectID: own}
+	orgWide := Principal{Source: SourceAPIKey, ActiveOrgID: orgID, AllProjects: true}
+	selected := Principal{Source: SourceAPIKey, ActiveOrgID: orgID, ProjectIDs: []uuid.UUID{own, sibling}}
 
 	tests := []struct {
 		name         string
@@ -34,6 +36,10 @@ func TestPrincipal_Reach(t *testing.T) {
 		{"a resource-bound key reaches its resource", narrow, orgID, own, postA, true, false, true},
 		{"a resource-bound key never reaches another resource", narrow, orgID, own, postB, true, false, false},
 		{"a key granted no project reaches nothing", projectless, orgID, own, postA, false, false, false},
+		{"an all-projects key reaches every project of its org", orgWide, orgID, sibling, postB, true, true, true},
+		{"an all-projects key never reaches another org", orgWide, otherOrg, sibling, postB, false, false, false},
+		{"a selected-projects key reaches each granted project", selected, orgID, sibling, postB, true, true, true},
+		{"a selected-projects key never reaches an ungranted project", selected, orgID, uuid.New(), postB, false, false, false},
 		{"the zero principal reaches nothing", Principal{}, uuid.Nil, uuid.Nil, uuid.Nil, false, false, false},
 	}
 	for _, tt := range tests {

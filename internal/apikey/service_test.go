@@ -32,7 +32,7 @@ func newAPIKeyService(t *testing.T, store apikey.Store) (*apikey.Service, *int) 
 		return apperror.New("altempl.unexpected", err.Error(), codes.Internal,
 			&apperrorv1.ErrorDetail{Code: "altempl.unexpected"}).WithCause(err)
 	}
-	return apikey.NewService(store, apikey.Scheme{}, log, unexpected), &calls
+	return apikey.NewService(store, apikey.Scheme{}, fakes.PermissiveManagers(), fakes.NewOrgProjects(), log, unexpected), &calls
 }
 
 func tenantCtx(t *testing.T) (context.Context, tenant.Context) {

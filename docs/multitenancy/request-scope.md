@@ -93,8 +93,8 @@ interchangeable downstream.
   context; the tool then calls the same control-plane method an RPC would, so it lands in the same scoping
   code.
 - **Reach is one rule: `session.Principal.Reaches{Project,WholeProject,Resource}`** (`internal/platform/session/reach.go`).
-  A person reaches every project of their org. A key reaches only the projects on its `ProjectIDs`, and
-  a non-empty `ResourceIDs` narrows it to those rows and refuses list and create outright.
+  A person reaches every project of their org. A key reaches its `ProjectIDs` (one for a project key,
+  the grant for an org key) or all of them (`AllProjects`); `ResourceIDs` narrows to named rows.
 - **A handler never compares tenant ids itself.** `internal/controlplane/reach.go` holds `scopeToProject`,
   `scopeToActiveProject` and `scopeToResource`; every service calls those. `TestReachIsNotCopiedIntoHandlers`
   fails on a hand-written `x.OrgID != p.ActiveOrgID`.

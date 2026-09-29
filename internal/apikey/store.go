@@ -13,5 +13,6 @@ type Store interface {
 	ByID(ctx context.Context, id uuid.UUID) (*APIKey, error)
 	BySecretHash(ctx context.Context, hash [32]byte) (*APIKey, error)
 	List(ctx context.Context, projectID uuid.UUID) ([]*APIKey, error)
+	ListOrg(ctx context.Context) ([]*APIKey, error)
 	TouchLastUsed(ctx context.Context, id uuid.UUID, at time.Time) error
 }

@@ -358,6 +358,33 @@ func (s *Service) MembershipOf(ctx context.Context, orgID, userID uuid.UUID) (*M
 	return m, nil
 }
 
+// IsManager reports whether userID holds an owner or admin membership in orgID. SECURITY: ctx must already carry the tenant scope.
+func (s *Service) IsManager(ctx context.Context, orgID, userID uuid.UUID) (bool, error) {
+	if userID == uuid.Nil {
+		return false, nil
+	}
+	m, err := s.MembershipOf(ctx, orgID, userID)
+	if IsMembershipMissingError(err) || IsNotFoundError(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return m.Role.CanManage(), nil
+}
+
+// RequireManager refuses with *NotManagerError unless userID is an owner or admin of orgID; a machine principal has no user and is always refused.
+func (s *Service) RequireManager(ctx context.Context, orgID, userID uuid.UUID) error {
+	ok, err := s.IsManager(ctx, orgID, userID)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return &NotManagerError{OrgID: orgID.String(), UserID: userID.String()}
+	}
+	return nil
+}
+
 // ListMembers returns every membership in the given org.
 func (s *Service) ListMembers(ctx context.Context, orgID uuid.UUID) ([]*Membership, error) {
 	ctx, span := tracer.Start(ctx, "org.ListMembers")

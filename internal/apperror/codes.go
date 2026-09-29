@@ -30,6 +30,7 @@ const (
 	CodeOrgSystemProtected   = "ORG008"
 	CodeOrgSelfRemoval       = "ORG009"
 	CodeOrgOwnerRemoval      = "ORG010"
+	CodeOrgManagerRequired   = "ORG011"
 
 	CodeProjectNotFound        = "PRJ001"
 	CodeProjectAlreadyExists   = "PRJ002"

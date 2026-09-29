@@ -60,7 +60,7 @@ func TestMintAndResolveAgreeUnderEveryPrefix(t *testing.T) {
 
 			sc := apikey.NewScheme(configured)
 			store := fakes.NewAPIKey()
-			svc := apikey.NewService(store, sc, slog.New(slog.NewTextHandler(io.Discard, nil)), failingUnexpected(t))
+			svc := apikey.NewService(store, sc, fakes.PermissiveManagers(), fakes.NewOrgProjects(), slog.New(slog.NewTextHandler(io.Discard, nil)), failingUnexpected(t))
 			auth := apikey.NewAuthenticator(store, nil, sc)
 
 			tc := tenant.Context{OrgID: uuid.New(), ProjectID: uuid.New(), UserID: uuid.New()}

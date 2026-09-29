@@ -6,8 +6,10 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
+	"altalune.id/template/internal/apikey"
 	"altalune.id/template/internal/apperror"
 	mcpinternal "altalune.id/template/internal/mcp"
 	"altalune.id/template/internal/org"
@@ -209,5 +211,57 @@ func TestMCP_KeyNeverReachesASiblingProject(t *testing.T) {
 		rec := f.call(t, token, callToolBody(mcpinternal.ToolBlogList, map[string]any{"projectId": sibling.ID.String()}))
 		require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
 		require.Equal(t, []string{"sibling-secret"}, postSlugsFromTool(t, rec), "body=%s", rec.Body.String())
+	})
+}
+
+// TestMCP_OrgKeyReachesOnlyItsGrantedProjects drives an org key over the real surface on SQLite, where no RLS backs the reach check.
+func TestMCP_OrgKeyReachesOnlyItsGrantedProjects(t *testing.T) {
+	f := newMCPFixture(t, mcpOpts{enabled: true})
+	ctx := t.Context()
+
+	owner, err := f.srv.Users.EnsureFromOIDC(ctx, user.Claims{
+		Issuer: f.issuer.url, Subject: tokenSubject, Email: tokenEmail, Name: "MCP Agent",
+	})
+	require.NoError(t, err)
+	o, err := f.srv.Orgs.BySlug(ctx, "mcp-org")
+	require.NoError(t, err)
+	orgCtx := tenant.Into(ctx, tenant.Context{OrgID: o.ID, UserID: owner.ID})
+	granted, err := f.srv.Projects.Create(orgCtx, o.ID, "granted-project", "Granted Project")
+	require.NoError(t, err)
+	_, err = f.srv.Projects.Create(orgCtx, o.ID, "ungranted-project", "Ungranted Project")
+	require.NoError(t, err)
+
+	_, selected, err := f.srv.APIKeys.MintOrg(orgCtx, "org-reader", []string{authn.ScopePostsRead},
+		apikey.ProjectGrant{ProjectIDs: []uuid.UUID{granted.ID}}, nil)
+	require.NoError(t, err)
+	_, everything, err := f.srv.APIKeys.MintOrg(orgCtx, "org-all", []string{authn.ScopePostsRead}, apikey.ProjectGrant{All: true}, nil)
+	require.NoError(t, err)
+
+	slugsFor := func(t *testing.T, key string) []string {
+		t.Helper()
+		rec := f.call(t, key, callToolBody(mcpinternal.ToolProjectList, map[string]any{}))
+		require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
+		out := []string{}
+		for _, p := range projectsFromTool(t, rec) {
+			out = append(out, p.Slug)
+		}
+		return out
+	}
+
+	t.Run("a selected-projects key discovers only its grant", func(t *testing.T) {
+		require.Equal(t, []string{"granted-project"}, slugsFor(t, selected))
+	})
+	t.Run("a selected-projects key cannot read an ungranted project", func(t *testing.T) {
+		rec := f.call(t, selected, callToolBody(mcpinternal.ToolBlogList, map[string]any{"projectId": f.projectID}))
+		require.Equal(t, apperror.CodeForbidden, toolPayload(t, rec).Code, "body=%s", rec.Body.String())
+	})
+	t.Run("an org key names no active project, so it must pass one", func(t *testing.T) {
+		rec := f.call(t, selected, callToolBody(mcpinternal.ToolBlogList, map[string]any{}))
+		require.Equal(t, apperror.CodeProjectUnresolved, toolPayload(t, rec).Code, "body=%s", rec.Body.String())
+	})
+	t.Run("an all-projects key discovers every project of its org", func(t *testing.T) {
+		require.ElementsMatch(t, []string{"mcp-project", "granted-project", "ungranted-project"}, slugsFor(t, everything))
+		rec := f.call(t, everything, callToolBody(mcpinternal.ToolBlogList, map[string]any{"projectId": f.projectID}))
+		require.Equal(t, []string{"hello"}, postSlugsFromTool(t, rec), "body=%s", rec.Body.String())
 	})
 }

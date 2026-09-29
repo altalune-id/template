@@ -6,12 +6,12 @@ import (
 	"github.com/google/uuid"
 )
 
-// ReachesProject reports whether p may act inside projectID of orgID. SECURITY: the one rule every surface asks; a person reaches every project of their org, a key only the projects it was granted.
+// ReachesProject reports whether p may act inside projectID of orgID. SECURITY: the one rule every surface asks; a person reaches every project of their org, a key only the projects it was granted or all of them.
 func (p Principal) ReachesProject(orgID, projectID uuid.UUID) bool {
 	if orgID == uuid.Nil || orgID != p.ActiveOrgID {
 		return false
 	}
-	if p.Source != SourceAPIKey {
+	if p.Source != SourceAPIKey || p.AllProjects {
 		return true
 	}
 	return slices.Contains(p.ProjectIDs, projectID)

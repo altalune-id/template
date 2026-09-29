@@ -65,6 +65,7 @@ In the Status column, `—` means the code is registered but nothing constructs 
 | `ORG008` | `apperror.CodeOrgSystemProtected`   | `FailedPrecondition` | Org System Protected   |
 | `ORG009` | `apperror.CodeOrgSelfRemoval`       | `FailedPrecondition` | Org Self Removal       |
 | `ORG010` | `apperror.CodeOrgOwnerRemoval`      | `FailedPrecondition` | Org Owner Removal      |
+| `ORG011` | `apperror.CodeOrgManagerRequired`   | `PermissionDenied`   | Org Manager Required   |
 
 ## PRJ — Projects
 

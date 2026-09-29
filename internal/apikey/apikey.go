@@ -36,23 +36,86 @@ func (sc Scheme) Prefix() string {
 // Authn returns the shape gate a surface boundary must apply to credentials minted under this Scheme.
 func (sc Scheme) Authn() authn.Scheme { return authn.Scheme{Prefix: sc.Prefix()} }
 
-// APIKey is a machine credential scoped to one project.
+// Kind names what an API key is bound to.
+type Kind string
+
+// The key kinds. A project key is bound to one project for life; an org key reaches the projects its grant names.
+const (
+	KindProject Kind = "project"
+	KindOrg     Kind = "org"
+)
+
+const secretHintLen = 4
+
+// ProjectGrant is the set of projects an org key reaches: every project of the org, or the named ones.
+type ProjectGrant struct {
+	All        bool
+	ProjectIDs []uuid.UUID
+}
+
+func (g ProjectGrant) validate() error {
+	if g.All && len(g.ProjectIDs) > 0 {
+		return &GrantConflictError{}
+	}
+	if !g.All && len(g.ProjectIDs) == 0 {
+		return &EmptyGrantError{}
+	}
+	return nil
+}
+
+// APIKey is a machine credential bound to one project, or to an org and the projects its grant names.
 type APIKey struct {
 	ID          uuid.UUID
 	OrgID       uuid.UUID
 	ProjectID   uuid.UUID
+	Kind        Kind
+	AllProjects bool
+	ProjectIDs  []uuid.UUID
 	Name        string
 	SecretHash  [32]byte
+	SecretHint  string
 	Scopes      []string
 	ResourceIDs []uuid.UUID
+	CreatedBy   uuid.UUID
 	CreatedAt   time.Time
 	ExpiresAt   *time.Time
 	RevokedAt   *time.Time
 	LastUsedAt  *time.Time
 }
 
-// Mint returns a new key and its plaintext secret, which is never recoverable afterwards.
+// Mint returns a new project key and its plaintext secret, which is never recoverable afterwards.
 func (sc Scheme) Mint(orgID, projectID uuid.UUID, name string, scopes []string, resourceIDs []uuid.UUID, expiresAt *time.Time, now time.Time) (*APIKey, string, error) {
+	for _, s := range scopes {
+		if level, ok := authn.LevelOf(s); ok && level != authn.LevelProject {
+			return nil, "", &ScopeLevelError{Scope: s}
+		}
+	}
+	k, plaintext, err := sc.mint(orgID, name, scopes, expiresAt, now)
+	if err != nil {
+		return nil, "", err
+	}
+	k.Kind = KindProject
+	k.ProjectID = projectID
+	k.ResourceIDs = slices.Clone(resourceIDs)
+	return k, plaintext, nil
+}
+
+// MintOrg returns a new org key reaching grant, and its plaintext secret.
+func (sc Scheme) MintOrg(orgID uuid.UUID, name string, scopes []string, grant ProjectGrant, expiresAt *time.Time, now time.Time) (*APIKey, string, error) {
+	if err := grant.validate(); err != nil {
+		return nil, "", err
+	}
+	k, plaintext, err := sc.mint(orgID, name, scopes, expiresAt, now)
+	if err != nil {
+		return nil, "", err
+	}
+	k.Kind = KindOrg
+	k.AllProjects = grant.All
+	k.ProjectIDs = dedupe(grant.ProjectIDs)
+	return k, plaintext, nil
+}
+
+func (sc Scheme) mint(orgID uuid.UUID, name string, scopes []string, expiresAt *time.Time, now time.Time) (*APIKey, string, error) {
 	for _, s := range scopes {
 		if !authn.Valid(s) {
 			return nil, "", &UnknownScopeError{Scope: s}
@@ -64,16 +127,71 @@ func (sc Scheme) Mint(orgID, projectID uuid.UUID, name string, scopes []string, 
 	}
 	plaintext := sc.Prefix() + base64.RawURLEncoding.EncodeToString(buf)
 	return &APIKey{
-		ID:          uuid.New(),
-		OrgID:       orgID,
-		ProjectID:   projectID,
-		Name:        name,
-		SecretHash:  sha256.Sum256([]byte(plaintext)),
-		Scopes:      slices.Clone(scopes),
-		ResourceIDs: slices.Clone(resourceIDs),
-		CreatedAt:   now,
-		ExpiresAt:   expiresAt,
+		ID:         uuid.New(),
+		OrgID:      orgID,
+		Name:       name,
+		SecretHash: sha256.Sum256([]byte(plaintext)),
+		SecretHint: plaintext[len(plaintext)-secretHintLen:],
+		Scopes:     slices.Clone(scopes),
+		CreatedAt:  now,
+		ExpiresAt:  expiresAt,
 	}, plaintext, nil
+}
+
+// GrantProjects widens a selected-projects org key by projectIDs. SECURITY: a grant only ever widens; no verb narrows it.
+func (k *APIKey) GrantProjects(projectIDs []uuid.UUID) error {
+	if err := k.promotable(); err != nil {
+		return err
+	}
+	if k.AllProjects {
+		return &AlreadyAllProjectsError{}
+	}
+	if len(projectIDs) == 0 {
+		return &EmptyGrantError{}
+	}
+	k.ProjectIDs = dedupe(append(slices.Clone(k.ProjectIDs), projectIDs...))
+	return nil
+}
+
+// GrantAllProjects promotes an org key to every project of its org, including ones created later; there is no way back.
+func (k *APIKey) GrantAllProjects() error {
+	if err := k.promotable(); err != nil {
+		return err
+	}
+	if k.AllProjects {
+		return &AlreadyAllProjectsError{}
+	}
+	k.AllProjects = true
+	k.ProjectIDs = nil
+	return nil
+}
+
+func (k *APIKey) promotable() error {
+	if k.Kind != KindOrg {
+		return &NotOrgKeyError{}
+	}
+	if k.RevokedAt != nil {
+		return &RevokedError{}
+	}
+	return nil
+}
+
+// ReachableProjects returns the projects the key's principal reaches when it is not granted all of them.
+func (k *APIKey) ReachableProjects() []uuid.UUID {
+	if k.Kind == KindOrg {
+		return slices.Clone(k.ProjectIDs)
+	}
+	return []uuid.UUID{k.ProjectID}
+}
+
+func dedupe(ids []uuid.UUID) []uuid.UUID {
+	out := make([]uuid.UUID, 0, len(ids))
+	for _, id := range ids {
+		if id != uuid.Nil && !slices.Contains(out, id) {
+			out = append(out, id)
+		}
+	}
+	return out
 }
 
 // Matches reports whether plaintext hashes to this key's secret, in constant time.

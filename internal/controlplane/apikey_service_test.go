@@ -38,18 +38,27 @@ type apikeyFixture struct {
 
 func newAPIKeyFixture(t *testing.T) *apikeyFixture {
 	t.Helper()
+	return newAPIKeyFixtureAs(t, true)
+}
+
+func newAPIKeyFixtureAs(t *testing.T, manager bool) *apikeyFixture {
+	t.Helper()
 	ctx := context.Background()
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	reporter := apperror.NewReporter(log, false)
 
 	orgID := uuid.New()
 	principal := session.Principal{UserID: uuid.New(), Email: "a@b", ActiveOrgID: orgID}
+	managers := fakes.NewManagers()
+	if manager {
+		managers.Seat(orgID, principal.UserID)
+	}
 
 	projs := fakes.NewProject()
 	keyStore := fakes.NewAPIKey()
 
 	projectSvc := project.NewService(projs, log, reporter.Unexpected)
-	keySvc := apikey.NewService(keyStore, apikey.Scheme{}, log, reporter.Unexpected)
+	keySvc := apikey.NewService(keyStore, apikey.Scheme{}, managers, fakes.NewOrgProjects(), log, reporter.Unexpected)
 
 	kernel := &platform.Kernel{
 		Log:      log,
@@ -166,7 +175,7 @@ func TestAPIKey_Revoke_MarksKeyRevoked(t *testing.T) {
 	createReq := connect.NewRequest(&apikeyv1.CreateRequest{
 		ProjectId: f.project.ID.String(),
 		Name:      "temp",
-		Scopes:    []string{authn.ScopeAPIKeysWrite},
+		Scopes:    []string{authn.ScopeAPIKeysRead},
 	})
 	withBearer(createReq.Header())
 	created, err := f.client().Create(t.Context(), createReq)
@@ -200,7 +209,7 @@ func TestAPIKey_Revoke_KeyFromAnotherProjectInSameOrg_ReturnsNotFound(t *testing
 	createReq := connect.NewRequest(&apikeyv1.CreateRequest{
 		ProjectId: f.project.ID.String(),
 		Name:      "p1-key",
-		Scopes:    []string{authn.ScopeAPIKeysWrite},
+		Scopes:    []string{authn.ScopeAPIKeysRead},
 	})
 	withBearer(createReq.Header())
 	created, err := f.client().Create(t.Context(), createReq)
@@ -257,4 +266,52 @@ func rawJSONList(t *testing.T, baseURL, projectID string) string {
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
 	return string(raw)
+}
+
+// SECURITY: only an owner or admin person mints a key; a member and every key — even one holding apikeys:write — are refused.
+func TestAPIKey_Create_RequiresAnOwnerOrAdminPerson(t *testing.T) {
+	create := func(f *apikeyFixture, auth func(http.Header)) error {
+		req := connect.NewRequest(&apikeyv1.CreateRequest{
+			ProjectId: f.project.ID.String(),
+			Name:      "k",
+			Scopes:    []string{authn.ScopePostsRead},
+		})
+		auth(req.Header())
+		_, err := f.client().Create(t.Context(), req)
+		return err
+	}
+
+	t.Run("a member is refused", func(t *testing.T) {
+		f := newAPIKeyFixtureAs(t, false)
+		err := create(f, withBearer)
+		require.Equal(t, connect.CodePermissionDenied, connectCode(err), "err=%v", err)
+		require.Empty(t, f.store.All(), "a refused mint must persist nothing")
+	})
+
+	t.Run("a key holding apikeys:write is refused", func(t *testing.T) {
+		f := newAPIKeyFixture(t)
+		k, plaintext, err := apikey.Scheme{}.Mint(f.orgID, f.project.ID, "writer", []string{authn.ScopeAPIKeysWrite}, nil, nil, time.Now().UTC())
+		require.NoError(t, err)
+		f.store.Seed(k)
+		err = create(f, func(h http.Header) { h.Set("Authorization", "Bearer "+plaintext) })
+		require.Equal(t, connect.CodePermissionDenied, connectCode(err), "err=%v", err)
+		require.Len(t, f.store.All(), 1, "the key must not have minted another")
+	})
+
+	t.Run("an owner or admin mints", func(t *testing.T) {
+		f := newAPIKeyFixture(t)
+		require.NoError(t, create(f, withBearer))
+	})
+}
+
+func TestAPIKey_Create_RetiredScope_ReturnsInvalidArgument(t *testing.T) {
+	f := newAPIKeyFixture(t)
+	req := connect.NewRequest(&apikeyv1.CreateRequest{
+		ProjectId: f.project.ID.String(),
+		Name:      "retired",
+		Scopes:    []string{authn.ScopeAPIKeysWrite},
+	})
+	withBearer(req.Header())
+	_, err := f.client().Create(t.Context(), req)
+	require.Equal(t, connect.CodeInvalidArgument, connectCode(err), "err=%v", err)
 }

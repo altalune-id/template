@@ -7,13 +7,22 @@ Defined in `internal/platform/authn/scope.go`. `authn.Valid()` gates minting.
 
 ## Catalog
 
-| Scope           | Grants                              |
-| --------------- | ----------------------------------- |
-| `posts:read`    | Read posts and todos; list projects |
-| `posts:write`   | Create, update, publish, unpublish  |
-| `posts:admin`   | Delete a post or todo               |
-| `apikeys:read`  | List keys; `Whoami`                 |
-| `apikeys:write` | Create and revoke keys              |
+| Scope           | Level   | Grants                                          |
+| --------------- | ------- | ----------------------------------------------- |
+| `posts:read`    | project | Read posts and todos; list projects             |
+| `posts:write`   | project | Create, update, publish, unpublish              |
+| `posts:admin`   | project | Delete a post or todo                           |
+| `apikeys:read`  | project | List keys; `Whoami`                             |
+| `apikeys:write` | project | **Retired.** Validates on old keys, grants none |
+
+- **Only an owner or admin person manages keys.** `apikey.Service` asks
+  `org.Service.RequireManager` before every mint, promotion and revoke, on every surface.
+  A key is never a manager, so `apikeys:write` retired: it still validates, the console
+  no longer offers it, and a mint naming it is refused (`authn.Mintable`).
+- **A level says where authority lives.** `project` scopes act on data inside the projects a
+  key reaches. An `org` scope (none yet — e.g. `projects:write`, `members:read`) acts on the
+  org itself, is refused on a project key (`apikey.ScopeLevelError`), and is the slot org
+  administration arrives through.
 
 - **No implication.** `posts:admin` does not grant `posts:write`. The check is
   `slices.Contains`. A key needing read + delete holds both strings.
@@ -49,14 +58,15 @@ Two asymmetries, both deliberate:
 - **MCP exempts nobody** — an MCP token is a delegated grant an agent holds for a person, so
   its scopes are the limit of that delegation. See [`mcp`](../mcp/README.md).
 
-The data plane narrows past the scope: the key's org and project must equal the path's, and a
+Every surface narrows past the scope with one rule, `session.Principal.Reaches*`: a key reaches
+only the projects it was granted — one for a project key, the grant for an org key — and a
 non-empty `ResourceIDs` confines it to named resources.
 
 ## Adding one
 
 A new string starts in two places, both of them here:
 
-1. Constant + `allScopes` entry in `internal/platform/authn/scope.go`.
+1. Constant + `catalog` entry, with its level, in `internal/platform/authn/scope.go`.
 2. A row in the catalog above.
 
 Mapping it onto a surface is that surface's own procedure:
@@ -64,4 +74,5 @@ Mapping it onto a surface is that surface's own procedure:
 [`howto/external-api.md`](../howto/external-api.md) for the `authorize` calls in
 `internal/dataplane/`, [`howto/mcp-tool.md`](../howto/mcp-tool.md) for `internal/mcp/scopes.go`.
 
-Never remove a scope — stop mapping it instead. Keys holding it keep validating and grant nothing.
+Never remove a scope — mark it `retired` instead. Keys holding it keep validating and it is never
+minted again.

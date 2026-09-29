@@ -439,6 +439,9 @@ templ orgMenu(d web.LayoutData, slug string) {
 		<a href={ templ.SafeURL(d.Href("/orgs/" + slug + "/invites")) } class={ orgItemClass(d.ActiveNav.OrgKey == "invites") }>
 			@icons.Icon("mail", "h-4 w-4 shrink-0") <span>{ d.Tr("nav.invites") }</span>
 		</a>
+		<a href={ templ.SafeURL(d.Href("/orgs/" + slug + "/apikeys")) } class={ orgItemClass(d.ActiveNav.OrgKey == "apikeys") }>
+			@icons.Icon("key", "h-4 w-4 shrink-0") <span>{ d.Tr("nav.apikeys") }</span>
+		</a>
 	</nav>
 }
 

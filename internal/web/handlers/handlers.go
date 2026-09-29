@@ -134,8 +134,15 @@ func (d Deps) orgIDForSlug(r *http.Request, slug string) uuid.UUID {
 
 // ProjectFragmentBase builds the LayoutData for an htmx fragment of a project page. NOTE: Deps.Base alone leaves ActiveOrg nil, which collapses every project path to /orgs.
 func (d Deps) ProjectFragmentBase(sc ProjectScope) web.LayoutData {
-	l := d.Base(sc.req, "")
-	l.ActiveOrg = &web.ActiveOrg{ID: sc.org.ID.String(), Slug: sc.org.Slug, Name: sc.org.Name}
+	return d.fragmentBase(sc.req, sc.org)
+}
+
+// OrgFragmentBase builds the LayoutData an org-scoped HTMX fragment renders with.
+func (d Deps) OrgFragmentBase(sc OrgScope) web.LayoutData { return d.fragmentBase(sc.req, sc.org) }
+
+func (d Deps) fragmentBase(r *http.Request, o *org.Org) web.LayoutData {
+	l := d.Base(r, "")
+	l.ActiveOrg = &web.ActiveOrg{ID: o.ID.String(), Slug: o.Slug, Name: o.Name}
 	return l
 }
 

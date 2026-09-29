@@ -97,7 +97,7 @@ func newHarnessOpts(t *testing.T, p session.Principal, verr error) *harness {
 		postSvc, catSvc, tagSvc,
 	)
 	srv.Authn = authn.Chain{apikey.NewAuthenticator(keys, nil, apikey.Scheme{}), tokens.NewAuthenticator(kernel.Verifier)}
-	srv.APIKeys = apikey.NewService(keys, apikey.Scheme{}, log, reporter.Unexpected)
+	srv.APIKeys = apikey.NewService(keys, apikey.Scheme{}, fakes.PermissiveManagers(), fakes.NewOrgProjects(), log, reporter.Unexpected)
 	srv.KeyPrefix = apikey.DefaultPrefix
 	ts := httptest.NewServer(srv.Handler(""))
 	t.Cleanup(ts.Close)
