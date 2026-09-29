@@ -92,19 +92,3 @@ func (k *APIKey) Usable(now time.Time) bool {
 	}
 	return true
 }
-
-// Allows reports whether the key grants scope on resourceID; empty ResourceIDs means the whole project.
-func (k *APIKey) Allows(scope string, resourceID uuid.UUID) bool {
-	if !slices.Contains(k.Scopes, scope) {
-		return false
-	}
-	if len(k.ResourceIDs) == 0 {
-		return true
-	}
-	return slices.Contains(k.ResourceIDs, resourceID)
-}
-
-// AllowsProject reports whether the key grants scope across its whole project. SECURITY: a resource-restricted key never does.
-func (k *APIKey) AllowsProject(scope string) bool {
-	return len(k.ResourceIDs) == 0 && slices.Contains(k.Scopes, scope)
-}

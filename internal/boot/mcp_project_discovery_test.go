@@ -12,6 +12,7 @@ import (
 	mcpinternal "altalune.id/template/internal/mcp"
 	"altalune.id/template/internal/org"
 	"altalune.id/template/internal/platform/authn"
+	"altalune.id/template/internal/platform/tenant"
 	"altalune.id/template/internal/user"
 )
 
@@ -160,5 +161,53 @@ func (f *mcpFixture) untenantedToken(t *testing.T) string {
 
 	return f.issuer.mintWith(t, mcpAudience, []string{authn.ScopePostsRead}, map[string]any{
 		"sub": subject, "email": "no-project@example.com",
+	})
+}
+
+// TestMCP_KeyNeverReachesASiblingProject drives a project-bound key over the real surface. SECURITY: the fixture runs on SQLite, so the handler's reach check is the only guard between the key and its sibling project.
+func TestMCP_KeyNeverReachesASiblingProject(t *testing.T) {
+	f := newMCPFixture(t, mcpOpts{enabled: true})
+	ctx := t.Context()
+
+	owner, err := f.srv.Users.EnsureFromOIDC(ctx, user.Claims{
+		Issuer: f.issuer.url, Subject: tokenSubject, Email: tokenEmail, Name: "MCP Agent",
+	})
+	require.NoError(t, err)
+	o, err := f.srv.Orgs.BySlug(ctx, "mcp-org")
+	require.NoError(t, err)
+	orgCtx := tenant.Into(ctx, tenant.Context{OrgID: o.ID, UserID: owner.ID})
+	sibling, err := f.srv.Projects.Create(orgCtx, o.ID, "sibling-project", "Sibling Project")
+	require.NoError(t, err)
+	projCtx := tenant.WithProject(orgCtx, sibling.ID)
+	cat, err := f.srv.Categories.Create(projCtx, "Internal", "internal")
+	require.NoError(t, err)
+	post, err := f.srv.Posts.Create(projCtx, cat.ID, "Sibling", "sibling-secret", "body")
+	require.NoError(t, err)
+	_, err = f.srv.Posts.Publish(projCtx, post.ID, 0)
+	require.NoError(t, err)
+
+	t.Run("project_list hides the sibling project", func(t *testing.T) {
+		rec := f.call(t, f.readKey, callToolBody(mcpinternal.ToolProjectList, map[string]any{}))
+		require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
+		slugs := make([]string, 0)
+		for _, p := range projectsFromTool(t, rec) {
+			slugs = append(slugs, p.Slug)
+		}
+		require.Equal(t, []string{"mcp-project"}, slugs, "a project-bound key discovered a project it does not reach")
+	})
+
+	t.Run("blog_list refuses the sibling project", func(t *testing.T) {
+		rec := f.call(t, f.readKey, callToolBody(mcpinternal.ToolBlogList, map[string]any{"projectId": sibling.ID.String()}))
+		require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
+		require.NotContains(t, rec.Body.String(), "sibling-secret",
+			"a key read its sibling project's posts; body=%s", rec.Body.String())
+		require.Equal(t, apperror.CodeForbidden, toolPayload(t, rec).Code, "body=%s", rec.Body.String())
+	})
+
+	t.Run("a person in the org still reaches the sibling project", func(t *testing.T) {
+		token := f.issuer.mint(t, mcpAudience, []string{authn.ScopePostsRead})
+		rec := f.call(t, token, callToolBody(mcpinternal.ToolBlogList, map[string]any{"projectId": sibling.ID.String()}))
+		require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
+		require.Equal(t, []string{"sibling-secret"}, postSlugsFromTool(t, rec), "body=%s", rec.Body.String())
 	})
 }

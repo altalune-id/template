@@ -195,6 +195,31 @@ func TestAuthorizeProjectRefusesRestrictedKey(t *testing.T) {
 	assert.Equal(t, session.SourceAPIKey, p.Source)
 }
 
+func TestAuthorizeRefusesAnUnlistedResource(t *testing.T) {
+	store := fakes.NewAPIKey()
+	orgID, projectID, listed := uuid.New(), uuid.New(), uuid.New()
+	_, plaintext := mintSeeded(t, store, orgID, projectID, []string{authn.ScopePostsWrite}, []uuid.UUID{listed})
+	auth := apikey.NewAuthenticator(store, nil, apikey.Scheme{})
+
+	_, err := auth.Authorize(t.Context(), plaintext, authn.ScopePostsWrite, orgID, projectID, listed)
+	require.NoError(t, err, "the listed resource must stay reachable")
+
+	_, err = auth.Authorize(t.Context(), plaintext, authn.ScopePostsWrite, orgID, projectID, uuid.New())
+	assert.True(t, authn.IsInsufficientScopeError(err), "an unlisted resource must be refused, got %T: %v", err, err)
+}
+
+// SECURITY: the control plane and the MCP surface bound a key by the grant its principal carries, so the principal must carry the key's project and resources.
+func TestPrincipalCarriesTheKeysGrant(t *testing.T) {
+	store := fakes.NewAPIKey()
+	projectID, resourceID := uuid.New(), uuid.New()
+	_, plaintext := mintSeeded(t, store, uuid.New(), projectID, []string{authn.ScopePostsRead}, []uuid.UUID{resourceID})
+
+	p, err := apikey.NewAuthenticator(store, nil, apikey.Scheme{}).Authenticate(t.Context(), plaintext)
+	require.NoError(t, err)
+	assert.Equal(t, []uuid.UUID{projectID}, p.ProjectIDs)
+	assert.Equal(t, []uuid.UUID{resourceID}, p.ResourceIDs)
+}
+
 func TestPrincipalCarriesNoUserIDAndNoSecret(t *testing.T) {
 	// SECURITY: a key is not a person. A key principal must never carry a UserID, or a
 	// membership check elsewhere will treat it as a signed-in human.

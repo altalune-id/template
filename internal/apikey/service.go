@@ -147,13 +147,14 @@ func (a *Authenticator) Authorize(ctx context.Context, raw, scope string, orgID,
 	if err != nil {
 		return session.Principal{}, err
 	}
-	if k.OrgID != orgID || k.ProjectID != projectID {
+	p := principalFor(k)
+	if !p.ReachesProject(orgID, projectID) {
 		return session.Principal{}, &authn.UnauthorizedError{}
 	}
-	if !k.Allows(scope, resourceID) {
+	if !slices.Contains(p.Scopes, scope) || !p.ReachesResource(orgID, projectID, resourceID) {
 		return session.Principal{}, &authn.InsufficientScopeError{Scope: scope}
 	}
-	return principalFor(k), nil
+	return p, nil
 }
 
 // AuthorizeProject resolves raw and requires an unrestricted project-wide grant of scope.
@@ -162,13 +163,14 @@ func (a *Authenticator) AuthorizeProject(ctx context.Context, raw, scope string,
 	if err != nil {
 		return session.Principal{}, err
 	}
-	if k.OrgID != orgID || k.ProjectID != projectID {
+	p := principalFor(k)
+	if !p.ReachesProject(orgID, projectID) {
 		return session.Principal{}, &authn.UnauthorizedError{}
 	}
-	if !k.AllowsProject(scope) {
+	if !slices.Contains(p.Scopes, scope) || !p.ReachesWholeProject(orgID, projectID) {
 		return session.Principal{}, &authn.InsufficientScopeError{Scope: scope}
 	}
-	return principalFor(k), nil
+	return p, nil
 }
 
 // SECURITY: every rejection collapses to one opaque *authn.UnauthorizedError; the shape gate short-circuits on purpose because the prefix is public config, and equalizing it would buy a DoS amplifier (see BACKLOG).
@@ -197,6 +199,8 @@ func principalFor(k *APIKey) session.Principal {
 		Scopes:          slices.Clone(k.Scopes),
 		ActiveOrgID:     k.OrgID,
 		ActiveProjectID: k.ProjectID,
+		ProjectIDs:      []uuid.UUID{k.ProjectID},
+		ResourceIDs:     slices.Clone(k.ResourceIDs),
 		IssuedAt:        k.CreatedAt,
 	}
 }

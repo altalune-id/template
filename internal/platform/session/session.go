@@ -32,6 +32,10 @@ type Principal struct {
 	Scopes          []string
 	ActiveOrgID     uuid.UUID
 	ActiveProjectID uuid.UUID
+	// ProjectIDs lists the projects a key principal reaches. SECURITY: rebuilt from the credential on every request, never persisted.
+	ProjectIDs []uuid.UUID `json:"-"`
+	// ResourceIDs narrows a key principal to these resources; empty means every resource in its projects.
+	ResourceIDs []uuid.UUID `json:"-"`
 	// ClaimedOrgID is the org_id a bearer token asserted.
 	// SECURITY: a hint, never authority; only a membership check may promote it to ActiveOrgID.
 	ClaimedOrgID    uuid.UUID `json:"-"`
