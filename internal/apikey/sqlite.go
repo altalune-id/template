@@ -317,6 +317,19 @@ func (s *sqliteStore) ListOrg(ctx context.Context) ([]*APIKey, error) {
 		AND(s.keys.Kind.EQ(sqlite.String(string(KindOrg)))))
 }
 
+func (s *sqliteStore) ListPersonal(ctx context.Context, ownerID uuid.UUID) ([]*APIKey, error) {
+	tx, owned, tc, err := s.txAcquire(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if owned {
+		defer func() { _ = tx.Rollback() }()
+	}
+	return s.queryMany(ctx, tx, "ListPersonal", s.keys.OrgID.EQ(sqlite.String(tc.OrgID.String())).
+		AND(s.keys.Kind.EQ(sqlite.String(string(KindPersonal)))).
+		AND(s.keys.CreatedBy.EQ(sqlite.String(ownerID.String()))))
+}
+
 func (s *sqliteStore) queryMany(ctx context.Context, tx *sql.Tx, op string, cond sqlite.BoolExpression) ([]*APIKey, error) {
 	stmt := sqlite.SELECT(s.keys.AllColumns, s.grantsExpr.AS("api_keys.project_ids")).
 		FROM(s.keys).
@@ -335,6 +348,24 @@ func (s *sqliteStore) queryMany(ctx context.Context, tx *sql.Tx, op string, cond
 		out = append(out, k)
 	}
 	return out, nil
+}
+
+func (s *sqliteStore) RevokePersonal(ctx context.Context, ownerID uuid.UUID, at time.Time) error {
+	tx, owned, tc, err := s.txAcquire(ctx)
+	if err != nil {
+		return err
+	}
+	stmt := s.keys.UPDATE(s.keys.RevokedAt).
+		SET(sqlite.String(sqliteent.SQLiteTime(at))).
+		WHERE(s.keys.OrgID.EQ(sqlite.String(tc.OrgID.String())).
+			AND(s.keys.Kind.EQ(sqlite.String(string(KindPersonal)))).
+			AND(s.keys.CreatedBy.EQ(sqlite.String(ownerID.String()))).
+			AND(s.keys.RevokedAt.IS_NULL()))
+	_, err = stmt.ExecContext(ctx, tx)
+	if err != nil {
+		err = fmt.Errorf("apikey.sqlite.RevokePersonal: %w", err)
+	}
+	return s.endTx(tx, owned, err)
 }
 
 func (s *sqliteStore) TouchLastUsed(ctx context.Context, id uuid.UUID, at time.Time) error {

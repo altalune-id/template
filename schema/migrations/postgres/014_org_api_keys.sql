@@ -9,12 +9,16 @@ ALTER TABLE {{.Schema}}.{{.TablePrefix}}api_keys
   ALTER COLUMN project_id DROP NOT NULL,
   ADD CONSTRAINT {{.TablePrefix}}api_keys_kind_shape CHECK (
     (kind = 'project' AND project_id IS NOT NULL AND NOT all_projects)
-    OR (kind = 'org' AND project_id IS NULL)
+    OR (kind IN ('org', 'personal') AND project_id IS NULL)
   ),
   ADD CONSTRAINT {{.TablePrefix}}api_keys_org_id_id_key UNIQUE (org_id, id);
 
 CREATE INDEX {{.TablePrefix}}api_keys_org_kind_idx
   ON {{.Schema}}.{{.TablePrefix}}api_keys (org_id, kind, created_at DESC);
+
+CREATE INDEX {{.TablePrefix}}api_keys_personal_owner_idx
+  ON {{.Schema}}.{{.TablePrefix}}api_keys (org_id, created_by, created_at DESC)
+  WHERE kind = 'personal';
 
 ALTER TABLE {{.Schema}}.{{.TablePrefix}}projects
   ADD CONSTRAINT {{.TablePrefix}}projects_org_id_id_key UNIQUE (org_id, id);
@@ -87,10 +91,11 @@ REVOKE EXECUTE ON FUNCTION {{.Schema}}.{{.TablePrefix}}resolve_api_key_by_secret
 
 DROP TABLE IF EXISTS {{.Schema}}.{{.TablePrefix}}api_key_projects;
 ALTER TABLE {{.Schema}}.{{.TablePrefix}}projects DROP CONSTRAINT IF EXISTS {{.TablePrefix}}projects_org_id_id_key;
+DROP INDEX IF EXISTS {{.Schema}}.{{.TablePrefix}}api_keys_personal_owner_idx;
 DROP INDEX IF EXISTS {{.Schema}}.{{.TablePrefix}}api_keys_org_kind_idx;
 
--- NOTE: org keys cannot satisfy the restored NOT NULL project_id and are dropped.
-DELETE FROM {{.Schema}}.{{.TablePrefix}}api_keys WHERE kind = 'org';
+-- NOTE: org keys and personal tokens cannot satisfy the restored NOT NULL project_id and are dropped.
+DELETE FROM {{.Schema}}.{{.TablePrefix}}api_keys WHERE kind <> 'project';
 ALTER TABLE {{.Schema}}.{{.TablePrefix}}api_keys
   DROP CONSTRAINT IF EXISTS {{.TablePrefix}}api_keys_org_id_id_key,
   DROP CONSTRAINT IF EXISTS {{.TablePrefix}}api_keys_kind_shape,

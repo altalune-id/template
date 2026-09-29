@@ -297,23 +297,19 @@ func (s *postgresStore) BySecretHash(ctx context.Context, hash [32]byte) (*APIKe
 }
 
 func (s *postgresStore) List(ctx context.Context, projectID uuid.UUID) ([]*APIKey, error) {
-	tx, owned, tc, err := s.txAcquire(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if owned {
-		defer func() { _ = tx.Rollback() }()
-	}
-	stmt := postgres.SELECT(s.selectColumns()).
-		FROM(s.keys).
-		WHERE(s.keys.OrgID.EQ(postgres.UUID(tc.OrgID)).
-			AND(s.keys.Kind.EQ(postgres.String(string(KindProject)))).
-			AND(s.keys.ProjectID.EQ(postgres.UUID(projectID)))).
-		ORDER_BY(s.keys.CreatedAt.DESC(), s.keys.ID.DESC())
-	return s.queryKeys(ctx, tx, stmt, "List")
+	return s.listWhere(ctx, "List", s.keys.Kind.EQ(postgres.String(string(KindProject))).AND(s.keys.ProjectID.EQ(postgres.UUID(projectID))))
 }
 
 func (s *postgresStore) ListOrg(ctx context.Context) ([]*APIKey, error) {
+	return s.listWhere(ctx, "ListOrg", s.keys.Kind.EQ(postgres.String(string(KindOrg))))
+}
+
+func (s *postgresStore) ListPersonal(ctx context.Context, ownerID uuid.UUID) ([]*APIKey, error) {
+	return s.listWhere(ctx, "ListPersonal", s.keys.Kind.EQ(postgres.String(string(KindPersonal))).AND(s.keys.CreatedBy.EQ(postgres.UUID(ownerID))))
+}
+
+// SECURITY: every listing is pinned to the caller's org here, whatever cond adds.
+func (s *postgresStore) listWhere(ctx context.Context, op string, cond postgres.BoolExpression) ([]*APIKey, error) {
 	tx, owned, tc, err := s.txAcquire(ctx)
 	if err != nil {
 		return nil, err
@@ -323,10 +319,9 @@ func (s *postgresStore) ListOrg(ctx context.Context) ([]*APIKey, error) {
 	}
 	stmt := postgres.SELECT(s.selectColumns()).
 		FROM(s.keys).
-		WHERE(s.keys.OrgID.EQ(postgres.UUID(tc.OrgID)).
-			AND(s.keys.Kind.EQ(postgres.String(string(KindOrg))))).
+		WHERE(s.keys.OrgID.EQ(postgres.UUID(tc.OrgID)).AND(cond)).
 		ORDER_BY(s.keys.CreatedAt.DESC(), s.keys.ID.DESC())
-	return s.queryKeys(ctx, tx, stmt, "ListOrg")
+	return s.queryKeys(ctx, tx, stmt, op)
 }
 
 func (s *postgresStore) queryKeys(ctx context.Context, tx *sql.Tx, stmt postgres.SelectStatement, op string) ([]*APIKey, error) {
@@ -343,6 +338,24 @@ func (s *postgresStore) queryKeys(ctx context.Context, tx *sql.Tx, stmt postgres
 		out = append(out, k)
 	}
 	return out, nil
+}
+
+func (s *postgresStore) RevokePersonal(ctx context.Context, ownerID uuid.UUID, at time.Time) error {
+	tx, owned, tc, err := s.txAcquire(ctx)
+	if err != nil {
+		return err
+	}
+	stmt := s.keys.UPDATE(s.keys.RevokedAt).
+		SET(postgres.TimestampzT(at.UTC())).
+		WHERE(s.keys.OrgID.EQ(postgres.UUID(tc.OrgID)).
+			AND(s.keys.Kind.EQ(postgres.String(string(KindPersonal)))).
+			AND(s.keys.CreatedBy.EQ(postgres.UUID(ownerID))).
+			AND(s.keys.RevokedAt.IS_NULL()))
+	_, err = stmt.ExecContext(ctx, tx)
+	if err != nil {
+		err = fmt.Errorf("apikey.postgres.RevokePersonal: %w", err)
+	}
+	return s.endTx(tx, owned, err)
 }
 
 func (s *postgresStore) TouchLastUsed(ctx context.Context, id uuid.UUID, at time.Time) error {

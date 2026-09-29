@@ -5,7 +5,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -86,7 +88,7 @@ func (x *apikeyWebFixture) orgKeys(t *testing.T) []*apikey.APIKey {
 func TestOrgAPIKeys_OwnerMintsASelectedProjectsKey(t *testing.T) {
 	x := newAPIKeyWebFixture(t)
 	rec := x.as(t, x.owner, http.MethodPost, "/orgs/acme/apikeys", url.Values{
-		"name": {"ci"}, "scopes": {authn.ScopePostsRead}, "grant": {"selected"}, "project_ids": {x.alpha.ID.String()},
+		"name": {"ci"}, "scopes": {authn.ScopePostsRead}, "grant": {"selected"}, "project_ids": {x.alpha.ID.String()}, "expires_in": {"30"},
 	})
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 
@@ -100,7 +102,7 @@ func TestOrgAPIKeys_OwnerMintsASelectedProjectsKey(t *testing.T) {
 func TestOrgAPIKeys_OwnerPromotesAKey(t *testing.T) {
 	x := newAPIKeyWebFixture(t)
 	x.as(t, x.owner, http.MethodPost, "/orgs/acme/apikeys", url.Values{
-		"name": {"ci"}, "grant": {"selected"}, "project_ids": {x.alpha.ID.String()},
+		"name": {"ci"}, "grant": {"selected"}, "project_ids": {x.alpha.ID.String()}, "expires_in": {"30"},
 	})
 	id := x.orgKeys(t)[0].ID.String()
 
@@ -116,7 +118,7 @@ func TestOrgAPIKeys_OwnerPromotesAKey(t *testing.T) {
 
 func TestOrgAPIKeys_EmptySelectionIsRefused(t *testing.T) {
 	x := newAPIKeyWebFixture(t)
-	rec := x.as(t, x.owner, http.MethodPost, "/orgs/acme/apikeys", url.Values{"name": {"ci"}, "grant": {"selected"}})
+	rec := x.as(t, x.owner, http.MethodPost, "/orgs/acme/apikeys", url.Values{"name": {"ci"}, "grant": {"selected"}, "expires_in": {"30"}})
 	require.Equal(t, http.StatusOK, rec.Code)
 	assert.Contains(t, rec.Body.String(), "apikey.error_empty_grant")
 	assert.Empty(t, x.orgKeys(t))
@@ -125,7 +127,7 @@ func TestOrgAPIKeys_EmptySelectionIsRefused(t *testing.T) {
 // SECURITY: a member sees the lists read-only and every write is refused by the service, not only hidden by the page.
 func TestAPIKeys_MemberIsReadOnly(t *testing.T) {
 	x := newAPIKeyWebFixture(t)
-	x.as(t, x.owner, http.MethodPost, "/orgs/acme/apikeys", url.Values{"name": {"ci"}, "grant": {"all"}})
+	x.as(t, x.owner, http.MethodPost, "/orgs/acme/apikeys", url.Values{"name": {"ci"}, "grant": {"all"}, "expires_in": {"30"}})
 	id := x.orgKeys(t)[0].ID.String()
 
 	page := x.as(t, x.member, http.MethodGet, "/orgs/acme/apikeys", nil)
@@ -140,7 +142,7 @@ func TestAPIKeys_MemberIsReadOnly(t *testing.T) {
 		"mint project key": "/orgs/acme/projects/alpha/apikeys",
 	} {
 		t.Run(name, func(t *testing.T) {
-			rec := x.as(t, x.member, http.MethodPost, target, url.Values{"name": {"sneaky"}, "grant": {"all"}})
+			rec := x.as(t, x.member, http.MethodPost, target, url.Values{"name": {"sneaky"}, "grant": {"all"}, "expires_in": {"30"}})
 			assert.Contains(t, rec.Body.String(), "apikey.error_not_manager", "body=%s", rec.Body.String())
 		})
 	}
@@ -156,4 +158,102 @@ func TestProjectAPIKeys_HideTheRetiredScope(t *testing.T) {
 	require.Equal(t, http.StatusOK, page.Code)
 	assert.NotContains(t, page.Body.String(), `value="`+authn.ScopeAPIKeysWrite+`"`)
 	assert.Contains(t, page.Body.String(), `value="`+authn.ScopePostsRead+`"`)
+}
+
+func TestAPIKeys_ExpiryIsRequiredAndCapped(t *testing.T) {
+	x := newAPIKeyWebFixture(t)
+	for _, days := range []string{"", "0", "366", "never"} {
+		rec := x.as(t, x.owner, http.MethodPost, "/orgs/acme/apikeys", url.Values{"name": {"ci"}, "grant": {"all"}, "expires_in": {days}})
+		assert.Contains(t, rec.Body.String(), "apikey.error_invalid_expiry", "expires_in=%q", days)
+	}
+	assert.Empty(t, x.Store.All(), "no key may be minted without an allowed lifetime")
+
+	x.as(t, x.owner, http.MethodPost, "/orgs/acme/apikeys", url.Values{"name": {"ci"}, "grant": {"all"}, "expires_in": {"365"}})
+	keys := x.orgKeys(t)
+	require.Len(t, keys, 1)
+	require.NotNil(t, keys[0].ExpiresAt)
+	assert.WithinDuration(t, time.Now().AddDate(0, 0, 365), *keys[0].ExpiresAt, time.Minute)
+}
+
+func (x *apikeyWebFixture) personalKeys(t *testing.T, userID uuid.UUID) []*apikey.APIKey {
+	t.Helper()
+	keys, err := x.Keys.ListPersonal(setTenant(context.Background(), x.org, userID))
+	require.NoError(t, err)
+	return keys
+}
+
+// A member — not only an owner or admin — creates their own personal access token from Settings.
+func TestPersonalTokens_AMemberCreatesTheirOwn(t *testing.T) {
+	x := newAPIKeyWebFixture(t)
+
+	page := x.as(t, x.member, http.MethodGet, "/settings/tokens", nil)
+	require.Equal(t, http.StatusOK, page.Code)
+	assert.Contains(t, page.Body.String(), `name="org"`, "the form lets the caller pick an org")
+	assert.Contains(t, page.Body.String(), `/settings/tokens/projects`, "switching org reloads the project picker")
+
+	rec := x.as(t, x.member, http.MethodPost, "/settings/tokens", url.Values{
+		"org": {"acme"}, "name": {"laptop"}, "scopes": {authn.ScopePostsRead}, "grant": {"selected"},
+		"project_ids": {x.beta.ID.String()}, "expires_in": {"7"},
+	})
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	mine := x.personalKeys(t, x.member)
+	require.Len(t, mine, 1)
+	assert.Equal(t, x.member, mine[0].CreatedBy)
+	assert.Equal(t, []uuid.UUID{x.beta.ID}, mine[0].ProjectIDs)
+	assert.Contains(t, rec.Body.String(), "…"+mine[0].SecretHint)
+	assert.Contains(t, rec.Body.String(), "/settings/tokens/acme/"+mine[0].ID.String()+"/revoke")
+	assert.Empty(t, x.personalKeys(t, x.owner), "the owner's list must not show a member's token")
+}
+
+// SECURITY: a personal token is its owner's alone — the org owner cannot revoke or widen it, and the attempt changes nothing.
+func TestPersonalTokens_OthersCannotTouchThem(t *testing.T) {
+	x := newAPIKeyWebFixture(t)
+	x.as(t, x.member, http.MethodPost, "/settings/tokens", url.Values{
+		"org": {"acme"}, "name": {"laptop"}, "grant": {"selected"}, "project_ids": {x.alpha.ID.String()}, "expires_in": {"7"},
+	})
+	id := x.personalKeys(t, x.member)[0].ID.String()
+
+	x.as(t, x.owner, http.MethodPost, "/settings/tokens/acme/"+id+"/revoke", nil)
+	x.as(t, x.owner, http.MethodPost, "/settings/tokens/acme/"+id+"/all-projects", nil)
+	x.as(t, x.owner, http.MethodPost, "/orgs/acme/apikeys/"+id+"/revoke", nil)
+
+	k := x.personalKeys(t, x.member)[0]
+	assert.Nil(t, k.RevokedAt, "another user's revoke must not land")
+	assert.False(t, k.AllProjects, "another user's promotion must not land")
+
+	x.as(t, x.member, http.MethodPost, "/settings/tokens/acme/"+id+"/revoke", nil)
+	assert.NotNil(t, x.personalKeys(t, x.member)[0].RevokedAt, "the owner revokes their own token")
+}
+
+// SECURITY: the org named by the form is membership-gated like any path slug, so a caller cannot mint into an org they do not belong to.
+func TestPersonalTokens_AForeignOrgIsRefused(t *testing.T) {
+	x := newAPIKeyWebFixture(t)
+	stranger := uuid.New()
+	x.seedOrg(t, "other", stranger)
+
+	rec := x.as(t, x.member, http.MethodPost, "/settings/tokens", url.Values{
+		"org": {"other"}, "name": {"sneaky"}, "grant": {"all"}, "expires_in": {"7"},
+	})
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+	assert.Empty(t, x.Store.All())
+
+	rec = x.as(t, x.member, http.MethodGet, "/settings/tokens/projects?org=other", nil)
+	assert.Equal(t, http.StatusNotFound, rec.Code, "the project picker must not list another org's projects")
+}
+
+func TestPersonalTokens_SignedOutIsSentToLogin(t *testing.T) {
+	x := newAPIKeyWebFixture(t)
+	r := httptest.NewRequest(http.MethodPost, "/settings/tokens", strings.NewReader("org=acme&name=x&expires_in=7"))
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	x.Mux.ServeHTTP(rec, r)
+	assert.Equal(t, http.StatusSeeOther, rec.Code)
+	assert.Contains(t, rec.Header().Get("Location"), "/login")
+}
+
+func TestPersonalTokens_UnknownOrgFallsBackToTheFirst(t *testing.T) {
+	x := newAPIKeyWebFixture(t)
+	page := x.as(t, x.member, http.MethodGet, "/settings/tokens?org=nope", nil)
+	require.Equal(t, http.StatusOK, page.Code)
+	assert.Contains(t, page.Body.String(), x.alpha.ID.String(), "the picker must show the selected org's projects")
 }

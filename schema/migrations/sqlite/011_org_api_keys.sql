@@ -23,7 +23,7 @@ CREATE TABLE {{.TablePrefix}}api_keys_new (
   last_used_at        TEXT,
   CONSTRAINT {{.TablePrefix}}api_keys_kind_shape CHECK (
     (kind = 'project' AND project_id IS NOT NULL AND all_projects = 0)
-    OR (kind = 'org' AND project_id IS NULL)
+    OR (kind IN ('org', 'personal') AND project_id IS NULL)
   )
 );
 
@@ -48,6 +48,10 @@ CREATE INDEX {{.TablePrefix}}api_keys_project_idx
 
 CREATE INDEX {{.TablePrefix}}api_keys_org_kind_idx
   ON {{.TablePrefix}}api_keys (org_id, kind, created_at DESC);
+
+CREATE INDEX {{.TablePrefix}}api_keys_personal_owner_idx
+  ON {{.TablePrefix}}api_keys (org_id, created_by, created_at DESC)
+  WHERE kind = 'personal';
 
 CREATE UNIQUE INDEX {{.TablePrefix}}api_keys_org_id_id_key
   ON {{.TablePrefix}}api_keys (org_id, id);
@@ -82,7 +86,7 @@ SELECT t.id, t.created_by_key_id FROM {{.TablePrefix}}todos t
 JOIN {{.TablePrefix}}api_keys k ON k.id = t.created_by_key_id
 WHERE k.kind = 'project';
 
--- NOTE: org keys cannot satisfy the restored NOT NULL project_id and are dropped.
+-- NOTE: org keys and personal tokens cannot satisfy the restored NOT NULL project_id and are dropped.
 CREATE TABLE {{.TablePrefix}}api_keys_old (
   id                  TEXT PRIMARY KEY,
   org_id              TEXT NOT NULL REFERENCES {{.TablePrefix}}orgs(id) ON DELETE CASCADE,

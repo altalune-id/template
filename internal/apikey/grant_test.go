@@ -81,8 +81,8 @@ func TestGrantOnlyWidens(t *testing.T) {
 	t.Run("a project key has no grant to change", func(t *testing.T) {
 		k, _, err := apikey.Scheme{}.Mint(uuid.New(), a, "p", nil, nil, nil, time.Now())
 		require.NoError(t, err)
-		assert.True(t, apikey.IsNotOrgKeyError(k.GrantProjects([]uuid.UUID{b})))
-		assert.True(t, apikey.IsNotOrgKeyError(k.GrantAllProjects()))
+		assert.True(t, apikey.IsBoundToProjectError(k.GrantProjects([]uuid.UUID{b})))
+		assert.True(t, apikey.IsBoundToProjectError(k.GrantAllProjects()))
 		assert.Equal(t, []uuid.UUID{a}, k.ReachableProjects())
 	})
 	t.Run("a revoked key cannot be promoted", func(t *testing.T) {

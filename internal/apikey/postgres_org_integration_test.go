@@ -97,3 +97,25 @@ func TestPostgres_OrgKeyGrantsAreInvisibleAcrossOrgs(t *testing.T) {
 	require.NoError(t, err, "the pre-tenant lookup must still resolve the key and its grant")
 	assert.Equal(t, []uuid.UUID{a.ProjectID}, resolved.ProjectIDs)
 }
+
+func TestPostgres_PersonalTokenRoundTrip(t *testing.T) {
+	f := newPgFixture(t)
+	ctx := tenant.Into(t.Context(), tenant.Context{OrgID: f.tc.OrgID, UserID: f.tc.UserID})
+
+	k, plaintext, err := apikey.Scheme{}.MintPersonal(f.tc.OrgID, f.tc.UserID, "laptop", []string{authn.ScopePostsRead}, apikey.ProjectGrant{ProjectIDs: []uuid.UUID{f.tc.ProjectID}}, nil, time.Now().UTC())
+	require.NoError(t, err)
+	require.NoError(t, f.store.Save(ctx, k))
+
+	mine, err := f.store.ListPersonal(ctx, f.tc.UserID)
+	require.NoError(t, err)
+	require.Len(t, mine, 1)
+	assert.Equal(t, []uuid.UUID{f.tc.ProjectID}, mine[0].ProjectIDs)
+	none, err := f.store.ListPersonal(ctx, uuid.New())
+	require.NoError(t, err)
+	assert.Empty(t, none)
+
+	resolved, err := f.store.BySecretHash(t.Context(), sha(plaintext))
+	require.NoError(t, err)
+	assert.Equal(t, apikey.KindPersonal, resolved.Kind)
+	assert.Equal(t, f.tc.UserID, resolved.CreatedBy)
+}

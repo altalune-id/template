@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
@@ -84,9 +85,9 @@ func newDataplaneFixture(t *testing.T, opts dataplaneOpts) *dataplaneFixture {
 	_, err = srv.Posts.Publish(projCtx, post.ID, 0)
 	require.NoError(t, err)
 
-	_, readKey, err := srv.APIKeys.Mint(projCtx, "reader", []string{authn.ScopePostsRead}, nil, nil)
+	_, readKey, err := srv.APIKeys.Mint(projCtx, "reader", []string{authn.ScopePostsRead}, nil, soon())
 	require.NoError(t, err)
-	_, noneKey, err := srv.APIKeys.Mint(projCtx, "keys-only", []string{authn.ScopeAPIKeysRead}, nil, nil)
+	_, noneKey, err := srv.APIKeys.Mint(projCtx, "keys-only", []string{authn.ScopeAPIKeysRead}, nil, soon())
 	require.NoError(t, err)
 
 	base := "/api/v1/orgs/" + o.Slug + "/projects/" + p.Slug + "/posts"
@@ -197,14 +198,19 @@ func TestDataPlane_OrgKeyAgreesWithItsGrant(t *testing.T) {
 	require.NoError(t, err)
 
 	_, granted, err := f.srv.APIKeys.MintOrg(f.orgCtx, "granted", []string{authn.ScopePostsRead},
-		apikey.ProjectGrant{ProjectIDs: []uuid.UUID{f.project}}, nil)
+		apikey.ProjectGrant{ProjectIDs: []uuid.UUID{f.project}}, soon())
 	require.NoError(t, err)
 	_, elsewhere, err := f.srv.APIKeys.MintOrg(f.orgCtx, "elsewhere", []string{authn.ScopePostsRead},
-		apikey.ProjectGrant{ProjectIDs: []uuid.UUID{other.ID}}, nil)
+		apikey.ProjectGrant{ProjectIDs: []uuid.UUID{other.ID}}, soon())
 	require.NoError(t, err)
 
 	rec := f.get(t, f.postURL, granted)
 	require.Equal(t, http.StatusOK, rec.Code, "an org key granted the project must read it; body=%s", rec.Body.String())
 	rec = f.get(t, f.postURL, elsewhere)
 	require.Equal(t, http.StatusNotFound, rec.Code, "an org key granted another project must read nothing here; body=%s", rec.Body.String())
+}
+
+func soon() *time.Time {
+	t := time.Now().UTC().Add(24 * time.Hour)
+	return &t
 }

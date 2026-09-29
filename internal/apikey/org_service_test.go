@@ -4,6 +4,7 @@ import (
 	"io"
 	"log/slog"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -19,7 +20,7 @@ import (
 type orgKeyFixture struct {
 	svc      *apikey.Service
 	store    *fakes.APIKey
-	managers *fakes.Managers
+	managers *fakes.Members
 	orgID    uuid.UUID
 	a, b     uuid.UUID
 	admin    tenant.Context
@@ -28,13 +29,13 @@ type orgKeyFixture struct {
 func newOrgKeyFixture(t *testing.T) *orgKeyFixture {
 	t.Helper()
 	store := fakes.NewAPIKey()
-	managers := fakes.NewManagers()
+	managers := fakes.NewMembers()
 	projects := fakes.NewOrgProjects()
 	orgID, a, b := uuid.New(), uuid.New(), uuid.New()
 	projects.Add(orgID, a)
 	projects.Add(orgID, b)
 	admin := tenant.Context{OrgID: orgID, UserID: uuid.New()}
-	managers.Seat(orgID, admin.UserID)
+	managers.SeatManager(orgID, admin.UserID)
 	svc := apikey.NewService(store, apikey.Scheme{}, managers, projects, slog.New(slog.NewTextHandler(io.Discard, nil)), failingUnexpected(t))
 	return &orgKeyFixture{svc: svc, store: store, managers: managers, orgID: orgID, a: a, b: b, admin: admin}
 }
@@ -43,11 +44,11 @@ func TestMintOrgKey(t *testing.T) {
 	f := newOrgKeyFixture(t)
 	ctx := tenant.Into(t.Context(), f.admin)
 
-	k, plaintext, err := f.svc.MintOrg(ctx, "ci", []string{authn.ScopePostsRead}, apikey.ProjectGrant{ProjectIDs: []uuid.UUID{f.a}}, nil)
+	k, plaintext, err := f.svc.MintOrg(ctx, "ci", []string{authn.ScopePostsRead}, apikey.ProjectGrant{ProjectIDs: []uuid.UUID{f.a}}, in(time.Hour))
 	require.NoError(t, err)
 	assert.Equal(t, f.admin.UserID, k.CreatedBy)
 
-	p, err := apikey.NewAuthenticator(f.store, nil, apikey.Scheme{}).Authenticate(t.Context(), plaintext)
+	p, err := apikey.NewAuthenticator(f.store, nil, apikey.Scheme{}, fakes.NewMembers()).Authenticate(t.Context(), plaintext)
 	require.NoError(t, err)
 	assert.True(t, p.ReachesProject(f.orgID, f.a), "the granted project must be reachable")
 	assert.False(t, p.ReachesProject(f.orgID, f.b), "an ungranted project must not be")
@@ -65,7 +66,7 @@ func TestMintOrgKeyRefusesAForeignProject(t *testing.T) {
 	f := newOrgKeyFixture(t)
 	ctx := tenant.Into(t.Context(), f.admin)
 
-	_, _, err := f.svc.MintOrg(ctx, "x", nil, apikey.ProjectGrant{ProjectIDs: []uuid.UUID{f.a, uuid.New()}}, nil)
+	_, _, err := f.svc.MintOrg(ctx, "x", nil, apikey.ProjectGrant{ProjectIDs: []uuid.UUID{f.a, uuid.New()}}, in(time.Hour))
 	assert.True(t, apikey.IsProjectNotInOrgError(err), "got %v", err)
 	assert.Empty(t, f.store.All())
 }
@@ -73,7 +74,7 @@ func TestMintOrgKeyRefusesAForeignProject(t *testing.T) {
 func TestPromoteOrgKey(t *testing.T) {
 	f := newOrgKeyFixture(t)
 	ctx := tenant.Into(t.Context(), f.admin)
-	k, plaintext, err := f.svc.MintOrg(ctx, "ci", []string{authn.ScopePostsRead}, apikey.ProjectGrant{ProjectIDs: []uuid.UUID{f.a}}, nil)
+	k, plaintext, err := f.svc.MintOrg(ctx, "ci", []string{authn.ScopePostsRead}, apikey.ProjectGrant{ProjectIDs: []uuid.UUID{f.a}}, in(time.Hour))
 	require.NoError(t, err)
 
 	_, err = f.svc.GrantProjects(ctx, k.ID, []uuid.UUID{uuid.New()})
@@ -87,7 +88,7 @@ func TestPromoteOrgKey(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, got.AllProjects)
 
-	p, err := apikey.NewAuthenticator(f.store, nil, apikey.Scheme{}).Authenticate(t.Context(), plaintext)
+	p, err := apikey.NewAuthenticator(f.store, nil, apikey.Scheme{}, fakes.NewMembers()).Authenticate(t.Context(), plaintext)
 	require.NoError(t, err)
 	assert.True(t, p.ReachesProject(f.orgID, uuid.New()), "an all-projects key reaches a project created later")
 }
@@ -95,7 +96,7 @@ func TestPromoteOrgKey(t *testing.T) {
 // SECURITY: an org key seen from a project reads as absent, so a project page can never revoke or widen it.
 func TestOrgKeyIsAbsentFromAProjectScope(t *testing.T) {
 	f := newOrgKeyFixture(t)
-	k, _, err := f.svc.MintOrg(tenant.Into(t.Context(), f.admin), "ci", nil, apikey.ProjectGrant{All: true}, nil)
+	k, _, err := f.svc.MintOrg(tenant.Into(t.Context(), f.admin), "ci", nil, apikey.ProjectGrant{All: true}, in(time.Hour))
 	require.NoError(t, err)
 
 	fromProject := tenant.Into(t.Context(), tenant.Context{OrgID: f.orgID, ProjectID: f.a, UserID: f.admin.UserID})
@@ -107,7 +108,7 @@ func TestOrgKeyIsAbsentFromAProjectScope(t *testing.T) {
 // SECURITY: every write asks the owner/admin gate; a member and a machine principal are refused before anything is stored.
 func TestEveryKeyWriteRequiresAManager(t *testing.T) {
 	f := newOrgKeyFixture(t)
-	k, _, err := f.svc.MintOrg(tenant.Into(t.Context(), f.admin), "ci", nil, apikey.ProjectGrant{ProjectIDs: []uuid.UUID{f.a}}, nil)
+	k, _, err := f.svc.MintOrg(tenant.Into(t.Context(), f.admin), "ci", nil, apikey.ProjectGrant{ProjectIDs: []uuid.UUID{f.a}}, in(time.Hour))
 	require.NoError(t, err)
 
 	for name, tc := range map[string]tenant.Context{
@@ -116,7 +117,7 @@ func TestEveryKeyWriteRequiresAManager(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			ctx := tenant.Into(t.Context(), tc)
-			_, _, err := f.svc.MintOrg(ctx, "x", nil, apikey.ProjectGrant{All: true}, nil)
+			_, _, err := f.svc.MintOrg(ctx, "x", nil, apikey.ProjectGrant{All: true}, in(time.Hour))
 			assert.True(t, org.IsNotManagerError(err), "MintOrg: %v", err)
 			_, err = f.svc.GrantProjects(ctx, k.ID, []uuid.UUID{f.b})
 			assert.True(t, org.IsNotManagerError(err), "GrantProjects: %v", err)
@@ -124,7 +125,7 @@ func TestEveryKeyWriteRequiresAManager(t *testing.T) {
 			assert.True(t, org.IsNotManagerError(err), "GrantAllProjects: %v", err)
 			assert.True(t, org.IsNotManagerError(f.svc.Revoke(ctx, k.ID)), "Revoke")
 			projCtx := tenant.Into(t.Context(), tenant.Context{OrgID: f.orgID, ProjectID: f.a, UserID: tc.UserID})
-			_, _, err = f.svc.Mint(projCtx, "x", nil, nil, nil)
+			_, _, err = f.svc.Mint(projCtx, "x", nil, nil, in(time.Hour))
 			assert.True(t, org.IsNotManagerError(err), "Mint: %v", err)
 		})
 	}

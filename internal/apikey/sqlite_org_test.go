@@ -2,6 +2,7 @@ package apikey_test
 
 import (
 	"crypto/sha256"
+	"database/sql"
 	"testing"
 	"time"
 
@@ -79,3 +80,67 @@ func TestSQLiteKindShapeIsEnforced(t *testing.T) {
 }
 
 func sha(plaintext string) [32]byte { return sha256.Sum256([]byte(plaintext)) }
+
+func TestSQLitePersonalTokenRoundTrip(t *testing.T) {
+	store, sqlDB, tc := newAPIKeyStoreForTest(t)
+	other := seedTenant(t, sqlDB)
+	ctx := tenant.Into(t.Context(), tenant.Context{OrgID: tc.OrgID, UserID: tc.UserID})
+
+	k, plaintext, err := apikey.Scheme{}.MintPersonal(tc.OrgID, tc.UserID, "laptop", []string{authn.ScopePostsRead}, apikey.ProjectGrant{All: true}, nil, time.Now().UTC())
+	require.NoError(t, err)
+	require.NoError(t, store.Save(ctx, k))
+
+	mine, err := store.ListPersonal(ctx, tc.UserID)
+	require.NoError(t, err)
+	require.Len(t, mine, 1)
+	assert.Equal(t, apikey.KindPersonal, mine[0].Kind)
+	assert.True(t, mine[0].AllProjects)
+	assert.Equal(t, tc.UserID, mine[0].CreatedBy)
+
+	none, err := store.ListPersonal(ctx, other.UserID)
+	require.NoError(t, err)
+	assert.Empty(t, none, "another user's listing must not include this token")
+	orgKeys, err := store.ListOrg(ctx)
+	require.NoError(t, err)
+	assert.Empty(t, orgKeys)
+
+	resolved, err := store.BySecretHash(t.Context(), sha(plaintext))
+	require.NoError(t, err)
+	assert.Equal(t, apikey.KindPersonal, resolved.Kind)
+}
+
+// SECURITY: SQLite has no RLS, so the org predicate is the only thing keeping one org's tokens out of another org's list and revoke.
+func TestSQLitePersonalTokensStayInTheirOrg(t *testing.T) {
+	store, sqlDB, a := newAPIKeyStoreForTest(t)
+	b := seedTenant(t, sqlDB)
+	joinOrg(t, sqlDB, b.OrgID, a.UserID)
+	inA := tenant.Into(t.Context(), tenant.Context{OrgID: a.OrgID, UserID: a.UserID})
+	inB := tenant.Into(t.Context(), tenant.Context{OrgID: b.OrgID, UserID: a.UserID})
+
+	ka, _, err := apikey.Scheme{}.MintPersonal(a.OrgID, a.UserID, "a", nil, apikey.ProjectGrant{All: true}, nil, time.Now().UTC())
+	require.NoError(t, err)
+	require.NoError(t, store.Save(inA, ka))
+	kb, _, err := apikey.Scheme{}.MintPersonal(b.OrgID, a.UserID, "b", nil, apikey.ProjectGrant{All: true}, nil, time.Now().UTC())
+	require.NoError(t, err)
+	require.NoError(t, store.Save(inB, kb))
+
+	listed, err := store.ListPersonal(inA, a.UserID)
+	require.NoError(t, err)
+	require.Len(t, listed, 1)
+	assert.Equal(t, ka.ID, listed[0].ID, "org A's list must not include the same owner's token in org B")
+
+	require.NoError(t, store.RevokePersonal(inA, a.UserID, time.Now().UTC()))
+	gotA, err := store.ByID(inA, ka.ID)
+	require.NoError(t, err)
+	assert.NotNil(t, gotA.RevokedAt)
+	gotB, err := store.ByID(inB, kb.ID)
+	require.NoError(t, err)
+	assert.Nil(t, gotB.RevokedAt, "leaving org A must not revoke the token in org B")
+}
+
+func joinOrg(t *testing.T, sqlDB *sql.DB, orgID, userID uuid.UUID) {
+	t.Helper()
+	_, err := sqlDB.Exec("INSERT INTO "+prefix+"memberships (id, org_id, user_id, role, created_at) VALUES (?, ?, ?, 'member', ?)",
+		uuid.NewString(), orgID.String(), userID.String(), sqliteent.SQLiteTime(time.Now()))
+	require.NoError(t, err)
+}

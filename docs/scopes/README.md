@@ -3,27 +3,26 @@
 Wire contract. Keys store these exact strings; integrators type them; MCP hosts read them from
 the metadata document. **Additive only** — renaming one invalidates keys in the field.
 
-Defined in `internal/platform/authn/scope.go`. `authn.Valid()` gates minting.
+Defined in `internal/platform/authn/scope.go`, one `catalog` row per scope with its level.
+`authn.Mintable()` gates minting; `authn.Valid()` still accepts a retired scope on an existing key.
 
 ## Catalog
 
-| Scope           | Level   | Grants                                          |
-| --------------- | ------- | ----------------------------------------------- |
-| `posts:read`    | project | Read posts and todos; list projects             |
-| `posts:write`   | project | Create, update, publish, unpublish              |
-| `posts:admin`   | project | Delete a post or todo                           |
-| `apikeys:read`  | project | List keys; `Whoami`                             |
-| `apikeys:write` | project | **Retired.** Validates on old keys, grants none |
+| Scope           | Level   | Grants                                 |
+| --------------- | ------- | -------------------------------------- |
+| `posts:read`    | project | Read posts and todos; list projects    |
+| `posts:write`   | project | Create, update, publish, unpublish     |
+| `posts:admin`   | project | Delete a post or todo                  |
+| `apikeys:read`  | project | List keys; `Whoami`                    |
+| `apikeys:write` | project | **Retired.** Validates, grants nothing |
+| `members:read`  | org     | List the org's members (`member_list`) |
 
-- **Only an owner or admin person manages keys.** `apikey.Service` asks
-  `org.Service.RequireManager` before every mint, promotion and revoke, on every surface.
-  A key is never a manager, so `apikeys:write` retired: it still validates, the console
-  no longer offers it, and a mint naming it is refused (`authn.Mintable`).
-- **A level says where authority lives.** `project` scopes act on data inside the projects a
-  key reaches. An `org` scope (none yet — e.g. `projects:write`, `members:read`) acts on the
-  org itself, is refused on a project key (`apikey.ScopeLevelError`), and is the slot org
-  administration arrives through.
-
+- **Levels.** A `project` scope acts on data inside the projects a key reaches. An `org` scope acts
+  on the org itself. A project key refuses an org scope (`APK003`); an org key may hold one; a
+  personal token may hold one only while its owner is an owner or admin, checked on every request.
+- **Who manages keys.** Org and project keys: an owner or admin person (`org.Service.RequireManager`),
+  on every surface. A personal token: its owner, a member of its org. A key never manages keys.
+- **Every new key expires** within `apikey.MaxLifetime` (a year).
 - **No implication.** `posts:admin` does not grant `posts:write`. The check is
   `slices.Contains`. A key needing read + delete holds both strings.
 - **`posts:*` spans `blog` and `todo`.** A fork splitting them adds its own strings.
@@ -59,8 +58,8 @@ Two asymmetries, both deliberate:
   its scopes are the limit of that delegation. See [`mcp`](../mcp/README.md).
 
 Every surface narrows past the scope with one rule, `session.Principal.Reaches*`: a key reaches
-only the projects it was granted — one for a project key, the grant for an org key — and a
-non-empty `ResourceIDs` confines it to named resources.
+only the projects it was granted — one for a project key, the grant for an org key or personal
+token — and a non-empty `ResourceIDs` confines it to named resources.
 
 ## Adding one
 

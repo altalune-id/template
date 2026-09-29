@@ -39,15 +39,33 @@ func (sc Scheme) Authn() authn.Scheme { return authn.Scheme{Prefix: sc.Prefix()}
 // Kind names what an API key is bound to.
 type Kind string
 
-// The key kinds. A project key is bound to one project for life; an org key reaches the projects its grant names.
+// The key kinds. A project key is bound to one project for life; an org key and a personal token reach the projects their grant names.
 const (
-	KindProject Kind = "project"
-	KindOrg     Kind = "org"
+	KindProject  Kind = "project"
+	KindOrg      Kind = "org"
+	KindPersonal Kind = "personal"
 )
 
 const secretHintLen = 4
 
-// ProjectGrant is the set of projects an org key reaches: every project of the org, or the named ones.
+// MaxLifetime is the longest a newly minted key may live: one calendar year, leap day included.
+const MaxLifetime = 366 * 24 * time.Hour
+
+// SECURITY: checked at mint only; existing keys may have no expiry.
+func validateLifetime(expiresAt *time.Time, now time.Time) error {
+	if expiresAt == nil {
+		return &ExpiryRequiredError{}
+	}
+	if !expiresAt.After(now) {
+		return &ExpiryInPastError{}
+	}
+	if expiresAt.Sub(now) > MaxLifetime {
+		return &ExpiryTooLongError{}
+	}
+	return nil
+}
+
+// ProjectGrant is the set of projects an org key or personal token reaches: every project of the org, or the named ones.
 type ProjectGrant struct {
 	All        bool
 	ProjectIDs []uuid.UUID
@@ -63,7 +81,7 @@ func (g ProjectGrant) validate() error {
 	return nil
 }
 
-// APIKey is a machine credential bound to one project, or to an org and the projects its grant names.
+// APIKey is a machine credential bound to one project, or to an org and the projects its grant names; a personal one acts for its owner.
 type APIKey struct {
 	ID          uuid.UUID
 	OrgID       uuid.UUID
@@ -115,6 +133,17 @@ func (sc Scheme) MintOrg(orgID uuid.UUID, name string, scopes []string, grant Pr
 	return k, plaintext, nil
 }
 
+// MintPersonal returns a new personal access token owned by ownerID, reaching grant inside orgID, and its plaintext secret.
+func (sc Scheme) MintPersonal(orgID, ownerID uuid.UUID, name string, scopes []string, grant ProjectGrant, expiresAt *time.Time, now time.Time) (*APIKey, string, error) {
+	k, plaintext, err := sc.MintOrg(orgID, name, scopes, grant, expiresAt, now)
+	if err != nil {
+		return nil, "", err
+	}
+	k.Kind = KindPersonal
+	k.CreatedBy = ownerID
+	return k, plaintext, nil
+}
+
 func (sc Scheme) mint(orgID uuid.UUID, name string, scopes []string, expiresAt *time.Time, now time.Time) (*APIKey, string, error) {
 	for _, s := range scopes {
 		if !authn.Valid(s) {
@@ -138,7 +167,7 @@ func (sc Scheme) mint(orgID uuid.UUID, name string, scopes []string, expiresAt *
 	}, plaintext, nil
 }
 
-// GrantProjects widens a selected-projects org key by projectIDs. SECURITY: a grant only ever widens; no verb narrows it.
+// GrantProjects widens a selected-projects org key or personal token by projectIDs. SECURITY: a grant only ever widens; no verb narrows it.
 func (k *APIKey) GrantProjects(projectIDs []uuid.UUID) error {
 	if err := k.promotable(); err != nil {
 		return err
@@ -153,7 +182,7 @@ func (k *APIKey) GrantProjects(projectIDs []uuid.UUID) error {
 	return nil
 }
 
-// GrantAllProjects promotes an org key to every project of its org, including ones created later; there is no way back.
+// GrantAllProjects promotes an org key or personal token to every project of its org, including ones created later; there is no way back.
 func (k *APIKey) GrantAllProjects() error {
 	if err := k.promotable(); err != nil {
 		return err
@@ -167,8 +196,8 @@ func (k *APIKey) GrantAllProjects() error {
 }
 
 func (k *APIKey) promotable() error {
-	if k.Kind != KindOrg {
-		return &NotOrgKeyError{}
+	if !k.HasGrant() {
+		return &BoundToProjectError{}
 	}
 	if k.RevokedAt != nil {
 		return &RevokedError{}
@@ -178,11 +207,14 @@ func (k *APIKey) promotable() error {
 
 // ReachableProjects returns the projects the key's principal reaches when it is not granted all of them.
 func (k *APIKey) ReachableProjects() []uuid.UUID {
-	if k.Kind == KindOrg {
+	if k.HasGrant() {
 		return slices.Clone(k.ProjectIDs)
 	}
 	return []uuid.UUID{k.ProjectID}
 }
+
+// HasGrant reports whether the key reaches projects through a grant rather than one bound project.
+func (k *APIKey) HasGrant() bool { return k.Kind == KindOrg || k.Kind == KindPersonal }
 
 func dedupe(ids []uuid.UUID) []uuid.UUID {
 	out := make([]uuid.UUID, 0, len(ids))

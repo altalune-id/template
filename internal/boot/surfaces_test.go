@@ -91,7 +91,7 @@ func TestDataPlaneRejectsJWT(t *testing.T) {
 func adminKeyFor(t *testing.T, f *dataplaneFixture) string {
 	t.Helper()
 	_, key, err := f.srv.APIKeys.Mint(tenant.WithProject(f.orgCtx, f.project), "dp-admin",
-		[]string{authn.ScopePostsAdmin}, nil, nil)
+		[]string{authn.ScopePostsAdmin}, nil, soon())
 	require.NoError(t, err)
 	return key
 }

@@ -68,4 +68,10 @@ func TestEveryScopeHasALevel(t *testing.T) {
 	if _, ok := authn.LevelOf("posts:destroy"); ok {
 		t.Fatal("LevelOf resolved a scope outside the catalog")
 	}
+	if level, _ := authn.LevelOf(authn.ScopeMembersRead); level != authn.LevelOrg {
+		t.Fatalf("members:read is %q, want org: it acts on the org itself", level)
+	}
+	if level, _ := authn.LevelOf(authn.ScopePostsRead); level != authn.LevelProject {
+		t.Fatalf("posts:read is %q, want project", level)
+	}
 }

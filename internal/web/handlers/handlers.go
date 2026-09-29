@@ -286,12 +286,12 @@ func (d Deps) OrgScopeFor(w http.ResponseWriter, r *http.Request, p session.Prin
 		d.ErrorPage(w, r, http.StatusNotFound, "Organization not found", "", err)
 		return nil, nil, false
 	}
-	ctx := tenant.Into(r.Context(), tenant.Context{OrgID: o.ID, UserID: p.UserID})
-	if _, err := d.Orgs.MembershipOf(ctx, o.ID, p.UserID); err != nil {
+	scoped := orgScopedRequest(r, p, o)
+	if _, err := d.Orgs.MembershipOf(scoped.Context(), o.ID, p.UserID); err != nil {
 		d.ErrorPage(w, r, http.StatusNotFound, "Organization not found", "", err)
 		return nil, nil, false
 	}
-	return o, r.WithContext(ctx), true
+	return o, scoped, true
 }
 
 // LoadSession reads the sid cookie, verifies its HMAC, and loads the Principal from the store.

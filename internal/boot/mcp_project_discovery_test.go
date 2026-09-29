@@ -232,9 +232,9 @@ func TestMCP_OrgKeyReachesOnlyItsGrantedProjects(t *testing.T) {
 	require.NoError(t, err)
 
 	_, selected, err := f.srv.APIKeys.MintOrg(orgCtx, "org-reader", []string{authn.ScopePostsRead},
-		apikey.ProjectGrant{ProjectIDs: []uuid.UUID{granted.ID}}, nil)
+		apikey.ProjectGrant{ProjectIDs: []uuid.UUID{granted.ID}}, soon())
 	require.NoError(t, err)
-	_, everything, err := f.srv.APIKeys.MintOrg(orgCtx, "org-all", []string{authn.ScopePostsRead}, apikey.ProjectGrant{All: true}, nil)
+	_, everything, err := f.srv.APIKeys.MintOrg(orgCtx, "org-all", []string{authn.ScopePostsRead}, apikey.ProjectGrant{All: true}, soon())
 	require.NoError(t, err)
 
 	slugsFor := func(t *testing.T, key string) []string {
@@ -264,4 +264,60 @@ func TestMCP_OrgKeyReachesOnlyItsGrantedProjects(t *testing.T) {
 		rec := f.call(t, everything, callToolBody(mcpinternal.ToolBlogList, map[string]any{"projectId": f.projectID}))
 		require.Equal(t, []string{"hello"}, postSlugsFromTool(t, rec), "body=%s", rec.Body.String())
 	})
+}
+
+// TestMCP_PersonalTokenActsForItsOwner drives a member's personal token over the real surface: it reaches its grant, and dies the moment the member leaves.
+func TestMCP_PersonalTokenActsForItsOwner(t *testing.T) {
+	f := newMCPFixture(t, mcpOpts{enabled: true})
+	ctx := t.Context()
+
+	o, err := f.srv.Orgs.BySlug(ctx, "mcp-org")
+	require.NoError(t, err)
+	member, err := f.srv.Users.Create(ctx, user.CreateRequest{Email: "pat-member@example.com", Name: "PAT Member", Source: user.SourceOIDC})
+	require.NoError(t, err)
+	memberCtx := tenant.Into(ctx, tenant.Context{OrgID: o.ID, UserID: member.ID})
+	_, err = f.srv.Orgs.AddMember(memberCtx, o.ID, member.ID, org.RoleMember)
+	require.NoError(t, err)
+
+	_, token, err := f.srv.APIKeys.MintPersonal(memberCtx, "laptop", []string{authn.ScopePostsRead}, apikey.ProjectGrant{All: true}, soon())
+	require.NoError(t, err)
+
+	rec := f.call(t, token, callToolBody(mcpinternal.ToolBlogList, map[string]any{"projectId": f.projectID}))
+	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
+	require.Equal(t, []string{"hello"}, postSlugsFromTool(t, rec), "a member's token must read what the member can; body=%s", rec.Body.String())
+
+	owner, err := f.srv.Users.EnsureFromOIDC(ctx, user.Claims{Issuer: f.issuer.url, Subject: tokenSubject, Email: tokenEmail, Name: "MCP Agent"})
+	require.NoError(t, err)
+	require.NoError(t, f.srv.Orgs.RemoveMember(tenant.Into(ctx, tenant.Context{OrgID: o.ID, UserID: owner.ID}), o.ID, member.ID))
+	rec = f.call(t, token, callToolBody(mcpinternal.ToolBlogList, map[string]any{"projectId": f.projectID}))
+	require.Equal(t, http.StatusUnauthorized, rec.Code, "a departed member's token must be refused at the door; body=%s", rec.Body.String())
+
+	_, err = f.srv.Orgs.AddMember(memberCtx, o.ID, member.ID, org.RoleMember)
+	require.NoError(t, err)
+	rec = f.call(t, token, callToolBody(mcpinternal.ToolBlogList, map[string]any{"projectId": f.projectID}))
+	require.Equal(t, http.StatusUnauthorized, rec.Code, "removal revoked the token for good, so re-joining must not revive it; body=%s", rec.Body.String())
+}
+
+// TestMCP_MemberListIsAnOrgLevelRead drives the org-level member_list tool: an org key holding members:read reads its own org's members, and nothing else can.
+func TestMCP_MemberListIsAnOrgLevelRead(t *testing.T) {
+	f := newMCPFixture(t, mcpOpts{enabled: true})
+	ctx := t.Context()
+	seedForeignTenant(t, f)
+
+	owner, err := f.srv.Users.EnsureFromOIDC(ctx, user.Claims{Issuer: f.issuer.url, Subject: tokenSubject, Email: tokenEmail, Name: "MCP Agent"})
+	require.NoError(t, err)
+	o, err := f.srv.Orgs.BySlug(ctx, "mcp-org")
+	require.NoError(t, err)
+	orgCtx := tenant.Into(ctx, tenant.Context{OrgID: o.ID, UserID: owner.ID})
+
+	_, reader, err := f.srv.APIKeys.MintOrg(orgCtx, "members", []string{authn.ScopeMembersRead}, apikey.ProjectGrant{All: true}, soon())
+	require.NoError(t, err)
+
+	rec := f.call(t, reader, callToolBody(mcpinternal.ToolMemberList, map[string]any{}))
+	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
+	require.Contains(t, rec.Body.String(), tokenEmail, "the org's own member must be listed; body=%s", rec.Body.String())
+	require.NotContains(t, rec.Body.String(), "outsider@example.com", "another org's member must never be listed; body=%s", rec.Body.String())
+
+	rec = f.call(t, f.readKey, callToolBody(mcpinternal.ToolMemberList, map[string]any{}))
+	require.Equal(t, apperror.CodeForbidden, toolPayload(t, rec).Code, "a key without members:read must be refused; body=%s", rec.Body.String())
 }

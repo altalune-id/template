@@ -57,7 +57,7 @@ shape: [`howto/webpage.md`](../howto/webpage.md).
 - **`Principal.ActiveOrgID` never scopes data** — only the post-login redirect and the org switcher read it.
 - **Use `sc.req`, not the original `r`** — the scoped request replaces the unscoped one, so a later
   `r.Context()` cannot be the wrong scope.
-- **Call `RequireOrg` / `RequireProject`, never `OrgScopeFor` / `ProjectScopeFor`.** That sequence is the only
+- **Call `RequireOrg` / `RequireProject` (or `RequireOrgFrom` / `MemberOrgScopes` on personal pages), never `OrgScopeFor` / `ProjectScopeFor`.** That sequence is the only
   thing separating one org's members from another org's rows, so it lives in
   `internal/web/handlers/scope.go` once. `TestTenantGateIsNotCopiedIntoHandlers` fails the build on a handler
   that rebuilds it.
@@ -93,8 +93,8 @@ interchangeable downstream.
   context; the tool then calls the same control-plane method an RPC would, so it lands in the same scoping
   code.
 - **Reach is one rule: `session.Principal.Reaches{Project,WholeProject,Resource}`** (`internal/platform/session/reach.go`).
-  A person reaches every project of their org. A key reaches its `ProjectIDs` (one for a project key,
-  the grant for an org key) or all of them (`AllProjects`); `ResourceIDs` narrows to named rows.
+  A person reaches every project of their org. A key reaches its `ProjectIDs` (one for a project key, the
+  grant for an org key or personal token) or all of them; a personal token also needs its owner's membership.
 - **A handler never compares tenant ids itself.** `internal/controlplane/reach.go` holds `scopeToProject`,
   `scopeToActiveProject` and `scopeToResource`; every service calls those. `TestReachIsNotCopiedIntoHandlers`
   fails on a hand-written `x.OrgID != p.ActiveOrgID`.

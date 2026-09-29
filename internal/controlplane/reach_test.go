@@ -3,10 +3,12 @@ package controlplane_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"connectrpc.com/connect"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	apikeyv1 "altalune.id/template/gen/go/apikey/v1"
 	blogv1 "altalune.id/template/gen/go/blog/v1"
@@ -124,7 +126,8 @@ func TestKeyNeverReachesASiblingProject(t *testing.T) {
 			return err
 		}, connect.CodePermissionDenied},
 		{"APIKeyCreate", func(ctx context.Context) error {
-			req := connect.NewRequest(&apikeyv1.CreateRequest{ProjectId: sibling, Name: "escalate", Scopes: []string{authn.ScopePostsRead}})
+			req := connect.NewRequest(&apikeyv1.CreateRequest{
+				ExpiresAt: timestamppb.New(time.Now().Add(24 * time.Hour)), ProjectId: sibling, Name: "escalate", Scopes: []string{authn.ScopePostsRead}})
 			withKey(key)(req.Header())
 			_, err := f.h.apikeyClient().Create(ctx, req)
 			return err

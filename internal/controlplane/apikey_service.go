@@ -2,7 +2,6 @@ package controlplane
 
 import (
 	"context"
-	"errors"
 	"strings"
 	"time"
 
@@ -90,20 +89,7 @@ func (s *APIKeyService) Revoke(ctx context.Context, req *connect.Request[apikeyv
 	return connect.NewResponse(&apikeyv1.RevokeResponse{}), nil
 }
 
-// NOTE: internal/apikey/errors.go implements no ToAppError hop, so without this an unknown scope surfaces as internal.
 func translateKeyErr(err error) error {
-	var unknown *apikey.UnknownScopeError
-	if errors.As(err, &unknown) {
-		return validationErr("scopes", "unknown scope: "+unknown.Scope)
-	}
-	var retired *apikey.RetiredScopeError
-	if errors.As(err, &retired) {
-		return validationErr("scopes", "retired scope: "+retired.Scope)
-	}
-	var level *apikey.ScopeLevelError
-	if errors.As(err, &level) {
-		return validationErr("scopes", "org-level scope on a project key: "+level.Scope)
-	}
 	if apikey.IsNotFoundError(err) {
 		return keyNotFoundErr()
 	}

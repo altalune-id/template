@@ -62,8 +62,8 @@ erDiagram
     api_keys {
         uuid id PK
         uuid org_id FK
-        uuid project_id FK "null for an org key"
-        text kind "project|org"
+        uuid project_id FK "null for org and personal keys"
+        text kind "project|org|personal"
         bool all_projects
         bytea secret_hash UK
         text secret_hint "last 4 chars"
@@ -80,14 +80,17 @@ Also tenant-scoped: `blog_categories`, `blog_tags`, `outbox_entries`, `bootstrap
 
 ## API keys
 
-- **Two kinds, one table.** A `project` key has a `project_id` for life. An
-  `org` key has none and reaches either every project (`all_projects`) or the
-  rows in `api_key_projects`. `api_keys_kind_shape` refuses any other mix.
+- **Three kinds, one table.** A `project` key has a `project_id` for life. An
+  `org` key and a `personal` token have none and reach either every project
+  (`all_projects`) or the rows in `api_key_projects`; a personal token's
+  `created_by` is its owner. `api_keys_kind_shape` refuses any other mix.
 - **A grant row cannot cross orgs.** Both foreign keys on `api_key_projects`
   are composite, `(org_id, key_id)` and `(org_id, project_id)`. RLS only
   checks the row's own `org_id`, and SQLite has no RLS at all.
 - **Grants only widen.** The domain has no verb that removes a project; moving to
   all projects deletes the named rows in the same write.
+- **New keys expire within a year** (`apikey.MaxLifetime`). `expires_at` may be
+  null on existing rows.
 
 ## SECURITY DEFINER functions (Postgres)
 

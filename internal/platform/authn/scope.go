@@ -9,6 +9,7 @@ const (
 	ScopePostsAdmin   = "posts:admin"
 	ScopeAPIKeysRead  = "apikeys:read"
 	ScopeAPIKeysWrite = "apikeys:write"
+	ScopeMembersRead  = "members:read"
 )
 
 // ScopeLevel names where a scope's authority lives: inside one project, or across the org itself.
@@ -33,6 +34,7 @@ var catalog = []scopeSpec{ //nolint:gochecknoglobals // immutable catalog, read 
 	{name: ScopePostsAdmin, level: LevelProject},
 	{name: ScopeAPIKeysRead, level: LevelProject},
 	{name: ScopeAPIKeysWrite, level: LevelProject, retired: true},
+	{name: ScopeMembersRead, level: LevelOrg},
 }
 
 // AllScopes returns every scope in the catalog, retired ones included.

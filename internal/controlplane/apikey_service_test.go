@@ -13,6 +13,7 @@ import (
 	"connectrpc.com/connect"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	apikeyv1 "altalune.id/template/gen/go/apikey/v1"
 	apikeyv1connect "altalune.id/template/gen/go/apikey/v1/apikeyv1connect"
@@ -49,9 +50,9 @@ func newAPIKeyFixtureAs(t *testing.T, manager bool) *apikeyFixture {
 
 	orgID := uuid.New()
 	principal := session.Principal{UserID: uuid.New(), Email: "a@b", ActiveOrgID: orgID}
-	managers := fakes.NewManagers()
+	managers := fakes.NewMembers()
 	if manager {
-		managers.Seat(orgID, principal.UserID)
+		managers.SeatManager(orgID, principal.UserID)
 	}
 
 	projs := fakes.NewProject()
@@ -74,7 +75,7 @@ func newAPIKeyFixtureAs(t *testing.T, manager bool) *apikeyFixture {
 		nil,
 		nil, nil, nil,
 	)
-	srv.Authn = authn.Chain{apikey.NewAuthenticator(keyStore, nil, apikey.Scheme{}), tokens.NewAuthenticator(kernel.Verifier)}
+	srv.Authn = authn.Chain{apikey.NewAuthenticator(keyStore, nil, apikey.Scheme{}, fakes.NewMembers()), tokens.NewAuthenticator(kernel.Verifier)}
 	srv.APIKeys = keySvc
 	srv.KeyPrefix = apikey.DefaultPrefix
 
@@ -96,6 +97,7 @@ func TestAPIKey_Create_MintsAndReturnsPlaintextOnce(t *testing.T) {
 	f := newAPIKeyFixture(t)
 
 	req := connect.NewRequest(&apikeyv1.CreateRequest{
+		ExpiresAt: timestamppb.New(time.Now().Add(24 * time.Hour)),
 		ProjectId: f.project.ID.String(),
 		Name:      "ci-deploy",
 		Scopes:    []string{authn.ScopeAPIKeysRead},
@@ -118,6 +120,7 @@ func TestAPIKey_List_NeverCarriesPlaintext(t *testing.T) {
 	f := newAPIKeyFixture(t)
 
 	createReq := connect.NewRequest(&apikeyv1.CreateRequest{
+		ExpiresAt: timestamppb.New(time.Now().Add(24 * time.Hour)),
 		ProjectId: f.project.ID.String(),
 		Name:      "ci-deploy",
 		Scopes:    []string{authn.ScopeAPIKeysRead},
@@ -143,6 +146,7 @@ func TestAPIKey_Create_UnknownScope_ReturnsInvalidArgument(t *testing.T) {
 	f := newAPIKeyFixture(t)
 
 	req := connect.NewRequest(&apikeyv1.CreateRequest{
+		ExpiresAt: timestamppb.New(time.Now().Add(24 * time.Hour)),
 		ProjectId: f.project.ID.String(),
 		Name:      "bad-scope",
 		Scopes:    []string{"not:a:real:scope"},
@@ -158,6 +162,7 @@ func TestAPIKey_Create_EmptyName_ReturnsInvalidArgument(t *testing.T) {
 	f := newAPIKeyFixture(t)
 
 	req := connect.NewRequest(&apikeyv1.CreateRequest{
+		ExpiresAt: timestamppb.New(time.Now().Add(24 * time.Hour)),
 		ProjectId: f.project.ID.String(),
 		Name:      "   ",
 		Scopes:    []string{authn.ScopeAPIKeysRead},
@@ -173,6 +178,7 @@ func TestAPIKey_Revoke_MarksKeyRevoked(t *testing.T) {
 	f := newAPIKeyFixture(t)
 
 	createReq := connect.NewRequest(&apikeyv1.CreateRequest{
+		ExpiresAt: timestamppb.New(time.Now().Add(24 * time.Hour)),
 		ProjectId: f.project.ID.String(),
 		Name:      "temp",
 		Scopes:    []string{authn.ScopeAPIKeysRead},
@@ -207,6 +213,7 @@ func TestAPIKey_Revoke_KeyFromAnotherProjectInSameOrg_ReturnsNotFound(t *testing
 	require.NoError(t, f.projs.Save(ctx, proj2))
 
 	createReq := connect.NewRequest(&apikeyv1.CreateRequest{
+		ExpiresAt: timestamppb.New(time.Now().Add(24 * time.Hour)),
 		ProjectId: f.project.ID.String(),
 		Name:      "p1-key",
 		Scopes:    []string{authn.ScopeAPIKeysRead},
@@ -240,6 +247,7 @@ func TestAPIKey_ScopeEnforcement(t *testing.T) {
 	require.NoError(t, err, "a read-scoped key must be admitted to List")
 
 	createReq := connect.NewRequest(&apikeyv1.CreateRequest{
+		ExpiresAt: timestamppb.New(time.Now().Add(24 * time.Hour)),
 		ProjectId: f.project.ID.String(),
 		Name:      "should-not-be-created",
 		Scopes:    []string{authn.ScopeAPIKeysRead},
@@ -272,6 +280,7 @@ func rawJSONList(t *testing.T, baseURL, projectID string) string {
 func TestAPIKey_Create_RequiresAnOwnerOrAdminPerson(t *testing.T) {
 	create := func(f *apikeyFixture, auth func(http.Header)) error {
 		req := connect.NewRequest(&apikeyv1.CreateRequest{
+			ExpiresAt: timestamppb.New(time.Now().Add(24 * time.Hour)),
 			ProjectId: f.project.ID.String(),
 			Name:      "k",
 			Scopes:    []string{authn.ScopePostsRead},
@@ -307,6 +316,7 @@ func TestAPIKey_Create_RequiresAnOwnerOrAdminPerson(t *testing.T) {
 func TestAPIKey_Create_RetiredScope_ReturnsInvalidArgument(t *testing.T) {
 	f := newAPIKeyFixture(t)
 	req := connect.NewRequest(&apikeyv1.CreateRequest{
+		ExpiresAt: timestamppb.New(time.Now().Add(24 * time.Hour)),
 		ProjectId: f.project.ID.String(),
 		Name:      "retired",
 		Scopes:    []string{authn.ScopeAPIKeysWrite},
@@ -314,4 +324,17 @@ func TestAPIKey_Create_RetiredScope_ReturnsInvalidArgument(t *testing.T) {
 	withBearer(req.Header())
 	_, err := f.client().Create(t.Context(), req)
 	require.Equal(t, connect.CodeInvalidArgument, connectCode(err), "err=%v", err)
+}
+
+func TestAPIKey_Create_WithoutExpiry_ReturnsInvalidArgument(t *testing.T) {
+	f := newAPIKeyFixture(t)
+	req := connect.NewRequest(&apikeyv1.CreateRequest{
+		ProjectId: f.project.ID.String(),
+		Name:      "forever",
+		Scopes:    []string{authn.ScopePostsRead},
+	})
+	withBearer(req.Header())
+	_, err := f.client().Create(t.Context(), req)
+	require.Equal(t, connect.CodeInvalidArgument, connectCode(err), "err=%v", err)
+	require.Empty(t, f.store.All(), "a key without an expiry must not be stored")
 }
