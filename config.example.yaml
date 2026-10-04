@@ -213,10 +213,14 @@ queue:
   connectTimeout: 10s
   # env: ALT_QUEUE_ENABLED
   enabled: false
+  # [secret] env: ALT_QUEUE_PASSWORD
+  password: ""
   # [secret] env: ALT_QUEUE_TOKEN
   token: ""
   # [secret] env: ALT_QUEUE_URL
   url: ""
+  # env: ALT_QUEUE_USER
+  user: ""
 
 scheduler:
   # [bootstrap] env: ALT_SCHEDULER_ENABLED
