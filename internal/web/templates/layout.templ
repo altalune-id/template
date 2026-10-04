@@ -260,15 +260,18 @@ templ htmxRequestHooks(nonce string) {
 templ themeInitScript(nonce string) {
 	<script nonce={ nonce }>
 	(function() {
+		var root = document.documentElement;
+		var mql = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
+		function applyMode() {
+			var m = root.getAttribute('data-color-mode') || 'auto';
+			root.classList.toggle('dark', m === 'dark' || (m === 'auto' && !!mql && mql.matches));
+		}
 		try {
-			var t = localStorage.getItem('altempl.theme') || 'slate';
-			var m = localStorage.getItem('altempl.mode') || 'auto';
-			var root = document.documentElement;
-			root.setAttribute('data-theme', t);
-			root.setAttribute('data-color-mode', m);
-			var dark = m === 'dark' || (m === 'auto' && window.matchMedia('(prefers-color-scheme: dark)').matches);
-			root.classList.toggle('dark', dark);
+			root.setAttribute('data-theme', localStorage.getItem('altempl.theme') || 'slate');
+			root.setAttribute('data-color-mode', localStorage.getItem('altempl.mode') || 'auto');
 		} catch (e) {}
+		applyMode();
+		if (mql && mql.addEventListener) mql.addEventListener('change', applyMode);
 	})();
 	</script>
 }
@@ -380,12 +383,6 @@ templ themeApplyScript(nonce string) {
 				var m = e.target.closest('button[data-color-mode]');
 				if (m) { setMode(m.getAttribute('data-color-mode')); closeParentDetails(m); return; }
 			});
-			if (window.matchMedia) {
-				var mql = window.matchMedia('(prefers-color-scheme: dark)');
-				if (mql.addEventListener) mql.addEventListener('change', function(){
-					if ((localStorage.getItem('altempl.mode') || 'auto') === 'auto') setMode('auto');
-				});
-			}
 		}
 		// Always refresh labels + active marks, even if the wire-guard tripped.
 		// Deferred to DOMContentLoaded so we still catch buttons rendered after

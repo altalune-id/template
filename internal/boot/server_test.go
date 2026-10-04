@@ -140,6 +140,21 @@ func TestBootServer_SupervisorRunReturnsWhenCtxCanceled(t *testing.T) {
 	}
 }
 
+func TestBootServer_RunReturnsNilOnACleanShutdown(t *testing.T) {
+	cfg := newSmokeCfg(t)
+	srv, err := boot.BootServer(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("BootServer: %v", err)
+	}
+	t.Cleanup(func() { _ = srv.Close() })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(200*time.Millisecond, cancel)
+	if err := srv.Run(ctx); err != nil {
+		t.Fatalf("Run after a shutdown signal = %v, want nil", err)
+	}
+}
+
 func TestBootServer_CloseNilSafe(t *testing.T) {
 	var srv *boot.Server
 	defer func() {

@@ -39,7 +39,7 @@ func RegisterTodoServiceTools(reg *mcp.Registry, h todov1connect.TodoServiceHand
 			}
 			var req v1.CreateRequest
 			if err := (protojson.UnmarshalOptions{DiscardUnknown: false}).Unmarshal(input, &req); err != nil {
-				return nil, fmt.Errorf("mcp: %s: decode arguments: %w", TodoCreateToolName, err)
+				return nil, mcp.NewInvalidArgumentsError(TodoCreateToolName, err)
 			}
 			resp, err := h.Create(ctx, connect.NewRequest(&req))
 			if err != nil {

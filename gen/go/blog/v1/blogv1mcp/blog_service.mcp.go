@@ -43,7 +43,7 @@ func RegisterBlogServiceTools(reg *mcp.Registry, h blogv1connect.BlogServiceHand
 			}
 			var req v1.ListPostsRequest
 			if err := (protojson.UnmarshalOptions{DiscardUnknown: false}).Unmarshal(input, &req); err != nil {
-				return nil, fmt.Errorf("mcp: %s: decode arguments: %w", BlogListToolName, err)
+				return nil, mcp.NewInvalidArgumentsError(BlogListToolName, err)
 			}
 			resp, err := h.ListPosts(ctx, connect.NewRequest(&req))
 			if err != nil {
@@ -69,7 +69,7 @@ func RegisterBlogServiceTools(reg *mcp.Registry, h blogv1connect.BlogServiceHand
 			}
 			var req v1.PublishPostRequest
 			if err := (protojson.UnmarshalOptions{DiscardUnknown: false}).Unmarshal(input, &req); err != nil {
-				return nil, fmt.Errorf("mcp: %s: decode arguments: %w", BlogPublishToolName, err)
+				return nil, mcp.NewInvalidArgumentsError(BlogPublishToolName, err)
 			}
 			resp, err := h.PublishPost(ctx, connect.NewRequest(&req))
 			if err != nil {

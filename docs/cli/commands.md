@@ -108,6 +108,6 @@ after a restart, or after eviction is served as a new request.
 | `version`                | `version`, `commit`, `buildTime`                                      |
 | `healthz`                | `url`, `status`, `ok`, `took`, `error`                                |
 
-Timestamps are RFC 3339. `role` is `owner\|admin\|member`; `status` is `pending\|accepted` for an
+Timestamps are RFC 3339 in UTC (`Z`), and table dates are UTC days. `role` is `owner\|admin\|member`; `status` is `pending\|accepted` for an
 invite and `draft\|published` for a post. `blog` is the one payload using camelCase, because it
 mirrors the data plane's JSON verbatim.

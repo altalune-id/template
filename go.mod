@@ -2,7 +2,7 @@ module altalune.id/template
 
 go 1.26.0
 
-toolchain go1.26.2
+toolchain go1.26.6
 
 require (
 	connectrpc.com/connect v1.20.0
