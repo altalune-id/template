@@ -9,9 +9,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/stdlib"
 	_ "modernc.org/sqlite" // sqlite driver: registers "sqlite" with database/sql
 )
@@ -115,19 +117,42 @@ func sqliteDSNWithPragmas(dsn string) string {
 	return b.String()
 }
 
+// NOTE: BEGIN IMMEDIATE takes the write lock up front, so a unit of work that reads before it writes waits on busy_timeout instead of failing with SQLITE_BUSY_SNAPSHOT when another writer commits in between. Only the unit-of-work handle uses it: store reads open deferred transactions on W and must stay concurrent with a writer.
+func sqliteDSNWithImmediateTx(dsn string) string {
+	if strings.Contains(dsn, "_txlock=") {
+		return dsn
+	}
+	if !strings.HasPrefix(dsn, "file:") {
+		dsn = "file:" + dsn
+	}
+	if strings.Contains(dsn, "?") {
+		return dsn + "&_txlock=immediate"
+	}
+	return dsn + "?_txlock=immediate"
+}
+
+// NOTE: every handle on a private in-memory database opens its own empty database, so a second handle would not see W's tables.
+func sqliteInMemory(dsn string) bool {
+	return strings.Contains(dsn, ":memory:") || strings.Contains(dsn, "mode=memory")
+}
+
 func openPostgres(cfg DBConfig) (*sql.DB, error) {
-	connCfg, err := pgx.ParseConfig(cfg.DSN)
+	connCfg, err := pgConnConfig(cfg.DSN)
 	if err != nil {
-		return nil, fmt.Errorf("db: parse dsn: %w", err)
+		return nil, err
 	}
 	if cfg.Role == "" {
-		return stdlib.OpenDB(*connCfg), nil
+		return stdlib.OpenDB(*connCfg, stdlib.OptionAfterConnect(func(_ context.Context, conn *pgx.Conn) error {
+			registerUTCTimestamptz(conn)
+			return nil
+		})), nil
 	}
 	if err := validateRoleIdent(cfg.Role); err != nil {
 		return nil, err
 	}
 	stmt := "SET ROLE " + quoteIdent(cfg.Role)
 	afterConnect := func(ctx context.Context, conn *pgx.Conn) error {
+		registerUTCTimestamptz(conn)
 		_, execErr := conn.Exec(ctx, stmt)
 		if execErr == nil {
 			return nil
@@ -139,6 +164,27 @@ func openPostgres(cfg DBConfig) (*sql.DB, error) {
 		return wrapped
 	}
 	return stdlib.OpenDB(*connCfg, stdlib.OptionAfterConnect(afterConnect)), nil
+}
+
+func pgConnConfig(dsn string) (*pgx.ConnConfig, error) {
+	connCfg, err := pgx.ParseConfig(dsn)
+	if err != nil {
+		return nil, fmt.Errorf("db: parse dsn: %w", err)
+	}
+	for k := range connCfg.RuntimeParams {
+		if strings.EqualFold(k, "timezone") {
+			delete(connCfg.RuntimeParams, k)
+		}
+	}
+	connCfg.RuntimeParams["timezone"] = "UTC"
+	return connCfg, nil
+}
+
+func registerUTCTimestamptz(conn *pgx.Conn) {
+	conn.TypeMap().RegisterType(&pgtype.Type{
+		Name: "timestamptz", OID: pgtype.TimestamptzOID,
+		Codec: &pgtype.TimestamptzCodec{ScanLocation: time.UTC},
+	})
 }
 
 func ensureDirFor(path string) error {
