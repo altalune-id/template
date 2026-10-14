@@ -233,7 +233,7 @@ func translatePgError(err error, slug, id string) error {
 	switch pgErr.Code {
 	case "23505":
 		return &AlreadyExistsError{Slug: slug}
-	case "23503":
+	case "23503", "23001":
 		return &InUseError{ID: id}
 	}
 	return nil

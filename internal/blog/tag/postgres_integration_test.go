@@ -292,6 +292,8 @@ func TestPostgres_Tag_Delete_InUse(t *testing.T) {
 
 	err = f.store.Delete(ctx, tg.ID)
 	require.True(t, tag.IsInUseError(err), "want InUseError, got %T: %v", err, err)
+	require.NotContains(t, err.Error(), "23503", "the SQLSTATE must not leak into the domain error")
+	require.NotContains(t, err.Error(), "23001", "the SQLSTATE must not leak into the domain error")
 
 	got, err := f.store.ByID(ctx, tg.ID)
 	require.NoError(t, err, "a refused delete must leave the row in place")
