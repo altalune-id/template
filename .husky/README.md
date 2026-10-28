@@ -20,7 +20,7 @@ automatically on `pnpm install` (via the `prepare` script in `package.json`).
 ## Before you commit — the short list
 
 - Run `make check` (fmt + vet + test) — same gate as pre-commit but without staged-only filter.
-- If you added a `d.Tr("...")` in a template, add the key to every locale in `internal/web/i18n/`.
+- If you added a `d.Tr("...")` in a template, add the key to every locale in `internal/i18n/locales/`.
 - If you changed a `config.Config` field, run `make config-examples` and commit the regenerated files.
 - If you edited a `.proto`, commit the regenerated `gen/` alongside.
 

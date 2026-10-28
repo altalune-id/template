@@ -18,7 +18,7 @@ const sessionsRLSConsequence = "a session row is resolved before any tenant scop
 // TestTenantTableSuffixes_OmitsSessions pins sessions out of the RLS-managed table list.
 func TestTenantTableSuffixes_OmitsSessions(t *testing.T) {
 	if slices.Contains(TenantTableSuffixes, "sessions") {
-		t.Fatalf("TenantTableSuffixes contains %q: %s. The list is generated from ALTER TABLE ... ENABLE ROW LEVEL SECURITY in schema/migrations/postgres/*.sql by schema/cmd/gen-tenant-tables, so remove the statement that added it rather than editing tenant_tables_gen.go", "sessions", sessionsRLSConsequence)
+		t.Fatalf("TenantTableSuffixes contains %q: %s. The list is generated from ALTER TABLE ... ENABLE ROW LEVEL SECURITY in schema/migrations/postgres/*.sql by cmd/gen-tenant-tables, so remove the statement that added it rather than editing tenant_tables_gen.go", "sessions", sessionsRLSConsequence)
 	}
 
 	const prefix = "altempl_"
