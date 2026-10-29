@@ -167,12 +167,13 @@ mcp:
   audience: ""
   # env: ALT_MCP_AUDIENCE_OVERRIDE
   audienceOverride: ""
-  # env: ALT_MCP_CHALLENGE_PREFIX
-  challengePrefix: ""
-  # env: ALT_MCP_CHALLENGE_TOKEN
-  challengeToken: ""
   # env: ALT_MCP_ENABLED
   enabled: ""
+  introspection:
+    # env: ALT_MCP_INTROSPECTION_CLIENT_ID
+    clientID: ""
+    # [secret] env: ALT_MCP_INTROSPECTION_CLIENT_SECRET
+    clientSecret: ""
 
 # [required, bootstrap] env: ALT_MODE
 mode: selfhosted
@@ -189,6 +190,8 @@ oidc:
   buttonLabel: ""
   # env: ALT_OIDC_BUTTON_LOGO_URL
   buttonLogoURL: ""
+  # env: ALT_OIDC_CLI_CLIENT_ID
+  cliClientID: ""
   # [required, mode:cloud] env: ALT_OIDC_CLIENT_ID
   clientID: ""
   # [required, mode:cloud, secret] env: ALT_OIDC_CLIENT_SECRET
@@ -199,8 +202,6 @@ oidc:
   issuer: ""
   # env: ALT_OIDC_REDIRECT_PORT
   redirectPort: ""
-  # env: ALT_OIDC_RESOURCE
-  resource: ""
   # env: ALT_OIDC_SCOPES
   scopes: openid,email,profile
 
@@ -282,17 +283,14 @@ tenant:
   tenantScopedTables: ""
 
 tokens:
-  # env: ALT_TOKENS_ACCEPT_RS256
-  acceptRS256: ""
   # [required, mode:cloud, bootstrap] env: ALT_TOKENS_AUDIENCE
-  audience: "urn:altempl:api"
+  audience: ""
   # env: ALT_TOKENS_CLOCK_SKEW
   clockSkew: 60s
+  introspection:
+    # env: ALT_TOKENS_INTROSPECTION_CLIENT_ID
+    clientID: ""
+    # [secret] env: ALT_TOKENS_INTROSPECTION_CLIENT_SECRET
+    clientSecret: ""
   # [required, mode:cloud] env: ALT_TOKENS_ISSUER
   issuer: ""
-  # env: ALT_TOKENS_JWKS_CACHE_TTL
-  jwksCacheTTL: ""
-  # [required, mode:cloud] env: ALT_TOKENS_JWKS_URL
-  jwksURL: ""
-  # env: ALT_TOKENS_SUPPORTED_ALGS
-  supportedAlgs: RS256,ES256

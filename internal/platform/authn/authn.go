@@ -18,10 +18,16 @@ const (
 	ShapeUnknown Shape = iota
 	ShapeAPIKey
 	ShapeJWT
+	ShapePersonalToken
 )
 
 // Scheme classifies raw credentials; its zero value recognizes JWTs only.
-type Scheme struct{ Prefix string }
+type Scheme struct {
+	// Prefix starts every API key this app mints.
+	Prefix string
+	// TokenPrefix starts every opaque personal token the issuer mints; empty refuses them.
+	TokenPrefix string
+}
 
 // Looks classifies raw by shape alone, without touching a store.
 func (s Scheme) Looks(raw string) Shape {
@@ -30,6 +36,9 @@ func (s Scheme) Looks(raw string) Shape {
 	}
 	if s.Prefix != "" && strings.HasPrefix(raw, s.Prefix) {
 		return ShapeAPIKey
+	}
+	if s.TokenPrefix != "" && strings.HasPrefix(raw, s.TokenPrefix) {
+		return ShapePersonalToken
 	}
 	if strings.Count(raw, ".") == 2 && !strings.ContainsAny(raw, " \t") {
 		return ShapeJWT

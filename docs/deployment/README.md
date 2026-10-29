@@ -132,12 +132,13 @@ multiple replicas need: [`workers`](workers.md).
 ## MCP
 
 `/mcp` (S7) is off by default. The env block, the enforced enable order (`tokens.issuer` →
-`http.baseURL` → `mcp.enabled` → `mcp.challengeToken`, each omission a boot error), the audience
+`http.baseURL` → `mcp.enabled`, each omission a boot error), the audience
 rules — default `baseURL + basePath + /mcp`, widened only by `mcp.audienceOverride` — and
 `bash scripts/verify-mcp-smoke.sh`: [`mcp`](../mcp/README.md#setup).
 
-Deployment-side: the proxy must pass `/.well-known/oauth-protected-resource<basePath>/mcp` and the
-challenge path through — both are unauthenticated and both are how a host discovers the endpoint. A proxy
+Deployment-side: the proxy must pass `/.well-known/oauth-protected-resource<basePath>/mcp` and
+`…/api` through — both are unauthenticated, a host discovers the endpoint through them and Othra
+verifies each resource server by reading them. A proxy
 terminating on a different public URL needs `ALT_MCP_AUDIENCE` plus `ALT_MCP_AUDIENCE_OVERRIDE=true`.
 
 ## Observability
@@ -171,11 +172,25 @@ them.
 
 ## OIDC
 
-1. In the authorization server's console, create an OAuth client — `confidential` for servers,
-   `public` for CLI-only. Copy client ID + secret.
-2. Register redirect URIs — `https://<host>/oauth/callback` (web, under `http.basePath`) and
-   `http://127.0.0.1:0/callback` (CLI loopback, RFC 8252).
-3. Create a resource server for `urn:altempl:api`.
-4. Set `oidc.issuer`, `oidc.clientID`, `oidc.clientSecret`, `oidc.resource: urn:altempl:api`,
-   `tokens.audience: urn:altempl:api`, `tokens.issuer` and `tokens.jwksURL`.
-5. Restart — log in at `/login`.
+Sign-in, CLI login and bearer tokens all come from one Othra project, whose issuer is
+`https://<othra>/p/<handle>`. In that project:
+
+1. Create two resource servers: `https://<host><basePath>/api` (the control plane) and
+   `https://<host><basePath>/mcp`, each with the scopes it serves. Othra verifies each by reading
+   its RFC 9728 document, so deploy the app first. Never register `apikeys:write`: key management
+   stays in the console.
+2. Create a web client (confidential) with redirect URI `https://<host><basePath>/oauth/callback`
+   and post-logout URI `https://<host><basePath>/`, and a CLI client (native, public) with redirect
+   URI `http://127.0.0.1/callback` (RFC 8252; any port matches). Mark both first-party.
+3. Link both clients to both resource servers with their scopes.
+4. Set `oidc.issuer` and `tokens.issuer` to the project issuer (they must be equal), `oidc.clientID`,
+   `oidc.clientSecret`, `oidc.cliClientID`. `tokens.audience` and `mcp.audience` derive from
+   `http.baseURL`.
+5. Optional: to accept `othra_pt_` personal tokens, set `tokens.introspection.*` (and
+   `mcp.introspection.*`) to each resource server's public id and introspection secret.
+6. Restart — sign in at `/login`.
+
+A user is matched by `(issuer, subject)`. A first sign-in from a new issuer relinks an existing
+user only when the issuer marks the email verified and the row is unlinked or linked at another
+issuer. An unverified email for an unknown subject is refused (`USR006`), and so is a verified
+email whose user is linked to another subject at the same issuer (`USR007`).

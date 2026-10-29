@@ -9,7 +9,8 @@ import (
 
 // Authenticator adapts a Verifier to authn.Authenticator, so JWT verification is one link in an authn.Chain.
 type Authenticator struct {
-	v Verifier
+	v      Verifier
+	scheme *authn.Scheme
 }
 
 // NewAuthenticator returns an authn.Authenticator backed by v.
@@ -19,7 +20,18 @@ func NewAuthenticator(v Verifier) *Authenticator {
 
 var _ authn.Authenticator = (*Authenticator)(nil)
 
-// Authenticate implements authn.Authenticator by verifying raw as a bearer JWT.
+// WithScheme dispatches by shape: only a JWT or a personal token reaches the Verifier, never an API key.
+func (a *Authenticator) WithScheme(s authn.Scheme) *Authenticator {
+	a.scheme = &s
+	return a
+}
+
+// Authenticate implements authn.Authenticator by verifying raw as an access token or personal token.
 func (a *Authenticator) Authenticate(ctx context.Context, raw string) (session.Principal, error) {
+	if a.scheme != nil {
+		if shape := a.scheme.Looks(raw); shape != authn.ShapeJWT && shape != authn.ShapePersonalToken {
+			return session.Principal{}, &InvalidTokenError{Reason: "not a token shape"}
+		}
+	}
 	return a.v.Verify(ctx, raw)
 }

@@ -35,27 +35,31 @@ Defined in `internal/platform/authn/scope.go`, one `catalog` row per scope with 
 ```mermaid
 flowchart LR
   K["key_… principal"] --> CP & DP & MCP
-  J["JWT principal"] --> CP & MCP
+  J["token principal"] --> CP & MCP
   J -. "401 at the door" .-> DP
   CP["control plane<br/>ScopeTable"] --> OK([checked])
   DP["data plane<br/>+ org/project + ResourceIDs"] --> OK
   MCP["mcp<br/>ScopeTable"] --> OK
-  CP -. "JWT exempt" .-> SKIP([not checked])
 ```
 
-| Surface       | Enforced by                             | Applies to               |
-| ------------- | --------------------------------------- | ------------------------ |
-| control plane | `authn.Interceptor` + `ScopeTable()`    | keys only — JWT exempt   |
-| data plane    | `apikey.Authorize` per route            | keys only — JWT gets 401 |
-| mcp           | `mcp.Server.authorize` + `ScopeTable()` | **everyone, JWT too**    |
-| console       | session membership and role             | —                        |
+| Surface       | Enforced by                             | Applies to                 |
+| ------------- | --------------------------------------- | -------------------------- |
+| control plane | `authn.Interceptor` + `ScopeTable()`    | keys and tokens            |
+| data plane    | `apikey.Authorize` per route            | keys only — a token is 401 |
+| mcp           | `mcp.Server.authorize` + `ScopeTable()` | keys and tokens            |
+| console       | session membership and role             | —                          |
 
-Two asymmetries, both deliberate:
-
-- **Control plane exempts a JWT** — a signed-in human carries their own authority. A procedure
-  missing from the table is **denied**, not admitted; `TestEveryRPCHasAScope` pins it.
-- **MCP exempts nobody** — an MCP token is a delegated grant an agent holds for a person, so
-  its scopes are the limit of that delegation. See [`mcp`](../mcp/README.md).
+- **No credential is exempt.** A token is a delegated grant a client holds for a person, so its
+  scopes are the limit of that delegation, on the control plane and on MCP alike. Only a console
+  session skips the table, and the console never calls `/api/`. A procedure missing from the table
+  is **denied**, not admitted; `TestEveryRPCHasAScope` pins it.
+- **Challenges on Connect.** A 401 carries `WWW-Authenticate: Bearer resource_metadata="…/api"`
+  and a scope denial adds `error="insufficient_scope", scope="<scope>"` (RFC 6750 Section 3).
+- **MCP step-up.** An OAuth token missing a tool's scope gets an RFC 6750 `insufficient_scope`
+  403 naming it. See [`mcp`](../mcp/README.md).
+- **Key management stays in the console.** `apikeys:write` is retired, so no key can hold it; do
+  not register it on the Othra resource server either, and `APIKeyService.Create`/`Revoke`
+  answer a token with `PermissionDenied`.
 
 Every surface narrows past the scope with one rule, `session.Principal.Reaches*`: a key reaches
 only the projects it was granted — one for a project key, the grant for an org key or personal

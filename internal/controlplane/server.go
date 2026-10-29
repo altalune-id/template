@@ -34,6 +34,7 @@ import (
 	"altalune.id/template/internal/platform"
 	"altalune.id/template/internal/platform/authn"
 	"altalune.id/template/internal/platform/config"
+	"altalune.id/template/internal/platform/tokens"
 	"altalune.id/template/internal/project"
 	"altalune.id/template/internal/todo"
 	"altalune.id/template/internal/user"
@@ -67,6 +68,10 @@ type Server struct {
 
 	Authn     authn.Chain
 	KeyPrefix string
+	// TokenPrefix starts the personal tokens accepted through introspection; empty refuses them.
+	TokenPrefix string
+	// Resource is the control plane's protected resource, named in every 401 and 403 challenge; nil sends none.
+	Resource *tokens.Resource
 
 	OpenAPIEnabled   bool
 	OpenAPIBasicAuth *BasicAuth
@@ -195,8 +200,8 @@ func (s *Server) handlerOptions() []connect.HandlerOption {
 	}
 	ics = append(ics,
 		interceptor.Wrap(s.unexpected()),
-		translateAuthnErrors(),
-		authn.Interceptor(s.Authn, authn.Scheme{Prefix: s.KeyPrefix}, ScopeTable()),
+		translateAuthnErrors(s.Resource),
+		authn.Interceptor(s.Authn, authn.Scheme{Prefix: s.KeyPrefix, TokenPrefix: s.TokenPrefix}, ScopeTable()),
 		interceptor.Tenant(),
 	)
 	return []connect.HandlerOption{

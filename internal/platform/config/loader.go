@@ -142,8 +142,6 @@ func setDefaults(v *viper.Viper) {
 
 	v.SetDefault("i18n.defaultLocale", "en-US")
 
-	v.SetDefault("tokens.audience", "urn:altempl:api")
-	v.SetDefault("tokens.supportedAlgs", []string{"RS256", "ES256"})
 	v.SetDefault("tokens.clockSkew", "60s")
 }
 

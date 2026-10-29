@@ -29,6 +29,20 @@ func TestSchemeLooks(t *testing.T) {
 	}
 }
 
+func TestSchemeLooksPersonalTokenOnlyWithItsPrefix(t *testing.T) {
+	with := authn.Scheme{Prefix: "key_", TokenPrefix: "othra_pt_"}
+	if got := with.Looks("othra_pt_abc"); got != authn.ShapePersonalToken {
+		t.Fatalf("Looks(personal token) = %v, want ShapePersonalToken", got)
+	}
+	if got := with.Looks("key_abc"); got != authn.ShapeAPIKey {
+		t.Fatalf("Looks(api key) = %v, want ShapeAPIKey", got)
+	}
+	without := authn.Scheme{Prefix: "key_"}
+	if got := without.Looks("othra_pt_abc"); got != authn.ShapeUnknown {
+		t.Fatalf("a personal token without introspection = %v, want ShapeUnknown", got)
+	}
+}
+
 func TestZeroSchemeClassifiesJWTOnly(t *testing.T) {
 	var s authn.Scheme
 	if got := s.Looks("key_abc"); got != authn.ShapeUnknown {

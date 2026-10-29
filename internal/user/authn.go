@@ -2,8 +2,6 @@ package user
 
 import (
 	"context"
-	"errors"
-	"fmt"
 
 	"github.com/google/uuid"
 
@@ -64,6 +62,8 @@ func (a *Authenticator) Authenticate(ctx context.Context, raw string) (session.P
 		return session.Principal{}, &authn.UnauthorizedError{}
 	}
 	p.UserID = u.ID
+	p.Email = u.Email
+	p.Name = u.Name
 	p.IsAdmin = u.IsAdmin
 	p.Locale = u.Locale
 	if u.TermsAcceptedAt != nil {
@@ -72,7 +72,7 @@ func (a *Authenticator) Authenticate(ctx context.Context, raw string) (session.P
 	return a.resolveTenant(ctx, p)
 }
 
-// SECURITY: membership is the only authority for tenancy, so a ClaimedOrgID the user does not belong to refuses the credential.
+// SECURITY: membership is the only authority for tenancy; a token never names its org.
 func (a *Authenticator) resolveTenant(ctx context.Context, p session.Principal) (session.Principal, error) {
 	if a.orgs == nil || p.ActiveOrgID != uuid.Nil {
 		return p, nil
@@ -81,10 +81,7 @@ func (a *Authenticator) resolveTenant(ctx context.Context, p session.Principal) 
 	if err != nil {
 		return session.Principal{}, &authn.UnauthorizedError{}
 	}
-	orgID, err := pickOrg(p, orgs)
-	if err != nil {
-		return session.Principal{}, err
-	}
+	orgID := pickOrg(orgs)
 	if orgID == uuid.Nil {
 		return p, nil
 	}
@@ -93,20 +90,12 @@ func (a *Authenticator) resolveTenant(ctx context.Context, p session.Principal) 
 	return p, nil
 }
 
-// NOTE: several memberships and no claim leaves the principal untenanted, failing later with tenant.UnscopedError.
-func pickOrg(p session.Principal, orgs []*OrgRef) (uuid.UUID, error) {
-	if p.ClaimedOrgID != uuid.Nil {
-		for _, o := range orgs {
-			if o.ID == p.ClaimedOrgID {
-				return o.ID, nil
-			}
-		}
-		return uuid.Nil, &OrgClaimNotMemberError{OrgID: p.ClaimedOrgID.String(), UserID: p.UserID.String()}
-	}
+// NOTE: several memberships leave the principal untenanted, failing later with tenant.UnscopedError.
+func pickOrg(orgs []*OrgRef) uuid.UUID {
 	if len(orgs) == 1 {
-		return orgs[0].ID, nil
+		return orgs[0].ID
 	}
-	return uuid.Nil, nil
+	return uuid.Nil
 }
 
 // SECURITY: the principal holds no tenant scope yet, so bind to the org just resolved.
@@ -129,23 +118,4 @@ func needsIdentity(p session.Principal) bool {
 		return false
 	}
 	return p.IDPIssuer != "" && p.IDPSubject != ""
-}
-
-// OrgClaimNotMemberError signals a bearer token asserted an org_id its subject is not a member of.
-type OrgClaimNotMemberError struct {
-	OrgID  string
-	UserID string
-}
-
-func (e *OrgClaimNotMemberError) Error() string {
-	return fmt.Sprintf("user: token org_id %q names an org user %q is not a member of", e.OrgID, e.UserID)
-}
-
-// Unwrap reports the opaque failure every authentication link collapses to. SECURITY: the reason stays inside the process; the caller still sees only *authn.UnauthorizedError.
-func (e *OrgClaimNotMemberError) Unwrap() error { return &authn.UnauthorizedError{} }
-
-// IsOrgClaimNotMemberError reports whether err's tree contains an *OrgClaimNotMemberError.
-func IsOrgClaimNotMemberError(err error) bool {
-	_, ok := errors.AsType[*OrgClaimNotMemberError](err)
-	return ok
 }

@@ -17,7 +17,7 @@ func TestEnvVarName(t *testing.T) {
 		{"http.addr", "ALT_HTTP_ADDR"},
 		{"http.baseURL", "ALT_HTTP_BASE_URL"},
 		{"telemetry.otlp.endpoint", "ALT_TELEMETRY_OTLP_ENDPOINT"},
-		{"tokens.jwksURL", "ALT_TOKENS_JWKS_URL"},
+		{"tokens.introspection.clientID", "ALT_TOKENS_INTROSPECTION_CLIENT_ID"},
 		{"db.autoMigrate", "ALT_DB_AUTO_MIGRATE"},
 		{"db.AutoMigrate", "ALT_DB_AUTO_MIGRATE"},
 		{"api.openapi.requireBasicAuth", "ALT_API_OPENAPI_REQUIRE_BASIC_AUTH"},
@@ -100,7 +100,8 @@ func TestWalkEnvKeys_IncludesKnownLeaves(t *testing.T) {
 		{"ALT_HTTP_STATE_SECRET", "http.stateSecret", "string"},
 		{"ALT_TELEMETRY_OTLP_ENDPOINT", "telemetry.otlp.endpoint", "string"},
 		{"ALT_TOKENS_CLOCK_SKEW", "tokens.clockSkew", "duration"},
-		{"ALT_TOKENS_SUPPORTED_ALGS", "tokens.supportedAlgs", "[]string"},
+		{"ALT_TOKENS_INTROSPECTION_CLIENT_SECRET", "tokens.introspection.clientSecret", "string"},
+		{"ALT_OIDC_CLI_CLIENT_ID", "oidc.cliClientID", "string"},
 		{"ALT_OIDC_REDIRECT_PORT", "oidc.redirectPort", "int"},
 	}
 	for _, want := range expect {
@@ -131,7 +132,7 @@ func TestWalkEnvKeys_Defaults(t *testing.T) {
 		{"ALT_HTTP_ADDR", ":5150"},
 		{"ALT_DB_DRIVER", "sqlite"},
 		{"ALT_LOG_LEVEL", "info"},
-		{"ALT_TOKENS_AUDIENCE", "urn:altempl:api"},
+		{"ALT_TOKENS_CLOCK_SKEW", "60s"},
 	}
 	for _, tc := range withDefaults {
 		got, ok := byEnv[tc.env]
