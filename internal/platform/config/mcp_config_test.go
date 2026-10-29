@@ -299,12 +299,12 @@ func TestLoad_MCPDefaultsOff(t *testing.T) {
 
 func TestEnvKeys_MCPKeysAreRuntime(t *testing.T) {
 	want := map[string][]string{
-		"ALT_MCP_ENABLED":           nil,
-		"ALT_MCP_AUDIENCE":          nil,
-		"ALT_MCP_AUDIENCE_OVERRIDE": nil,
-		"ALT_MCP_APPS_UI":           nil,
-		"ALT_MCP_CHALLENGE_TOKEN":   nil,
-		"ALT_MCP_CHALLENGE_PREFIX":  nil,
+		"ALT_MCP_ENABLED":                     nil,
+		"ALT_MCP_AUDIENCE":                    nil,
+		"ALT_MCP_AUDIENCE_OVERRIDE":           nil,
+		"ALT_MCP_APPS_UI":                     nil,
+		"ALT_MCP_INTROSPECTION_CLIENT_ID":     nil,
+		"ALT_MCP_INTROSPECTION_CLIENT_SECRET": {"secret"},
 	}
 	seen := map[string]bool{}
 	for _, k := range WalkEnvKeys("ALT") {

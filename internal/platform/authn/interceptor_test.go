@@ -83,23 +83,72 @@ func TestInterceptorDeniesInsufficientScope(t *testing.T) {
 	}
 }
 
-func TestInterceptorSkipsScopeCheckForUserPrincipal(t *testing.T) {
-	user := session.Principal{UserID: uuid.New()}
-	ic := authn.Interceptor(
-		authn.Chain{stubAuth{p: user}},
-		authn.Scheme{Prefix: "key_"},
-		authn.ScopeTable{},
-	)
-	called := false
-	next := connect.UnaryFunc(func(context.Context, connect.AnyRequest) (connect.AnyResponse, error) {
-		called = true
-		return nil, nil
-	})
+func tokenPrincipal(scopes ...string) session.Principal {
+	return session.Principal{Source: session.SourceToken, UserID: uuid.New(), Scopes: scopes}
+}
 
-	if _, err := ic(next)(t.Context(), req("/any/Method", "aaa.bbb.ccc")); err != nil {
-		t.Fatalf("user principal rejected: %v", err)
+func TestInterceptorEnforcesScopesOnTokenPrincipal(t *testing.T) {
+	table := authn.ScopeTable{"/blog.v1.BlogService/ListPosts": authn.ScopePostsRead}
+	tests := []struct {
+		name      string
+		principal session.Principal
+		procedure string
+		wantErr   bool
+	}{
+		{"token with the scope passes", tokenPrincipal(authn.ScopePostsRead), "/blog.v1.BlogService/ListPosts", false},
+		{"token without the scope is denied", tokenPrincipal(authn.ScopeMembersRead), "/blog.v1.BlogService/ListPosts", true},
+		{"token on an undeclared procedure is denied", tokenPrincipal(authn.ScopePostsRead), "/blog.v1.BlogService/DeletePost", true},
+		{"a principal with no source is denied without the scope", session.Principal{UserID: uuid.New()}, "/blog.v1.BlogService/ListPosts", true},
 	}
-	if !called {
-		t.Fatal("user principal did not reach the handler")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ic := authn.Interceptor(authn.Chain{stubAuth{p: tt.principal}}, authn.Scheme{Prefix: "key_"}, table)
+			called := false
+			next := connect.UnaryFunc(func(context.Context, connect.AnyRequest) (connect.AnyResponse, error) {
+				called = true
+				return nil, nil
+			})
+			_, err := ic(next)(t.Context(), req(tt.procedure, "aaa.bbb.ccc"))
+			if tt.wantErr {
+				if !authn.IsInsufficientScopeError(err) || called {
+					t.Fatalf("err = %v, called = %v; want *InsufficientScopeError before the handler", err, called)
+				}
+				return
+			}
+			if err != nil || !called {
+				t.Fatalf("err = %v, called = %v; want the handler to run", err, called)
+			}
+		})
+	}
+}
+
+func TestInterceptorSkipsScopeCheckForSessionPrincipal(t *testing.T) {
+	for _, src := range []session.Source{session.SourceOIDC, session.SourceLocal, session.SourceGenesis} {
+		t.Run(string(src), func(t *testing.T) {
+			ic := authn.Interceptor(authn.Chain{stubAuth{p: session.Principal{UserID: uuid.New(), Source: src}}}, authn.Scheme{Prefix: "key_"}, authn.ScopeTable{})
+			called := false
+			next := connect.UnaryFunc(func(context.Context, connect.AnyRequest) (connect.AnyResponse, error) {
+				called = true
+				return nil, nil
+			})
+			if _, err := ic(next)(t.Context(), req("/any/Method", "aaa.bbb.ccc")); err != nil || !called {
+				t.Fatalf("session principal: err = %v, called = %v", err, called)
+			}
+		})
+	}
+}
+
+func TestInterceptorAdmitsPersonalTokenShapeOnlyWithItsPrefix(t *testing.T) {
+	table := authn.ScopeTable{"/m": authn.ScopePostsRead}
+	next := connect.UnaryFunc(func(context.Context, connect.AnyRequest) (connect.AnyResponse, error) { return nil, nil })
+	chain := authn.Chain{stubAuth{p: tokenPrincipal(authn.ScopePostsRead)}}
+
+	off := authn.Interceptor(chain, authn.Scheme{Prefix: "key_"}, table)
+	if _, err := off(next)(t.Context(), req("/m", "othra_pt_abc")); !authn.IsUnauthorizedError(err) {
+		t.Fatalf("personal token without introspection: err = %v, want *UnauthorizedError", err)
+	}
+	on := authn.Interceptor(chain, authn.Scheme{Prefix: "key_", TokenPrefix: "othra_pt_"}, table)
+	if _, err := on(next)(t.Context(), req("/m", "othra_pt_abc")); err != nil {
+		t.Fatalf("personal token with introspection: err = %v", err)
 	}
 }

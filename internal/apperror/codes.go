@@ -14,11 +14,13 @@ const (
 	CodeTodoInvalidTitle   = "TDO002"
 	CodeTodoAlreadyDeleted = "TDO003"
 
-	CodeUserNotFound      = "USR001"
-	CodeUserAlreadyExists = "USR002"
-	CodeUserNotInvited    = "USR003"
-	CodeUserInvalidEmail  = "USR004"
-	CodeUserInvalidName   = "USR005"
+	CodeUserNotFound         = "USR001"
+	CodeUserAlreadyExists    = "USR002"
+	CodeUserNotInvited       = "USR003"
+	CodeUserInvalidEmail     = "USR004"
+	CodeUserInvalidName      = "USR005"
+	CodeUserEmailUnverified  = "USR006"
+	CodeUserIdentityConflict = "USR007"
 
 	CodeOrgNotFound          = "ORG001"
 	CodeOrgAlreadyExists     = "ORG002"

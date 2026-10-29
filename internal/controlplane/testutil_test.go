@@ -85,7 +85,7 @@ func newHarnessOpts(t *testing.T, p session.Principal, verr error) *harness {
 	kernel := &platform.Kernel{
 		Log:      log,
 		Reporter: reporter,
-		Verifier: stubVerifier{principal: p, err: verr},
+		Verifier: stubVerifier{principal: fullTokenGrant(p), err: verr},
 	}
 
 	srv := controlplane.New(
@@ -102,6 +102,17 @@ func newHarnessOpts(t *testing.T, p session.Principal, verr error) *harness {
 	ts := httptest.NewServer(srv.Handler(""))
 	t.Cleanup(ts.Close)
 	return &harness{t: t, server: ts, orgs: orgs, projs: projs, todos: tds, posts: posts, cats: cats, tags: tags, keys: keys}
+}
+
+// NOTE: a token principal is held to the scope table, so the harness's person carries every scope unless a test narrows it.
+func fullTokenGrant(p session.Principal) session.Principal {
+	if p.Source == "" {
+		p.Source = session.SourceToken
+	}
+	if p.Scopes == nil {
+		p.Scopes = authn.AllScopes()
+	}
+	return p
 }
 
 func (h *harness) mintKey(orgID, projectID uuid.UUID, scopes []string, resourceIDs []uuid.UUID) string {

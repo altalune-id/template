@@ -64,7 +64,7 @@ func newAPIKeyFixtureAs(t *testing.T, manager bool) *apikeyFixture {
 	kernel := &platform.Kernel{
 		Log:      log,
 		Reporter: reporter,
-		Verifier: stubVerifier{principal: principal},
+		Verifier: stubVerifier{principal: fullTokenGrant(principal)},
 	}
 
 	srv := controlplane.New(

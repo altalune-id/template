@@ -184,3 +184,55 @@ func TestServer_HandlerOptions_AcceptsAnyConfiguredKeyPrefix(t *testing.T) {
 		})
 	}
 }
+
+type scopedTokenVerifier struct{ scopes []string }
+
+func (v scopedTokenVerifier) Verify(context.Context, string) (session.Principal, error) {
+	return session.Principal{Source: session.SourceToken, UserID: uuid.New(), Scopes: v.scopes}, nil
+}
+
+// TestServer_HandlerOptions_EnforcesTokenScopes proves a token principal is held to the same scope table as a key.
+func TestServer_HandlerOptions_EnforcesTokenScopes(t *testing.T) {
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	reporter := apperror.NewReporter(log, false)
+	const procedure = blogv1connect.BlogServiceDeletePostProcedure
+
+	for _, tc := range []struct {
+		name   string
+		scopes []string
+		want   connect.Code
+	}{
+		{"a token without the scope is denied", []string{authn.ScopePostsRead}, connect.CodePermissionDenied},
+		{"a token with the scope is admitted", []string{authn.ScopePostsAdmin}, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := &Server{
+				Kernel:    &platform.Kernel{Log: log, Reporter: reporter},
+				Authn:     authn.Chain{tokens.NewAuthenticator(scopedTokenVerifier{scopes: tc.scopes})},
+				KeyPrefix: apikey.DefaultPrefix,
+			}
+			handler := connect.NewUnaryHandlerSimple(procedure,
+				func(context.Context, *blogv1.DeletePostRequest) (*blogv1.DeletePostResponse, error) {
+					return &blogv1.DeletePostResponse{}, nil
+				}, s.handlerOptions()...)
+			mux := http.NewServeMux()
+			mux.Handle(procedure, handler)
+			ts := httptest.NewServer(mux)
+			t.Cleanup(ts.Close)
+
+			client := connect.NewClient[blogv1.DeletePostRequest, blogv1.DeletePostResponse](http.DefaultClient, ts.URL+procedure)
+			req := connect.NewRequest(&blogv1.DeletePostRequest{PostId: uuid.NewString()})
+			req.Header().Set("Authorization", "Bearer aaa.bbb.ccc")
+			_, err := client.CallUnary(t.Context(), req)
+			if tc.want == 0 {
+				if err != nil {
+					t.Fatalf("a token holding the scope was refused: %v", err)
+				}
+				return
+			}
+			if connect.CodeOf(err) != tc.want {
+				t.Fatalf("code = %v, want %v (err: %v)", connect.CodeOf(err), tc.want, err)
+			}
+		})
+	}
+}

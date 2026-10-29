@@ -13,6 +13,7 @@ import (
 	mcpinternal "altalune.id/template/internal/mcp"
 	"altalune.id/template/internal/platform/authn"
 	"altalune.id/template/internal/platform/session"
+	"altalune.id/template/internal/platform/tokens"
 )
 
 type rejectingAuthenticator struct{ err error }
@@ -29,7 +30,7 @@ func TestAuthenticate_LogsEachChainAuthenticatorsCause(t *testing.T) {
 		rejectingAuthenticator{err: errors.New("api key: no such key")},
 		rejectingAuthenticator{err: errors.New("jwt: token audience is not this resource")},
 	}
-	guard := mcpinternal.Authenticate(chain, authn.Scheme{Prefix: "key_"}, "https://x/meta", log)
+	guard := mcpinternal.Authenticate(chain, authn.Scheme{Prefix: "key_"}, tokens.Resource{MetadataURL: "https://x/meta"}, log)
 	h := guard(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 		t.Fatal("the guard admitted a request it must have rejected")
 	}))
@@ -59,7 +60,7 @@ func TestAuthenticate_LogsADistinctReasonPerFailure(t *testing.T) {
 	}{
 		{"no authenticator", nil, "Bearer a.b.c", "no authenticator configured"},
 		{"absent credential", rejectingAuthenticator{err: &authn.UnauthorizedError{}}, "", "no bearer credential"},
-		{"unrecognized shape", rejectingAuthenticator{err: &authn.UnauthorizedError{}}, "Bearer opaque-token", "neither the api key prefix nor the JWT shape"},
+		{"unrecognized shape", rejectingAuthenticator{err: &authn.UnauthorizedError{}}, "Bearer opaque-token", "neither the api key prefix, the JWT shape nor the personal token prefix"},
 		{"chain rejected", rejectingAuthenticator{err: &authn.UnauthorizedError{}}, "Bearer a.b.c", "every authenticator rejected"},
 	}
 
@@ -68,7 +69,7 @@ func TestAuthenticate_LogsADistinctReasonPerFailure(t *testing.T) {
 			var buf bytes.Buffer
 			log := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn}))
 
-			guard := mcpinternal.Authenticate(tc.auth, authn.Scheme{Prefix: "key_"}, "https://x/meta", log)
+			guard := mcpinternal.Authenticate(tc.auth, authn.Scheme{Prefix: "key_"}, tokens.Resource{MetadataURL: "https://x/meta"}, log)
 			h := guard(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				t.Fatal("the guard admitted a request it must have rejected")
 			}))

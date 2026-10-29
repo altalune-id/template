@@ -1,11 +1,12 @@
-// Package mcp is the app side of the MCP surface (S7): request authentication, per-tool scope resolution, the RFC 9728 metadata document and the tools the surface publishes.
+// Package mcp is the app side of the MCP surface (S7): request authentication, per-tool scope resolution and the tools the surface publishes.
 package mcp
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"slices"
@@ -17,24 +18,22 @@ import (
 	"altalune.id/template/internal/apperror"
 	"altalune.id/template/internal/platform/authn"
 	"altalune.id/template/internal/platform/session"
+	"altalune.id/template/internal/platform/tokens"
 	rootmcp "altalune.id/template/mcp"
 )
 
-const unauthorizedMessage = "unauthorized"
+const (
+	unauthorizedMessage = "unauthorized"
+	maxPeekBytes        = 1 << 20
+)
 
 // ScopesFromContext resolves the scopes the caller's principal carries, for rootmcp.WithScopes. SECURITY: every principal is scope-checked on this surface, a JWT included — see the S7 row of R4 in ../../docs/surfaces/README.md.
 func ScopesFromContext(ctx context.Context) []string {
 	return slices.Clone(session.PrincipalFrom(ctx).Scopes)
 }
 
-// WWWAuthenticate builds the challenge a 401 carries, naming the protected-resource metadata document per RFC 9728.
-func WWWAuthenticate(resourceMetadataURL string) string {
-	return fmt.Sprintf("Bearer resource_metadata=%q", resourceMetadataURL)
-}
-
 // Authenticate authenticates every request reaching the MCP surface and puts the resulting principal in the request context, where ScopesFromContext reads it. SECURITY: a nil authenticator, an absent credential, a credential of an unrecognized shape and a rejected credential all answer the same masked 401, so a caller learns nothing about why.
-func Authenticate(a authn.Authenticator, scheme authn.Scheme, resourceMetadataURL string, log *slog.Logger) func(http.Handler) http.Handler {
-	challenge := WWWAuthenticate(resourceMetadataURL)
+func Authenticate(a authn.Authenticator, scheme authn.Scheme, resource tokens.Resource, log *slog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			p, reason, ok := principalFor(r, a, scheme)
@@ -43,8 +42,14 @@ func Authenticate(a authn.Authenticator, scheme authn.Scheme, resourceMetadataUR
 				if log != nil {
 					log.WarnContext(r.Context(), "mcp: credential rejected", slog.String("reason", reason))
 				}
-				writeUnauthorized(r.Context(), w, challenge)
+				writeUnauthorized(r.Context(), w, challengeFor(r, resource))
 				return
+			}
+			if p.Source == session.SourceToken {
+				if scope := missingToolScope(r, p.Scopes); scope != "" {
+					writeInsufficientScope(r.Context(), w, resource.InsufficientScope(scope))
+					return
+				}
 			}
 			next.ServeHTTP(w, r.WithContext(session.PrincipalInto(r.Context(), p)))
 		})
@@ -77,7 +82,7 @@ func principalFor(r *http.Request, a authn.Authenticator, scheme authn.Scheme) (
 		return session.Principal{}, "no bearer credential on the request", false
 	}
 	if scheme.Looks(raw) == authn.ShapeUnknown {
-		return session.Principal{}, "credential matched neither the api key prefix nor the JWT shape", false
+		return session.Principal{}, "credential matched neither the api key prefix, the JWT shape nor the personal token prefix", false
 	}
 	p, err := a.Authenticate(r.Context(), raw)
 	if err != nil {
@@ -99,6 +104,54 @@ func chainCauses(err error) string {
 
 func appError(code, message string, grpcCode codes.Code, cause error) error {
 	return apperror.New(code, message, grpcCode, &apperrorv1.ErrorDetail{Code: code}).WithCause(cause)
+}
+
+// SECURITY: RFC 6750 Section 3.1: only the error code tells "no token" from "token refused"; why it was refused stays masked.
+func challengeFor(r *http.Request, resource tokens.Resource) string {
+	if authn.CredentialFrom(r) == "" {
+		return resource.Challenge()
+	}
+	return resource.InvalidToken()
+}
+
+// NOTE: RFC 6750 Section 3.1 step-up for OAuth tokens: a tools/call whose scope the token lacks is a 403 naming it, before dispatch; the body is restored.
+func missingToolScope(r *http.Request, granted []string) string {
+	if r.Method != http.MethodPost || r.Body == nil {
+		return ""
+	}
+	head, err := io.ReadAll(io.LimitReader(r.Body, maxPeekBytes+1))
+	r.Body = struct {
+		io.Reader
+		io.Closer
+	}{io.MultiReader(bytes.NewReader(head), r.Body), r.Body}
+	if err != nil || len(head) > maxPeekBytes {
+		return ""
+	}
+	var call struct {
+		Method string `json:"method"`
+		Params struct {
+			Name string `json:"name"`
+		} `json:"params"`
+	}
+	if json.Unmarshal(head, &call) != nil || call.Method != "tools/call" {
+		return ""
+	}
+	scope := ScopeFor(call.Params.Name)
+	if scope == "" || slices.Contains(granted, scope) {
+		return ""
+	}
+	return scope
+}
+
+func writeInsufficientScope(ctx context.Context, w http.ResponseWriter, challenge string) {
+	w.Header().Set("WWW-Authenticate", challenge)
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusForbidden)
+	_ = json.NewEncoder(w).Encode(AttachContext(ctx, rootmcp.ErrorPayload{
+		Code:    apperror.CodeForbidden,
+		Message: "credential lacks the required scope",
+	}))
 }
 
 // NOTE: the body is rootmcp.ErrorPayload, the same struct an in-result tool failure carries, so one client parser reads both.
