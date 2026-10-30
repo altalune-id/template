@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"maps"
 	"net/http"
+	"net/url"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -199,7 +200,7 @@ func surfaceChains(
 			webmw.Recover(reporter.Unexpected, nil),
 		}),
 		Console: slices.Concat(edge, []web.Middleware{
-			webmw.CSP(cspOptions(cfg.HTTP.CSP)),
+			webmw.CSP(cspOptions(cfg)),
 			webmw.Recover(reporter.Unexpected, errTmpl),
 			webmw.Session(webmw.SessionConfig{
 				Store:  kernel.Sessions,
@@ -270,10 +271,22 @@ func (w logSlogWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-func cspOptions(cfg config.CSPConfig) webmw.CSPOptions {
-	return webmw.CSPOptions{
-		Enabled:    cfg.Enabled,
-		ReportOnly: cfg.ReportOnly,
-		ReportURI:  cfg.ReportURI,
+func cspOptions(cfg *config.Config) webmw.CSPOptions {
+	opts := webmw.CSPOptions{
+		Enabled:    cfg.HTTP.CSP.Enabled,
+		ReportOnly: cfg.HTTP.CSP.ReportOnly,
+		ReportURI:  cfg.HTTP.CSP.ReportURI,
 	}
+	if origin := issuerOrigin(cfg.OIDC.Issuer); origin != "" && cfg.OIDC.EndSessionOnLogout {
+		opts.ExtraFormAction = []string{origin}
+	}
+	return opts
+}
+
+func issuerOrigin(issuer string) string {
+	u, err := url.Parse(issuer)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return ""
+	}
+	return u.Scheme + "://" + u.Host
 }
