@@ -70,7 +70,6 @@ func newFixture(t *testing.T) *handlerFixture {
 	t.Helper()
 	cfg := &config.Config{}
 	cfg.HTTP.BasePath = ""
-	cfg.HTTP.StateSecret = "0123456789abcdef0123456789abcdef"
 	cfg.HTTP.BaseURL = "http://localhost"
 	caps := capabilities.Capabilities{OrgCreation: true, LocalIdentity: true}
 	sessions := session.NewMemoryStore()
@@ -100,6 +99,7 @@ func newFixture(t *testing.T) *handlerFixture {
 		Logger:   discardStdLogger(),
 		Orgs:     orgs,
 		Projects: projects,
+		Secret:   []byte("0123456789abcdef0123456789abcdef"),
 	}
 	return &handlerFixture{
 		Deps: deps, Cfg: cfg, Sessions: sessions,
@@ -117,7 +117,7 @@ func (f *handlerFixture) seedSession(t *testing.T, p session.Principal) string {
 	sid, err := web.NewSID()
 	require.NoError(t, err)
 	require.NoError(t, f.Sessions.Save(context.Background(), sid, p, time.Now().Add(web.SessionTTL)))
-	return web.SignCookie([]byte(f.Cfg.HTTP.StateSecret), sid)
+	return web.SignCookie(f.Deps.Key(web.PurposeSession), sid)
 }
 
 func (f *handlerFixture) authedRequest(t *testing.T, method, target string, body string, p session.Principal) *http.Request {
@@ -918,6 +918,24 @@ func TestDeps_ClearSession_RemovesRow(t *testing.T) {
 	r.AddCookie(&http.Cookie{Name: web.SessionCookieName, Value: sid})
 	f.Deps.ClearSession(rec, r)
 	assert.Contains(t, rec.Header().Get("Set-Cookie"), web.SessionCookieName)
+}
+
+func TestDeps_ClearSessionMatchesWriteSessionSecure(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	r := httptest.NewRequest(http.MethodPost, "https://app.example.com/", nil)
+	write := httptest.NewRecorder()
+	require.NoError(t, f.Deps.WriteSession(write, r, session.Principal{UserID: uuid.New()}))
+	written := write.Result().Cookies()
+	require.Len(t, written, 1)
+	require.True(t, written[0].Secure, "a session written over TLS is Secure")
+
+	r.AddCookie(written[0])
+	clearRec := httptest.NewRecorder()
+	f.Deps.ClearSession(clearRec, r)
+	cleared := clearRec.Result().Cookies()
+	require.Len(t, cleared, 1)
+	assert.Equal(t, written[0].Secure, cleared[0].Secure, "clearing must use the Secure rule that set the cookie")
 }
 
 func TestDeps_UpdateSession(t *testing.T) {
