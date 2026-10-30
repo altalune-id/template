@@ -181,6 +181,7 @@ documents before it accepts a resource server:
    two documents are now served at `/.well-known/oauth-protected-resource{basePath}/api` and
    `…/mcp`. `selfhosted` boots without client credentials; `cloud` refuses to boot without
    `oidc.clientID` and `oidc.clientSecret`, so set any non-empty placeholder for both until step 5.
+   `cloud` also requires `http.stateSecret`: generate it with `openssl rand -hex 32`.
 2. In Othra, create two resource servers: `https://<host><basePath>/api` (the control plane) and
    `https://<host><basePath>/mcp`, each with the scopes its document lists. The documents never
    list a retired scope such as `apikeys:write`: key management stays in the console.
@@ -213,6 +214,7 @@ podman run -d --name <app>-pg -e POSTGRES_PASSWORD=dev -p 5432:5432 postgres:18
 export ALT_MODE=cloud ALT_DB_DRIVER=postgres ALT_DB_ALLOW_BYPASS_RLS=true \
   ALT_DB_DSN='postgres://postgres:dev@127.0.0.1:5432/postgres?sslmode=disable' \
   ALT_SECURITY_ENCRYPTION_KEY="$(openssl rand -hex 32)" \
+  ALT_HTTP_STATE_SECRET="$(openssl rand -hex 32)" \
   ALT_GENESIS_EMAIL=you@example.com \
   ALT_HTTP_ADDR=:5150 ALT_HTTP_BASE_URL=http://localhost:5150 \
   ALT_MCP_ENABLED=true
