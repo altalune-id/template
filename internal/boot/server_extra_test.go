@@ -20,8 +20,7 @@ func discardLogger() *slog.Logger { return slog.New(slog.NewTextHandler(io.Disca
 func TestBootClient_Wires(t *testing.T) {
 	t.Parallel()
 	cfg := config.Defaults()
-	cfg.HTTP.BaseURL = "http://127.0.0.1:0"
-	c, err := BootClient(context.Background(), cfg, "sometoken")
+	c, err := BootClient(context.Background(), cfg, "http://127.0.0.1:0", "sometoken")
 	require.NoError(t, err)
 	require.NotNil(t, c)
 	assert.NotNil(t, c.Log)
