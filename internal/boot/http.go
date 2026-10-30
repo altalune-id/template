@@ -158,7 +158,7 @@ func resourceMetadata(cfg *config.Config, log *slog.Logger, mcp mcpSurface) map[
 			slog.String("audience", cfg.Tokens.Audience), slog.String("err", err.Error()))
 		return out
 	}
-	out[resource.MetadataPath] = resource.MetadataHandler(cfg.Tokens.Issuer, apiScopes())
+	out[resource.MetadataPath] = resource.CLIMetadataHandler(cfg.Tokens.Issuer, apiScopes(), cfg.OIDC.CLIClientID)
 	return out
 }
 

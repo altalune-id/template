@@ -71,7 +71,7 @@ func main() {
 }
 
 func generate(format string) string {
-	keys := config.WalkEnvKeys("ALT")
+	keys := config.WalkEnvKeys(config.EnvPrefix)
 
 	var bootstrap, runtime []config.EnvKey
 	for _, k := range keys {

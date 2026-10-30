@@ -3,6 +3,7 @@ package cli
 
 import (
 	"context"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -15,15 +16,14 @@ import (
 // ServerBootFn boots the fully-wired server graph (DB, migrations, services).
 type ServerBootFn func(ctx context.Context, cfg *config.Config, opts ...boot.Option) (*boot.Server, error)
 
-// ClientBootFn boots the minimal client graph used by remote-facing subcommands.
-type ClientBootFn func(ctx context.Context, cfg *config.Config, token string) (*boot.Client, error)
+// ClientBootFn boots the minimal client graph remote subcommands use to call the server at baseURL with token.
+type ClientBootFn func(ctx context.Context, cfg *config.Config, baseURL, token string) (*boot.Client, error)
 
 type ctxKey int
 
-const (
-	ctxKeyConfig ctxKey = iota + 1
-	ctxKeyPrincipal
-)
+const ctxKeyConfig ctxKey = iota + 1
+
+const operatorAnnotation = "altempl/operator"
 
 // NewRootCmd builds a fresh command tree bound to the given boot fns.
 func NewRootCmd(bootServer ServerBootFn, bootClient ClientBootFn) *cobra.Command {
@@ -32,6 +32,7 @@ func NewRootCmd(bootServer ServerBootFn, bootClient ClientBootFn) *cobra.Command
 		url           string
 		token         string
 		tokenFile     string
+		profile       string
 		output        string
 		orgSlug       string
 		projectSlug   string
@@ -53,7 +54,8 @@ func NewRootCmd(bootServer ServerBootFn, bootClient ClientBootFn) *cobra.Command
 	p.StringVarP(&configPath, "config", "c", "", "config file (yaml). Env (ALT_*) still applies; -c makes yaml explicit.")
 	p.StringVar(&url, "url", "", "base URL of the altempl instance to talk to (also: ALT_URL)")
 	p.StringVar(&token, "token", "", "bearer token (also: ALT_TOKEN)")
-	p.StringVar(&tokenFile, "token-file", "", "path to file containing the bearer token (0600) (also: ALT_TOKEN_FILE)")
+	p.StringVar(&tokenFile, "token-file", "", "read the bearer token from a file")
+	p.StringVar(&profile, "profile", "", "signed-in profile to use (also: ALT_PROFILE; default \"default\")")
 	p.StringVar(&output, "output", "", "output format: text|json|ndjson (also: ALT_OUTPUT)")
 	p.StringVar(&orgSlug, "org", "", "override active org (slug) (also: ALT_ORG)")
 	p.StringVar(&projectSlug, "project", "", "override active project (slug) (also: ALT_PROJECT)")
@@ -64,6 +66,9 @@ func NewRootCmd(bootServer ServerBootFn, bootClient ClientBootFn) *cobra.Command
 	root.PersistentPreRunE = func(cmd *cobra.Command, _ []string) error {
 		if cmd.Name() == "help" || cmd.Name() == "completion" {
 			return nil
+		}
+		if err := refuseRemoteFlags(cmd); err != nil {
+			return err
 		}
 		cfg, err := config.Load(configPath)
 		if err != nil {
@@ -84,15 +89,15 @@ func NewRootCmd(bootServer ServerBootFn, bootClient ClientBootFn) *cobra.Command
 	)
 
 	root.AddCommand(
-		newServeCmd(bootServer),
-		newInitCmd(bootServer),
-		newMigrateCmd(bootServer),
-		newSchedulerCmd(bootServer),
+		markOperator(newServeCmd(bootServer)),
+		markOperator(newInitCmd(bootServer)),
+		markOperator(newMigrateCmd(bootServer)),
+		markOperator(newSchedulerCmd(bootServer)),
 		newAuthCmd(bootServer, bootClient),
-		newOrgCmd(bootServer, bootClient),
-		newProjectCmd(bootServer, bootClient),
-		newInviteCmd(bootServer, bootClient),
-		newTodoCmd(bootServer, bootClient),
+		markOperator(newOrgCmd(bootServer)),
+		markOperator(newProjectCmd(bootServer)),
+		markOperator(newInviteCmd(bootServer)),
+		newTodoCmd(bootClient),
 		newBlogCmd(),
 		newVersionCmd(),
 		newHealthzCmd(),
@@ -111,11 +116,26 @@ func configFromCtx(ctx context.Context) *config.Config {
 	return cfg
 }
 
-func ctxWithPrincipal(ctx context.Context, p Principal) context.Context {
-	return context.WithValue(ctx, ctxKeyPrincipal, p)
+func markOperator(cmd *cobra.Command) *cobra.Command {
+	if cmd.Annotations == nil {
+		cmd.Annotations = map[string]string{}
+	}
+	cmd.Annotations[operatorAnnotation] = "true"
+	for _, sub := range cmd.Commands() {
+		markOperator(sub)
+	}
+	return cmd
 }
 
-func principalFromCtx(ctx context.Context) (Principal, bool) {
-	p, ok := ctx.Value(ctxKeyPrincipal).(Principal)
-	return p, ok
+// NOTE: --profile stays allowed on operator commands, because it picks the local sign-in.
+func refuseRemoteFlags(cmd *cobra.Command) error {
+	if cmd.Annotations[operatorAnnotation] != "true" {
+		return nil
+	}
+	for _, name := range []string{"url", "token", "token-file"} {
+		if f := cmd.Flags().Lookup(name); f != nil && f.Changed {
+			return &RemoteFlagError{Command: strings.TrimPrefix(cmd.CommandPath(), cmd.Root().Name()+" "), Flag: name}
+		}
+	}
+	return nil
 }
