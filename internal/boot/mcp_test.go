@@ -368,8 +368,8 @@ func TestMCP_ControlPlaneEnforcesScopesOnTokens(t *testing.T) {
 
 	unauth := f.connectRPC(t, "not.a.token", todoListProcedure, map[string]any{"projectId": f.projectID})
 	require.Equal(t, http.StatusUnauthorized, unauth.Code)
-	require.Equal(t, `Bearer resource_metadata="http://127.0.0.1`+apiMetadataPath+`"`, unauth.Header().Get("WWW-Authenticate"),
-		"a 401 on Connect must point the client at the API's RFC 9728 document")
+	require.Equal(t, `Bearer resource_metadata="http://127.0.0.1`+apiMetadataPath+`", error="invalid_token"`, unauth.Header().Get("WWW-Authenticate"),
+		"a 401 for a presented token on Connect must say invalid_token and point at the API's RFC 9728 document")
 }
 
 // TestMCP_EachResourceServesItsOwnMetadata pins the two RFC 9728 documents Othra verifies before it mints tokens.
