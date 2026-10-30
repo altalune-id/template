@@ -39,12 +39,10 @@ import (
 	"altalune.id/template/internal/webhook"
 )
 
-func buildAPIHandler(cfg *config.Config, k *platform.Kernel, s *Services) (*controlplane.Server, http.Handler) {
+func buildAPIHandler(cfg *config.Config, k *platform.Kernel, s *Services, resource *tokens.Resource) (*controlplane.Server, http.Handler) {
 	srv := controlplane.New(cfg, k, s.Auth, s.Users, s.Orgs, s.Projects, s.Todos, s.Invites, s.TodoStore, s.Posts, s.Categories, s.Tags)
 	srv.Authn = s.Authn
-	if resource, err := apiResource(cfg); err == nil && cfg.Tokens.Issuer != "" {
-		srv.Resource = resource
-	}
+	srv.Resource = resource
 	srv.APIKeys = s.APIKeys
 	if !cfg.API.Enabled {
 		return srv, nil
@@ -101,6 +99,7 @@ func buildWebHandler(
 	apiHandler http.Handler,
 	dataHandler http.Handler,
 	mcp mcpSurface,
+	resource *tokens.Resource,
 	bundle *i18npkg.Bundle,
 	defaultLoc i18npkg.Locale,
 ) (handler http.Handler, routes []string) { //nolint:nonamedreturns // two return values differ in role
@@ -137,37 +136,37 @@ func buildWebHandler(
 		DataHandler:      dataHandler,
 		IngestHandler:    buildIngestHandler(cfg, slogger),
 		MCPHandler:       mcp.Handler,
-		ResourceMetadata: resourceMetadata(cfg, slogger, mcp),
+		ResourceMetadata: resourceMetadata(cfg, mcp, resource),
 		RobotsCfg:        &struct{ RobotsTxt string }{RobotsTxt: cfg.HTTP.RobotsTxt},
 		Chains:           surfaceChains(cfg, kernel, slogger, reporter, errTmpl, bundle, defaultLoc, required),
 	})
 }
 
 // NOTE: the control plane and MCP are separate protected resources, each with its own RFC 9728 document on the Probes chain.
-func resourceMetadata(cfg *config.Config, log *slog.Logger, mcp mcpSurface) map[string]http.Handler {
+func resourceMetadata(cfg *config.Config, mcp mcpSurface, resource *tokens.Resource) map[string]http.Handler {
 	out := map[string]http.Handler{}
 	if mcp.Metadata != nil {
 		out[mcp.MetadataPath] = mcp.Metadata
 	}
-	if !cfg.API.Enabled || cfg.Tokens.Issuer == "" {
-		return out
-	}
-	resource, err := apiResource(cfg)
-	if err != nil {
-		log.Warn("boot: tokens.audience is not an http(s) resource identifier, so the API serves no RFC 9728 document",
-			slog.String("audience", cfg.Tokens.Audience), slog.String("err", err.Error()))
+	if resource == nil {
 		return out
 	}
 	out[resource.MetadataPath] = resource.CLIMetadataHandler(cfg.Tokens.Issuer, apiScopes(), cfg.OIDC.CLIClientID)
 	return out
 }
 
-func apiResource(cfg *config.Config) (*tokens.Resource, error) {
+// NOTE: nil when the API is off, no token issuer is set or tokens.audience cannot be an RFC 9728 resource identifier.
+func apiResource(cfg *config.Config, log *slog.Logger) *tokens.Resource {
+	if !cfg.API.Enabled || cfg.Tokens.Issuer == "" {
+		return nil
+	}
 	resource, err := tokens.NewResource(cfg.Tokens.Audience)
 	if err != nil {
-		return nil, err
+		log.Warn("boot: tokens.audience is not an http(s) resource identifier, so the API serves no RFC 9728 document",
+			slog.String("audience", cfg.Tokens.Audience), slog.String("err", err.Error()))
+		return nil
 	}
-	return &resource, nil
+	return &resource
 }
 
 func apiScopes() []string {

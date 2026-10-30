@@ -312,7 +312,8 @@ func BootServer(ctx context.Context, cfg *config.Config, opts ...Option) (*Serve
 		sup.Register(listener)
 	}
 
-	apiSrv, apiHandler := buildAPIHandler(cfg, kernel, svcs)
+	apiRes := apiResource(cfg, log)
+	apiSrv, apiHandler := buildAPIHandler(cfg, kernel, svcs, apiRes)
 	dataHandler := buildDataHandler(cfg, caps, log, svcs)
 
 	mcpSurf, err := buildMCPSurface(cfg, log, svcs, apiSrv, tokenKeys)
@@ -344,7 +345,7 @@ func BootServer(ctx context.Context, cfg *config.Config, opts ...Option) (*Serve
 
 	webHandler, webRoutes := buildWebHandler(cfg, kernel, caps, log, reporter, healthOK,
 		svcs.Auth, svcs.Users, svcs.Orgs, svcs.Projects, svcs.Todos, svcs.Invites, svcs.Onboards,
-		svcs.Posts, svcs.Categories, svcs.Tags, svcs.APIKeys, svcs.Webhooks, required, gate.Complete, setup, apiHandler, dataHandler, mcpSurf, bundle, defaultLoc)
+		svcs.Posts, svcs.Categories, svcs.Tags, svcs.APIKeys, svcs.Webhooks, required, gate.Complete, setup, apiHandler, dataHandler, mcpSurf, apiRes, bundle, defaultLoc)
 
 	httpHandler := webHandler
 	if o.schedulerOnly || o.consumerOnly {
