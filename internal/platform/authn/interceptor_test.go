@@ -46,7 +46,6 @@ func req(procedure, credential string) *fakeReq {
 func TestInterceptorDeniesMethodMissingFromTable(t *testing.T) {
 	ic := authn.Interceptor(
 		authn.Chain{stubAuth{p: keyPrincipal(authn.ScopePostsRead)}},
-		authn.Scheme{Prefix: "key_"},
 		authn.ScopeTable{"/blog.v1.BlogService/ListPosts": authn.ScopePostsRead},
 	)
 
@@ -69,7 +68,6 @@ func TestInterceptorDeniesMethodMissingFromTable(t *testing.T) {
 func TestInterceptorDeniesInsufficientScope(t *testing.T) {
 	ic := authn.Interceptor(
 		authn.Chain{stubAuth{p: keyPrincipal(authn.ScopePostsRead)}},
-		authn.Scheme{Prefix: "key_"},
 		authn.ScopeTable{"/blog.v1.BlogService/DeletePost": authn.ScopePostsAdmin},
 	)
 	next := connect.UnaryFunc(func(context.Context, connect.AnyRequest) (connect.AnyResponse, error) {
@@ -102,7 +100,7 @@ func TestInterceptorEnforcesScopesOnTokenPrincipal(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ic := authn.Interceptor(authn.Chain{stubAuth{p: tt.principal}}, authn.Scheme{Prefix: "key_"}, table)
+			ic := authn.Interceptor(authn.Chain{stubAuth{p: tt.principal}}, table)
 			called := false
 			next := connect.UnaryFunc(func(context.Context, connect.AnyRequest) (connect.AnyResponse, error) {
 				called = true
@@ -125,7 +123,7 @@ func TestInterceptorEnforcesScopesOnTokenPrincipal(t *testing.T) {
 func TestInterceptorSkipsScopeCheckForSessionPrincipal(t *testing.T) {
 	for _, src := range []session.Source{session.SourceOIDC, session.SourceLocal, session.SourceGenesis} {
 		t.Run(string(src), func(t *testing.T) {
-			ic := authn.Interceptor(authn.Chain{stubAuth{p: session.Principal{UserID: uuid.New(), Source: src}}}, authn.Scheme{Prefix: "key_"}, authn.ScopeTable{})
+			ic := authn.Interceptor(authn.Chain{stubAuth{p: session.Principal{UserID: uuid.New(), Source: src}}}, authn.ScopeTable{})
 			called := false
 			next := connect.UnaryFunc(func(context.Context, connect.AnyRequest) (connect.AnyResponse, error) {
 				called = true
@@ -135,20 +133,5 @@ func TestInterceptorSkipsScopeCheckForSessionPrincipal(t *testing.T) {
 				t.Fatalf("session principal: err = %v, called = %v", err, called)
 			}
 		})
-	}
-}
-
-func TestInterceptorAdmitsPersonalTokenShapeOnlyWithItsPrefix(t *testing.T) {
-	table := authn.ScopeTable{"/m": authn.ScopePostsRead}
-	next := connect.UnaryFunc(func(context.Context, connect.AnyRequest) (connect.AnyResponse, error) { return nil, nil })
-	chain := authn.Chain{stubAuth{p: tokenPrincipal(authn.ScopePostsRead)}}
-
-	off := authn.Interceptor(chain, authn.Scheme{Prefix: "key_"}, table)
-	if _, err := off(next)(t.Context(), req("/m", "othra_pt_abc")); !authn.IsUnauthorizedError(err) {
-		t.Fatalf("personal token without introspection: err = %v, want *UnauthorizedError", err)
-	}
-	on := authn.Interceptor(chain, authn.Scheme{Prefix: "key_", TokenPrefix: "othra_pt_"}, table)
-	if _, err := on(next)(t.Context(), req("/m", "othra_pt_abc")); err != nil {
-		t.Fatalf("personal token with introspection: err = %v", err)
 	}
 }

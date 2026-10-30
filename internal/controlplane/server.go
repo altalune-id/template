@@ -56,7 +56,7 @@ type Server struct {
 	Categories *category.Service
 	Tags       *tag.Service
 
-	// APIKeys is set by boot after New returns, mirroring Authn/KeyPrefix below.
+	// APIKeys is set by boot after New returns, mirroring Authn below.
 	APIKeys *apikey.Service
 
 	AuthSvc    *AuthService
@@ -66,10 +66,7 @@ type Server struct {
 	MemberSvc  *MemberService
 	APIKeySvc  *APIKeyService
 
-	Authn     authn.Chain
-	KeyPrefix string
-	// TokenPrefix starts the personal tokens accepted through introspection; empty refuses them.
-	TokenPrefix string
+	Authn authn.Chain
 	// Resource is the control plane's protected resource, named in every 401 and 403 challenge; nil sends none.
 	Resource *tokens.Resource
 
@@ -201,7 +198,7 @@ func (s *Server) handlerOptions() []connect.HandlerOption {
 	ics = append(ics,
 		interceptor.Wrap(s.unexpected()),
 		translateAuthnErrors(s.Resource),
-		authn.Interceptor(s.Authn, authn.Scheme{Prefix: s.KeyPrefix, TokenPrefix: s.TokenPrefix}, ScopeTable()),
+		authn.Interceptor(s.Authn, ScopeTable()),
 		interceptor.Tenant(),
 	)
 	return []connect.HandlerOption{

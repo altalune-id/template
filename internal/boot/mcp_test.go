@@ -384,6 +384,9 @@ func TestMCP_EachResourceServesItsOwnMetadata(t *testing.T) {
 		require.Equal(t, resource, doc.Resource)
 		require.Equal(t, []string{f.issuer.url}, doc.AuthorizationServers)
 		require.Contains(t, doc.ScopesSupported, authn.ScopePostsRead)
+		for _, scope := range doc.ScopesSupported {
+			require.True(t, authn.Mintable(scope), "%s advertises %q, which no client may register", path, scope)
+		}
 	}
 }
 

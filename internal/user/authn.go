@@ -48,7 +48,7 @@ func NewAuthenticator(next authn.Authenticator, store Store, opts ...Authenticat
 
 var _ authn.Authenticator = (*Authenticator)(nil)
 
-// Authenticate implements authn.Authenticator. SECURITY: an unknown IdP identity and a store failure both collapse to the opaque *authn.UnauthorizedError.
+// Authenticate implements authn.Authenticator. SECURITY: an unknown IdP identity is the opaque *authn.UnauthorizedError; a store failure is *authn.UnavailableError, so an outage never reads as a bad token.
 func (a *Authenticator) Authenticate(ctx context.Context, raw string) (session.Principal, error) {
 	p, err := a.next.Authenticate(ctx, raw)
 	if err != nil {
@@ -58,8 +58,11 @@ func (a *Authenticator) Authenticate(ctx context.Context, raw string) (session.P
 		return p, nil
 	}
 	u, err := a.store.ByIDP(ctx, p.IDPIssuer, p.IDPSubject)
-	if err != nil {
+	if IsNotFoundError(err) {
 		return session.Principal{}, &authn.UnauthorizedError{}
+	}
+	if err != nil {
+		return session.Principal{}, &authn.UnavailableError{Cause: err}
 	}
 	p.UserID = u.ID
 	p.Email = u.Email
@@ -79,7 +82,7 @@ func (a *Authenticator) resolveTenant(ctx context.Context, p session.Principal) 
 	}
 	orgs, err := a.orgs.ListForUser(ctx, p.UserID)
 	if err != nil {
-		return session.Principal{}, &authn.UnauthorizedError{}
+		return session.Principal{}, &authn.UnavailableError{Cause: err}
 	}
 	orgID := pickOrg(orgs)
 	if orgID == uuid.Nil {

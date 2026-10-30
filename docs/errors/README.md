@@ -105,9 +105,10 @@ In the Status column, `—` means registered but not yet constructed.
 
 ## TKN — Tokens
 
-| Code     | Constant                    | Status            | Meaning       |
-| -------- | --------------------------- | ----------------- | ------------- |
-| `TKN001` | `apperror.CodeTokenExpired` | `Unauthenticated` | Token Expired |
+| Code     | Constant                        | Status            | Meaning           |
+| -------- | ------------------------------- | ----------------- | ----------------- |
+| `TKN001` | `apperror.CodeTokenExpired`     | `Unauthenticated` | Token Expired     |
+| `TKN002` | `apperror.CodeTokenUnavailable` | `Unavailable`     | Token Unavailable |
 
 ## ONB — Onboarding
 

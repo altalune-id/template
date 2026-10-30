@@ -282,7 +282,7 @@ func TestUnauthorizedCarriesTheRequestID(t *testing.T) {
 	const id = "mcp-unauthorized-probe-0123456789"
 
 	h := newHarness(t)
-	guarded := mcpinternal.Authenticate(nil, authScheme(), authResource(t), nil)(h.mcp)
+	guarded := mcpinternal.Authenticate(nil, authResource(t), nil)(h.mcp)
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		guarded.ServeHTTP(w, r.WithContext(reqid.WithContext(r.Context(), id)))
 	}))
@@ -356,7 +356,7 @@ func TestNilAuthenticatorDeniesEveryRequest(t *testing.T) {
 	t.Parallel()
 
 	h := newHarness(t)
-	ts := httptest.NewServer(mcpinternal.Authenticate(nil, authScheme(), authResource(t), nil)(h.mcp))
+	ts := httptest.NewServer(mcpinternal.Authenticate(nil, authResource(t), nil)(h.mcp))
 	t.Cleanup(ts.Close)
 
 	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, ts.URL, strings.NewReader("{}"))
@@ -389,6 +389,7 @@ func TestTranslateError(t *testing.T) {
 		{name: "scope undeclared", err: &rootmcp.ScopeUndeclaredError{Tool: "blog_unscoped"}, code: apperror.CodeForbidden},
 		{name: "insufficient scope", err: &authn.InsufficientScopeError{Scope: "posts:write"}, code: apperror.CodeForbidden},
 		{name: "unauthorized", err: &authn.UnauthorizedError{}, code: apperror.CodeUnauthenticated},
+		{name: "unavailable", err: &authn.UnavailableError{Cause: errors.New("db down")}, code: apperror.CodeTokenUnavailable},
 		{name: "invalid arguments", err: &rootmcp.InvalidArgumentsError{Tool: "blog_publish", Field: "title", Reason: "bad"}, code: apperror.CodeValidation},
 		{name: "unrecognized error passes through", err: other},
 	}
@@ -479,10 +480,10 @@ func newHarness(t *testing.T) *harness {
 	h.keys["reader"] = seedKey(t, store, authn.ScopePostsRead)
 	chain := authn.Chain{
 		apikey.NewAuthenticator(store, nil, apikey.Scheme{}, fakes.NewMembers()),
-		tokens.NewAuthenticator(verifier),
+		tokens.NewAuthenticator(verifier, authScheme()),
 	}
 
-	h.ts = httptest.NewServer(mcpinternal.Authenticate(chain, authScheme(), authResource(t), nil)(h.mcp))
+	h.ts = httptest.NewServer(mcpinternal.Authenticate(chain, authResource(t), nil)(h.mcp))
 	t.Cleanup(h.ts.Close)
 	return h
 }

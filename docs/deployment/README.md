@@ -173,22 +173,48 @@ them.
 ## OIDC
 
 Sign-in, CLI login and bearer tokens all come from one Othra project, whose issuer is
-`https://<othra>/p/<handle>`. In that project:
+`https://<othra>/p/<handle>`. Register in this order, because Othra reads the app's RFC 9728
+documents before it accepts a resource server:
 
-1. Create two resource servers: `https://<host><basePath>/api` (the control plane) and
-   `https://<host><basePath>/mcp`, each with the scopes it serves. Othra verifies each by reading
-   its RFC 9728 document, so deploy the app first. Never register `apikeys:write`: key management
-   stays in the console.
-2. Create a web client (confidential) with redirect URI `https://<host><basePath>/oauth/callback`
+1. Start the app with `http.baseURL`, `oidc.issuer` and `tokens.issuer` set to the project issuer
+   (they must be equal). `tokens.audience` and `mcp.audience` derive from `http.baseURL`, and the
+   two documents are now served at `/.well-known/oauth-protected-resource{basePath}/api` and
+   `…/mcp`. `selfhosted` boots without client credentials; `cloud` refuses to boot without
+   `oidc.clientID` and `oidc.clientSecret`, so set any non-empty placeholder for both until step 5.
+2. In Othra, create two resource servers: `https://<host><basePath>/api` (the control plane) and
+   `https://<host><basePath>/mcp`, each with the scopes its document lists. The documents never
+   list a retired scope such as `apikeys:write`: key management stays in the console.
+3. Create a web client (confidential) with redirect URI `https://<host><basePath>/oauth/callback`
    and post-logout URI `https://<host><basePath>/`, and a CLI client (native, public) with redirect
    URI `http://127.0.0.1/callback` (RFC 8252; any port matches). Mark both first-party.
-3. Link both clients to both resource servers with their scopes.
-4. Set `oidc.issuer` and `tokens.issuer` to the project issuer (they must be equal), `oidc.clientID`,
-   `oidc.clientSecret`, `oidc.cliClientID`. `tokens.audience` and `mcp.audience` derive from
-   `http.baseURL`.
-5. Optional: to accept `othra_pt_` personal tokens, set `tokens.introspection.*` (and
+4. Link both clients to both resource servers with their scopes.
+5. Set `oidc.clientID`, `oidc.clientSecret` and `oidc.cliClientID`, and restart.
+6. Optional: to accept `othra_pt_` personal tokens, set `tokens.introspection.*` (and
    `mcp.introspection.*`) to each resource server's public id and introspection secret.
-6. Restart — sign in at `/login`.
+7. Open `/login`. On a fresh install the first sign-in goes to `/onboard`, which needs the one-time
+   URL boot logs as `boot: setup required — open this one-time onboarding URL url=…/onboard?token=…`
+   (or a pinned `onboard.setupToken`).
+
+Signing out also ends the Othra session through RP-Initiated Logout, back to the post-logout URI;
+set `oidc.endSessionOnLogout=false` to keep the Othra session.
+
+While Othra or the database is unreachable, a bearer token that cannot be checked answers
+`Unavailable` (Connect) or `503` (MCP) with code `TKN002` and no `WWW-Authenticate` challenge, so a
+client keeps its token and retries.
+
+### Cloud mode locally
+
+`mode=cloud` runs on Postgres only; SQLite is refused at boot. A throwaway local setup:
+
+```bash
+podman run -d --name altempl-pg -e POSTGRES_PASSWORD=dev -p 5432:5432 postgres:18
+export ALT_MODE=cloud ALT_DB_DRIVER=postgres ALT_DB_ALLOW_BYPASS_RLS=true \
+  ALT_DB_DSN='postgres://postgres:dev@127.0.0.1:5432/postgres?sslmode=disable' \
+  ALT_SECURITY_ENCRYPTION_KEY="$(openssl rand -hex 32)" \
+  ALT_GENESIS_EMAIL=you@example.com ALT_HTTP_BASE_URL=http://localhost:5150
+```
+
+Then follow the registration order above (issuer, placeholders, register, real credentials).
 
 A user is matched by `(issuer, subject)`. A first sign-in from a new issuer relinks an existing
 user only when the issuer marks the email verified and the row is unlinked or linked at another

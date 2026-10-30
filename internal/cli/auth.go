@@ -166,7 +166,7 @@ func cliRelyingParty(cfg config.OIDCConfig, client *http.Client) *oidcrp.Client 
 func loopbackSignIn(ctx context.Context, rp *oidcrp.Client, port int, out io.Writer, open func(context.Context, string) error) (*oidcrp.IDToken, error) {
 	ctx, cancel := context.WithTimeout(ctx, loopbackTimeout)
 	defer cancel()
-	return rp.RunLoopback(ctx, oidcrp.LoopbackConfig{
+	set, err := rp.RunLoopback(ctx, oidcrp.LoopbackConfig{
 		Port:   port,
 		Prompt: "select_account",
 		Open: func(ctx context.Context, authURL string) error {
@@ -177,6 +177,10 @@ func loopbackSignIn(ctx context.Context, rp *oidcrp.Client, port int, out io.Wri
 			return nil
 		},
 	})
+	if err != nil {
+		return nil, err
+	}
+	return set.IDToken, nil
 }
 
 func readPassword(cmd *cobra.Command, reader *bufio.Reader, stdinMode bool) (string, error) {

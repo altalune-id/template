@@ -2,6 +2,7 @@ package controlplane
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -46,12 +47,11 @@ func TestServer_HandlerOptions_EnforcesKeyScopes(t *testing.T) {
 	store.Seed(adminKey)
 
 	keyAuthn := apikey.NewAuthenticator(store, nil, apikey.Scheme{}, fakes.NewMembers())
-	chain := authn.Chain{keyAuthn, tokens.NewAuthenticator(alwaysOKVerifier{})}
+	chain := authn.Chain{keyAuthn, tokens.NewAuthenticator(alwaysOKVerifier{}, authn.Scheme{Prefix: apikey.DefaultPrefix})}
 
 	s := &Server{
-		Kernel:    &platform.Kernel{Log: log, Reporter: reporter},
-		Authn:     chain,
-		KeyPrefix: apikey.DefaultPrefix,
+		Kernel: &platform.Kernel{Log: log, Reporter: reporter},
+		Authn:  chain,
 	}
 
 	// DeletePost requires ScopePostsAdmin in controlplane.ScopeTable().
@@ -113,11 +113,10 @@ func TestServer_HandlerOptions_RejectsUnscopedProcedure(t *testing.T) {
 	}
 	store.Seed(key)
 
-	chain := authn.Chain{apikey.NewAuthenticator(store, nil, apikey.Scheme{}, fakes.NewMembers()), tokens.NewAuthenticator(alwaysOKVerifier{})}
+	chain := authn.Chain{apikey.NewAuthenticator(store, nil, apikey.Scheme{}, fakes.NewMembers()), tokens.NewAuthenticator(alwaysOKVerifier{}, authn.Scheme{Prefix: apikey.DefaultPrefix})}
 	s := &Server{
-		Kernel:    &platform.Kernel{Log: log, Reporter: reporter},
-		Authn:     chain,
-		KeyPrefix: apikey.DefaultPrefix,
+		Kernel: &platform.Kernel{Log: log, Reporter: reporter},
+		Authn:  chain,
 	}
 
 	const procedure = "/test.UndeclaredService/DoSomething"
@@ -158,9 +157,8 @@ func TestServer_HandlerOptions_AcceptsAnyConfiguredKeyPrefix(t *testing.T) {
 
 			keyAuthn := apikey.NewAuthenticator(store, nil, scheme, fakes.NewMembers())
 			s := &Server{
-				Kernel:    &platform.Kernel{Log: log, Reporter: apperror.NewReporter(log, false)},
-				Authn:     authn.Chain{keyAuthn},
-				KeyPrefix: keyAuthn.Scheme().Prefix(),
+				Kernel: &platform.Kernel{Log: log, Reporter: apperror.NewReporter(log, false)},
+				Authn:  authn.Chain{keyAuthn},
 			}
 
 			const procedure = blogv1connect.BlogServiceDeletePostProcedure
@@ -207,9 +205,8 @@ func TestServer_HandlerOptions_EnforcesTokenScopes(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s := &Server{
-				Kernel:    &platform.Kernel{Log: log, Reporter: reporter},
-				Authn:     authn.Chain{tokens.NewAuthenticator(scopedTokenVerifier{scopes: tc.scopes})},
-				KeyPrefix: apikey.DefaultPrefix,
+				Kernel: &platform.Kernel{Log: log, Reporter: reporter},
+				Authn:  authn.Chain{tokens.NewAuthenticator(scopedTokenVerifier{scopes: tc.scopes}, authn.Scheme{Prefix: apikey.DefaultPrefix})},
 			}
 			handler := connect.NewUnaryHandlerSimple(procedure,
 				func(context.Context, *blogv1.DeletePostRequest) (*blogv1.DeletePostResponse, error) {
@@ -232,6 +229,72 @@ func TestServer_HandlerOptions_EnforcesTokenScopes(t *testing.T) {
 			}
 			if connect.CodeOf(err) != tc.want {
 				t.Fatalf("code = %v, want %v (err: %v)", connect.CodeOf(err), tc.want, err)
+			}
+		})
+	}
+}
+
+type failingTokenVerifier struct{ err error }
+
+func (v failingTokenVerifier) Verify(context.Context, string) (session.Principal, error) {
+	return session.Principal{}, v.err
+}
+
+// TestServer_HandlerOptions_AnOutageIsUnavailableNotUnauthenticated proves a client keeps its token through an issuer or database outage.
+func TestServer_HandlerOptions_AnOutageIsUnavailableNotUnauthenticated(t *testing.T) {
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	resource, err := tokens.NewResource("https://app.example.com/api")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const procedure = blogv1connect.BlogServiceDeletePostProcedure
+	scheme := authn.Scheme{Prefix: apikey.DefaultPrefix}
+	downStore := fakes.NewAPIKey()
+	downStore.BySecretHashErr = errors.New("connection refused")
+	keyAuthn := apikey.NewAuthenticator(downStore, nil, apikey.Scheme{}, fakes.NewMembers())
+	tokenChain := func(err error) authn.Chain {
+		return authn.Chain{keyAuthn, tokens.NewAuthenticator(failingTokenVerifier{err: err}, scheme)}
+	}
+
+	for _, tc := range []struct {
+		name          string
+		chain         authn.Chain
+		bearer        string
+		want          connect.Code
+		wantChallenge bool
+	}{
+		{"an issuer outage", tokenChain(&authn.UnavailableError{Cause: errors.New("issuer unreachable")}), "aaa.bbb.ccc", connect.CodeUnavailable, false},
+		{"an api key during a store outage", tokenChain(nil), apikey.DefaultPrefix + "whatever", connect.CodeUnavailable, false},
+		{"a refused token", tokenChain(&tokens.InvalidTokenError{Reason: "signature"}), "aaa.bbb.ccc", connect.CodeUnauthenticated, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := &Server{
+				Kernel:   &platform.Kernel{Log: log, Reporter: apperror.NewReporter(log, false)},
+				Authn:    tc.chain,
+				Resource: &resource,
+			}
+			mux := http.NewServeMux()
+			mux.Handle(procedure, connect.NewUnaryHandlerSimple(procedure,
+				func(context.Context, *blogv1.DeletePostRequest) (*blogv1.DeletePostResponse, error) {
+					t.Fatal("the handler ran for a credential that was not verified")
+					return nil, nil
+				}, s.handlerOptions()...))
+			ts := httptest.NewServer(mux)
+			t.Cleanup(ts.Close)
+
+			client := connect.NewClient[blogv1.DeletePostRequest, blogv1.DeletePostResponse](http.DefaultClient, ts.URL+procedure)
+			req := connect.NewRequest(&blogv1.DeletePostRequest{PostId: uuid.NewString()})
+			req.Header().Set("Authorization", "Bearer "+tc.bearer)
+			_, err := client.CallUnary(t.Context(), req)
+			if connect.CodeOf(err) != tc.want {
+				t.Fatalf("code = %v, want %v (err: %v)", connect.CodeOf(err), tc.want, err)
+			}
+			var cerr *connect.Error
+			if !errors.As(err, &cerr) {
+				t.Fatalf("err = %T, want *connect.Error", err)
+			}
+			if got := cerr.Meta().Get("WWW-Authenticate") != ""; got != tc.wantChallenge {
+				t.Fatalf("WWW-Authenticate present = %v, want %v", got, tc.wantChallenge)
 			}
 		})
 	}

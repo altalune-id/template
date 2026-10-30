@@ -52,7 +52,8 @@ const (
 	CodeAuthOIDCUnavailable    = "AUT002"
 	CodeAuthOIDCClaimMissing   = "AUT003"
 
-	CodeTokenExpired = "TKN001"
+	CodeTokenExpired     = "TKN001"
+	CodeTokenUnavailable = "TKN002"
 
 	CodeOnboardingRequired    = "ONB001"
 	CodeOnboardingAlreadyDone = "ONB002"

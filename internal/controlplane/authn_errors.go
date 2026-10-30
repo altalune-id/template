@@ -32,6 +32,22 @@ func translateAuthnErrors(resource *tokens.Resource) connect.UnaryInterceptorFun
 					return r.InsufficientScope(scope.Scope)
 				})
 			}
+			if authn.IsSessionRequiredError(err) {
+				return nil, apperror.New(
+					apperror.CodeForbidden,
+					"only a signed-in person may call this procedure",
+					codes.PermissionDenied,
+					&apperrorv1.ErrorDetail{Code: apperror.CodeForbidden},
+				).WithCause(err)
+			}
+			if authn.IsUnavailableError(err) {
+				return nil, apperror.New(
+					apperror.CodeTokenUnavailable,
+					authn.UnavailableMessage,
+					codes.Unavailable,
+					&apperrorv1.ErrorDetail{Code: apperror.CodeTokenUnavailable},
+				).WithCause(err)
+			}
 			if authn.IsUnauthorizedError(err) {
 				ae := apperror.New(
 					apperror.CodeUnauthenticated,

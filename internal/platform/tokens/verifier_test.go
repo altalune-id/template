@@ -1,11 +1,14 @@
 package tokens_test
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/altalune-id/oidcrp/oidcrptest"
 
+	"altalune.id/template/internal/platform/authn"
 	"altalune.id/template/internal/platform/session"
 	"altalune.id/template/internal/platform/tokens"
 )
@@ -149,5 +152,29 @@ func TestVerify_PersonalTokenRefusedWithoutIntrospection(t *testing.T) {
 	}
 	if got := idp.Introspections(); got != 0 {
 		t.Fatalf("introspections = %d, want 0", got)
+	}
+}
+
+func TestVerify_AnIssuerOutageIsNotARefusal(t *testing.T) {
+	down := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(down.Close)
+	cfg := tokens.Config{
+		Issuer: down.URL, Audience: apiAudience,
+		Introspection: tokens.IntrospectionConfig{ClientID: "rs-api", ClientSecret: "rs-secret"},
+	}
+	v, err := tokens.NewVerifier(cfg, tokens.NewKeySource(cfg, down.Client()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, raw := range []string{"aaa.bbb.ccc", tokens.PersonalTokenPrefix + "abc"} {
+		_, err := v.Verify(t.Context(), raw)
+		if !authn.IsUnavailableError(err) {
+			t.Fatalf("Verify(%q) = %v, want *authn.UnavailableError", raw, err)
+		}
+		if tokens.IsInvalidTokenError(err) || tokens.IsExpiredTokenError(err) {
+			t.Fatalf("Verify(%q) = %v: an outage must not read as a bad token", raw, err)
+		}
 	}
 }

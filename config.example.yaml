@@ -197,7 +197,7 @@ oidc:
   # [required, mode:cloud, secret] env: ALT_OIDC_CLIENT_SECRET
   clientSecret: ""
   # env: ALT_OIDC_END_SESSION_ON_LOGOUT
-  endSessionOnLogout: ""
+  endSessionOnLogout: true
   # [required, mode:cloud] env: ALT_OIDC_ISSUER
   issuer: ""
   # env: ALT_OIDC_REDIRECT_PORT

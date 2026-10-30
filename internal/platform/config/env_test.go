@@ -133,6 +133,7 @@ func TestWalkEnvKeys_Defaults(t *testing.T) {
 		{"ALT_DB_DRIVER", "sqlite"},
 		{"ALT_LOG_LEVEL", "info"},
 		{"ALT_TOKENS_CLOCK_SKEW", "60s"},
+		{"ALT_OIDC_END_SESSION_ON_LOGOUT", "true"},
 	}
 	for _, tc := range withDefaults {
 		got, ok := byEnv[tc.env]

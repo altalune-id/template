@@ -43,21 +43,25 @@ func TestSchemeLooksClassifiesEveryCredential(t *testing.T) {
 }
 
 func TestAuthenticatorDispatchesByShape(t *testing.T) {
-	scheme := authn.Scheme{Prefix: "key_", TokenPrefix: tokens.PersonalTokenPrefix}
+	with := authn.Scheme{Prefix: "key_", TokenPrefix: tokens.PersonalTokenPrefix}
+	without := authn.Scheme{Prefix: "key_"}
 	tests := []struct {
+		name      string
+		scheme    authn.Scheme
 		raw       string
 		wantCalls int
 	}{
-		{"key_secret", 0},
-		{"key_a.b.c", 0},
-		{"junk", 0},
-		{"aaa.bbb.ccc", 1},
-		{tokens.PersonalTokenPrefix + "abc", 1},
+		{"api key", with, "key_secret", 0},
+		{"dotted api key", with, "key_a.b.c", 0},
+		{"junk", with, "junk", 0},
+		{"jwt", with, "aaa.bbb.ccc", 1},
+		{"personal token with introspection", with, tokens.PersonalTokenPrefix + "abc", 1},
+		{"personal token without introspection", without, tokens.PersonalTokenPrefix + "abc", 0},
 	}
 	for _, tt := range tests {
-		t.Run(tt.raw, func(t *testing.T) {
+		t.Run(tt.name, func(t *testing.T) {
 			v := &countingVerifier{}
-			_, err := tokens.NewAuthenticator(v).WithScheme(scheme).Authenticate(t.Context(), tt.raw)
+			_, err := tokens.NewAuthenticator(v, tt.scheme).Authenticate(t.Context(), tt.raw)
 			if v.calls != tt.wantCalls {
 				t.Fatalf("verifier calls = %d, want %d: an API key must never reach the resource server", v.calls, tt.wantCalls)
 			}

@@ -58,8 +58,9 @@ flowchart LR
 - **MCP step-up.** An OAuth token missing a tool's scope gets an RFC 6750 `insufficient_scope`
   403 naming it. See [`mcp`](../mcp/README.md).
 - **Key management stays in the console.** `apikeys:write` is retired, so no key can hold it; do
-  not register it on the Othra resource server either, and `APIKeyService.Create`/`Revoke`
-  answer a token with `PermissionDenied`.
+  not register it on the Othra resource server either. `APIKeyService.Create`/`Revoke` are
+  `authn.SessionOnly` in the scope table: every key and token gets `PermissionDenied` with no
+  `insufficient_scope` challenge.
 
 Every surface narrows past the scope with one rule, `session.Principal.Reaches*`: a key reaches
 only the projects it was granted — one for a project key, the grant for an org key or personal
