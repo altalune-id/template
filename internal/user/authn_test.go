@@ -57,6 +57,7 @@ func TestAuthenticator_Authenticate(t *testing.T) {
 		seed         *user.User
 		storeErr     error
 		wantErr      bool
+		wantOutage   bool
 		wantUserID   uuid.UUID
 		wantIsAdmin  bool
 		wantLocale   string
@@ -85,15 +86,16 @@ func TestAuthenticator_Authenticate(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name: "store error fails closed",
+			name: "store error fails closed as an outage",
 			next: stubAuthenticator{p: session.Principal{
 				Source:     session.SourceToken,
 				IDPIssuer:  issuer,
 				IDPSubject: subject,
 			}},
-			seed:     localUser,
-			storeErr: errors.New("db exploded"),
-			wantErr:  true,
+			seed:       localUser,
+			storeErr:   errors.New("db exploded"),
+			wantErr:    true,
+			wantOutage: true,
 		},
 		{
 			name: "api key principal passes through untouched",
@@ -136,8 +138,8 @@ func TestAuthenticator_Authenticate(t *testing.T) {
 			if tt.wantErr {
 				require.Error(t, err,
 					"membership is the only authority for tenancy: a token must never be granted an org its subject does not belong to")
-				var unauthorized *authn.UnauthorizedError
-				assert.ErrorAs(t, err, &unauthorized, "want opaque *authn.UnauthorizedError, got %v", err)
+				assert.Equal(t, tt.wantOutage, authn.IsUnavailableError(err), "a store failure is an outage, an unknown identity a refusal: %v", err)
+				assert.Equal(t, !tt.wantOutage, authn.IsUnauthorizedError(err), "want opaque *authn.UnauthorizedError for a refusal, got %v", err)
 				assert.Equal(t, session.Principal{}, got)
 			} else {
 				require.NoError(t, err)
@@ -294,8 +296,8 @@ func TestAuthenticator_ResolvesTenantFromMembership(t *testing.T) {
 			if tt.wantErr {
 				require.Error(t, err,
 					"membership is the only authority for tenancy: a token must never be granted an org its subject does not belong to")
-				assert.True(t, authn.IsUnauthorizedError(err),
-					"every tenant-resolution failure must still read as unauthorized, got %T: %v", err, err)
+				assert.True(t, authn.IsUnavailableError(err),
+					"a membership lookup failure is an outage, not a bad token, got %T: %v", err, err)
 				assert.Equal(t, session.Principal{}, got, "a refused credential must carry no org at all")
 				return
 			}

@@ -98,6 +98,7 @@ one account once and never overwrite it. Boot writes nothing — it reconciles t
 | `oidc.clientSecret`                 | `""`                    | `required, mode:cloud, secret`    | Paired with `clientID`.                                                               |
 | `oidc.cliClientID`                  | `""`                    | `-`                               | Native public Othra client for `auth login`, redirect `http://127.0.0.1/callback`.    |
 | `oidc.redirectPort`                 | `0`                     | `-`                               | Loopback port `auth login` binds; `0` picks a free one.                               |
+| `oidc.endSessionOnLogout`           | `true`                  | `-`                               | Signing out also ends the Othra session (RP-Initiated Logout).                        |
 | `http.baseURL`                      | `""`                    | `required`                        | Public URL. Both resource identifiers derive from it.                                 |
 | `http.stateSecret`                  | `""`                    | `required, secret, bootstrap`     | Signs the sign-in state cookie and the `sid` cookie.                                  |
 | `tokens.issuer`                     | `""`                    | `required, mode:cloud`            | Issuer the bearer verifier trusts; must equal `oidc.issuer`. **MCP needs it always.** |
@@ -111,6 +112,11 @@ one account once and never overwrite it. Boot writes nothing — it reconciles t
 - Each resource serves its RFC 9728 document at `/.well-known/oauth-protected-resource{basePath}/api`
   and `…/mcp`; Othra reads it before it mints tokens for that resource.
 - Personal tokens are introspected on every call, never cached, so a revoked one stops at once.
+- `cloud` refuses to boot without `oidc.clientID` and `oidc.clientSecret`, yet Othra registers a
+  resource server only after reading its RFC 9728 document. Boot with placeholders first; the
+  registration order is in [`deployment`](../deployment/README.md#oidc).
+- `cloud` needs `db.driver=postgres`; a local recipe is in
+  [`deployment`](../deployment/README.md#cloud-mode-locally).
 
 ## Machine surfaces
 

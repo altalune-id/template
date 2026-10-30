@@ -49,7 +49,7 @@ func buildMCPSurface(cfg *config.Config, log *slog.Logger, s *Services, apiSrv *
 	chain := authn.Chain{
 		s.KeyAuthn,
 		user.NewAuthenticator(
-			tokens.NewAuthenticator(verifier).WithScheme(credentialScheme(s.KeyAuthn.Scheme(), cfg.MCP.Introspection)),
+			tokens.NewAuthenticator(verifier, credentialScheme(s.KeyAuthn.Scheme(), cfg.MCP.Introspection)),
 			s.UserStore,
 			user.WithTenantResolution(
 				orgStoreForOnboard{store: s.OrgStore},
@@ -82,7 +82,7 @@ func buildMCPSurface(cfg *config.Config, log *slog.Logger, s *Services, apiSrv *
 		slog.Int("tools", len(registry.Names())),
 		slog.Bool("ui", cfg.MCP.AppsUI))
 
-	guard := mcpinternal.Authenticate(chain, credentialScheme(s.KeyAuthn.Scheme(), cfg.MCP.Introspection), resource, log)
+	guard := mcpinternal.Authenticate(chain, resource, log)
 	return mcpSurface{
 		Handler:      guard(srv.Handler()),
 		Metadata:     resource.MetadataHandler(cfg.Tokens.Issuer, registeredScopes(registry)),
@@ -108,6 +108,7 @@ func mcpTokensConfig(cfg *config.Config) tokens.Config {
 	return c
 }
 
+// SECURITY: the one scheme per resource; the API key prefix comes from the scheme that mints keys, so a dotted key never reads as a JWT.
 func credentialScheme(keys apikey.Scheme, introspection tokens.IntrospectionConfig) authn.Scheme {
 	scheme := keys.Authn()
 	if introspection.Enabled() {

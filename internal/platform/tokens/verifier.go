@@ -38,37 +38,27 @@ func NewVerifier(cfg Config, keys *oidcrp.KeySource) (Verifier, error) {
 		return nil, errors.New("tokens: audience required when issuer set")
 	}
 	rsCfg := oauthrs.Config{Issuer: cfg.Issuer, Audience: cfg.Audience, Keys: keys, ClockSkew: cfg.ClockSkew}
-	scheme := authn.Scheme{}
 	if cfg.Introspection.Enabled() {
 		// SECURITY: a negative cache TTL asks Othra on every call, so a revoked personal token stops at once.
 		rsCfg.Introspection = &oauthrs.Introspection{
 			ClientID: cfg.Introspection.ClientID, ClientSecret: cfg.Introspection.ClientSecret, TokenPrefix: PersonalTokenPrefix, CacheTTL: -1,
 		}
-		scheme.TokenPrefix = PersonalTokenPrefix
 	}
 	rs, err := oauthrs.New(rsCfg)
 	if err != nil {
 		return nil, err
 	}
-	return &verifier{rs: rs, scheme: scheme}, nil
+	return &verifier{rs: rs}, nil
 }
 
 type verifier struct {
-	rs     *oauthrs.Verifier
-	scheme authn.Scheme
+	rs *oauthrs.Verifier
 }
 
-// SECURITY: only a JWT or a personal token reaches oauthrs, so an app API key never leaves the process.
 func (v *verifier) Verify(ctx context.Context, raw string) (session.Principal, error) {
-	if shape := v.scheme.Looks(raw); shape != authn.ShapeJWT && shape != authn.ShapePersonalToken {
-		return session.Principal{}, &InvalidTokenError{Reason: "neither an access token nor a personal token"}
-	}
 	tok, err := v.rs.Verify(ctx, raw)
-	switch {
-	case oauthrs.IsExpiredTokenError(err):
-		return session.Principal{}, &ExpiredTokenError{Cause: err}
-	case err != nil:
-		return session.Principal{}, &InvalidTokenError{Reason: "refused by the resource server", Cause: err}
+	if err != nil {
+		return session.Principal{}, refusal(err)
 	}
 	return session.Principal{
 		Source:     session.SourceToken,
@@ -77,6 +67,17 @@ func (v *verifier) Verify(ctx context.Context, raw string) (session.Principal, e
 		ClientID:   tok.ClientID,
 		Scopes:     tok.Scopes,
 	}, nil
+}
+
+// NOTE: a failure oauthrs does not type as a token problem is an issuer outage, so a client keeps its token.
+func refusal(err error) error {
+	switch {
+	case oauthrs.IsExpiredTokenError(err):
+		return &ExpiredTokenError{Cause: err}
+	case oauthrs.IsInvalidTokenError(err), oauthrs.IsMissingTokenError(err), oauthrs.IsMalformedRequestError(err):
+		return &InvalidTokenError{Reason: "refused by the resource server", Cause: err}
+	}
+	return &authn.UnavailableError{Cause: err}
 }
 
 type disabledVerifier struct{}

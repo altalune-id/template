@@ -10,6 +10,7 @@ import (
 
 	"github.com/altalune-id/oidcrp"
 	"github.com/google/uuid"
+	"google.golang.org/grpc/codes"
 
 	"altalune.id/template/internal/apperror"
 	"altalune.id/template/internal/auth"
@@ -218,9 +219,11 @@ func (h *AuthHandler) OIDCComplete(ctx context.Context, w http.ResponseWriter, r
 			h.signInFailed(w, r, http.StatusForbidden, signInEmailUnverified, err)
 		case user.IsIdentityConflictError(err):
 			h.signInFailed(w, r, http.StatusForbidden, signInIdentityConflict, err)
+		case isRefusal(err):
+			h.signInFailed(w, r, http.StatusForbidden, signInNotPermitted, err)
 		default:
 			h.LogErr("web auth: oidc onboard", err)
-			h.signInFailed(w, r, http.StatusForbidden, signInNotPermitted, err)
+			h.signInFailed(w, r, http.StatusInternalServerError, signInUnavailable, err)
 		}
 		return
 	}
@@ -248,6 +251,18 @@ func (h *AuthHandler) OIDCComplete(ctx context.Context, w http.ResponseWriter, r
 	http.Redirect(w, r, ResolveReturnTo(h.Cfg.HTTP.BasePath, returnTo), http.StatusSeeOther) //nolint:gosec // G710: return_to sanitized via ResolveReturnTo → SanitizeReturnTo
 }
 
+func isRefusal(err error) bool {
+	ae, ok := apperror.AsAppError(err)
+	if !ok {
+		return false
+	}
+	switch ae.GRPCCode() {
+	case codes.PermissionDenied, codes.FailedPrecondition, codes.InvalidArgument, codes.Unauthenticated:
+		return true
+	}
+	return false
+}
+
 func isNotInvitedApp(err error) bool {
 	ae, ok := apperror.AsAppError(err)
 	if !ok {
@@ -270,7 +285,7 @@ func (h *AuthHandler) renderNotInvited(w http.ResponseWriter, r *http.Request) {
 	}))
 }
 
-// PostLogout clears the local session and, when cfg.OIDC.EndSessionOnLogout is set, also terminates the IdP session via RP-Initiated Logout. Off by default so the "Continue with X" hint stays seamless — subsequent OIDC logins reuse the OP session instead of prompting for credentials.
+// PostLogout clears the local session and, when cfg.OIDC.EndSessionOnLogout is set (the default), also ends the issuer session through RP-Initiated Logout.
 func (h *AuthHandler) PostLogout(w http.ResponseWriter, r *http.Request) {
 	var idToken string
 	if p, _, ok := h.LoadSession(r); ok && p.Source == session.SourceOIDC {

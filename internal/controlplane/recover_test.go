@@ -55,7 +55,7 @@ func TestServer_HandlerOptions_RecoversPanicAndReportsUnexpected(t *testing.T) {
 			Reporter: reporter,
 			Verifier: alwaysOKVerifier{},
 		},
-		Authn: authn.Chain{tokens.NewAuthenticator(alwaysOKVerifier{})},
+		Authn: authn.Chain{tokens.NewAuthenticator(alwaysOKVerifier{}, authn.Scheme{})},
 	}
 
 	const procedure = "/test.PanicService/Panic"

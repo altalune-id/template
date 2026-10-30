@@ -220,7 +220,7 @@ func (s *Service) EnsureFromOIDC(ctx context.Context, claims Claims) (*User, err
 
 	// SECURITY: an unknown subject is matched or bound by its email, so the issuer must vouch for that email.
 	if !claims.EmailVerified {
-		return nil, &EmailUnverifiedError{Email: email}
+		return nil, &EmailUnverifiedError{}
 	}
 	existing, err := s.store.ByEmail(ctx, email)
 	if err == nil {
@@ -252,7 +252,7 @@ func (s *Service) EnsureFromOIDC(ctx context.Context, claims Claims) (*User, err
 // SECURITY: a verified email rebinds an unlinked row or one linked at another issuer; another subject at the same issuer is a different person.
 func (s *Service) relink(ctx context.Context, u *User, issuer, subject string, claims Claims) (*User, error) {
 	if u.IDPSubject != "" && u.IDPIssuer == issuer && u.IDPSubject != subject {
-		return nil, &IdentityConflictError{Email: u.Email}
+		return nil, &IdentityConflictError{}
 	}
 	if name := strings.TrimSpace(claims.Name); name != "" && u.Name != name {
 		if err := u.Rename(name); err != nil {

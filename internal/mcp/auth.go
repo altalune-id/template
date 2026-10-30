@@ -32,13 +32,20 @@ func ScopesFromContext(ctx context.Context) []string {
 	return slices.Clone(session.PrincipalFrom(ctx).Scopes)
 }
 
-// Authenticate authenticates every request reaching the MCP surface and puts the resulting principal in the request context, where ScopesFromContext reads it. SECURITY: a nil authenticator, an absent credential, a credential of an unrecognized shape and a rejected credential all answer the same masked 401, so a caller learns nothing about why.
-func Authenticate(a authn.Authenticator, scheme authn.Scheme, resource tokens.Resource, log *slog.Logger) func(http.Handler) http.Handler {
+// Authenticate authenticates every request reaching the MCP surface and puts the resulting principal in the request context, where ScopesFromContext reads it. SECURITY: a nil authenticator, an absent credential and a rejected credential all answer the same masked 401, so a caller learns nothing about why; only an outage answers 503.
+func Authenticate(a authn.Authenticator, resource tokens.Resource, log *slog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			p, reason, ok := principalFor(r, a, scheme)
-			if !ok {
-				// SECURITY: the reason is logged, never returned — the response stays one masked 401 whatever the cause.
+			p, reason, err := principalFor(r, a)
+			if authn.IsUnavailableError(err) {
+				if log != nil {
+					log.ErrorContext(r.Context(), "mcp: credential check unavailable", slog.String("reason", reason))
+				}
+				writeUnavailable(r.Context(), w)
+				return
+			}
+			if err != nil {
+				// SECURITY: the reason is logged, never returned.
 				if log != nil {
 					log.WarnContext(r.Context(), "mcp: credential rejected", slog.String("reason", reason))
 				}
@@ -64,6 +71,9 @@ func TranslateError(err error) error {
 	if rootmcp.IsScopeDeniedError(err) || rootmcp.IsScopeUndeclaredError(err) || authn.IsInsufficientScopeError(err) {
 		return appError(apperror.CodeForbidden, "credential lacks the required scope", codes.PermissionDenied, err)
 	}
+	if authn.IsUnavailableError(err) {
+		return appError(apperror.CodeTokenUnavailable, authn.UnavailableMessage, codes.Unavailable, err)
+	}
 	if authn.IsUnauthorizedError(err) {
 		return appError(apperror.CodeUnauthenticated, unauthorizedMessage, codes.Unauthenticated, err)
 	}
@@ -73,22 +83,22 @@ func TranslateError(err error) error {
 	return err
 }
 
-func principalFor(r *http.Request, a authn.Authenticator, scheme authn.Scheme) (session.Principal, string, bool) {
+func principalFor(r *http.Request, a authn.Authenticator) (session.Principal, string, error) {
 	if a == nil {
-		return session.Principal{}, "no authenticator configured", false
+		return session.Principal{}, "no authenticator configured", &authn.UnauthorizedError{}
 	}
 	raw := authn.CredentialFrom(r)
 	if raw == "" {
-		return session.Principal{}, "no bearer credential on the request", false
-	}
-	if scheme.Looks(raw) == authn.ShapeUnknown {
-		return session.Principal{}, "credential matched neither the api key prefix, the JWT shape nor the personal token prefix", false
+		return session.Principal{}, "no bearer credential on the request", &authn.UnauthorizedError{}
 	}
 	p, err := a.Authenticate(r.Context(), raw)
-	if err != nil {
-		return session.Principal{}, "every authenticator rejected the credential: " + chainCauses(err), false
+	if authn.IsUnavailableError(err) {
+		return session.Principal{}, "the credential could not be checked: " + err.Error(), err
 	}
-	return p, "", true
+	if err != nil {
+		return session.Principal{}, "every authenticator rejected the credential: " + chainCauses(err), err
+	}
+	return p, "", nil
 }
 
 // chainCauses renders why each authenticator refused. SECURITY: logged only — the caller still receives one masked 401.
@@ -151,6 +161,17 @@ func writeInsufficientScope(ctx context.Context, w http.ResponseWriter, challeng
 	_ = json.NewEncoder(w).Encode(AttachContext(ctx, rootmcp.ErrorPayload{
 		Code:    apperror.CodeForbidden,
 		Message: "credential lacks the required scope",
+	}))
+}
+
+// NOTE: no WWW-Authenticate, so a client keeps its token through an issuer or database outage.
+func writeUnavailable(ctx context.Context, w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusServiceUnavailable)
+	_ = json.NewEncoder(w).Encode(AttachContext(ctx, rootmcp.ErrorPayload{
+		Code:    apperror.CodeTokenUnavailable,
+		Message: authn.UnavailableMessage,
 	}))
 }
 

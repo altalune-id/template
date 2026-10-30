@@ -25,6 +25,7 @@ import (
 	"altalune.id/template/internal/onboard"
 	"altalune.id/template/internal/org"
 	"altalune.id/template/internal/platform"
+	"altalune.id/template/internal/platform/authn"
 	"altalune.id/template/internal/platform/capabilities"
 	"altalune.id/template/internal/platform/config"
 	"altalune.id/template/internal/platform/session"
@@ -41,8 +42,6 @@ import (
 func buildAPIHandler(cfg *config.Config, k *platform.Kernel, s *Services) (*controlplane.Server, http.Handler) {
 	srv := controlplane.New(cfg, k, s.Auth, s.Users, s.Orgs, s.Projects, s.Todos, s.Invites, s.TodoStore, s.Posts, s.Categories, s.Tags)
 	srv.Authn = s.Authn
-	srv.KeyPrefix = s.KeyAuthn.Scheme().Prefix()
-	srv.TokenPrefix = credentialScheme(s.KeyAuthn.Scheme(), cfg.Tokens.Introspection).TokenPrefix
 	if resource, err := apiResource(cfg); err == nil && cfg.Tokens.Issuer != "" {
 		srv.Resource = resource
 	}
@@ -174,7 +173,9 @@ func apiResource(cfg *config.Config) (*tokens.Resource, error) {
 func apiScopes() []string {
 	set := map[string]struct{}{}
 	for _, scope := range controlplane.ScopeTable() {
-		set[scope] = struct{}{}
+		if authn.Mintable(scope) {
+			set[scope] = struct{}{}
+		}
 	}
 	return slices.Sorted(maps.Keys(set))
 }

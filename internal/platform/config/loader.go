@@ -139,6 +139,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("genesis.breakGlass", false)
 
 	v.SetDefault("oidc.scopes", []string{"openid", "email", "profile"})
+	v.SetDefault("oidc.endSessionOnLogout", true)
 
 	v.SetDefault("i18n.defaultLocale", "en-US")
 

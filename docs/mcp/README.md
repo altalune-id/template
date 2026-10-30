@@ -97,6 +97,7 @@ error="insufficient_scope", scope="<tool scope>"` (RFC 6750 Section 3.1), so the
 | Where            | Shape                                                     |
 | ---------------- | --------------------------------------------------------- |
 | Transport 401    | HTTP 401, `ErrorPayload`, code `MCP001`                   |
+| Transport 503    | HTTP 503, `ErrorPayload`, code `TKN002`, no challenge     |
 | Step-up 403      | HTTP 403, `ErrorPayload`, code `GEN003` (OAuth tokens)    |
 | Tool failure     | HTTP 200, `result.isError = true`                         |
 | Unmapped failure | Same, code `GEN900` — the cause is logged, never returned |

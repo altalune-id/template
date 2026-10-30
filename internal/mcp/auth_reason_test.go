@@ -10,10 +10,13 @@ import (
 	"strings"
 	"testing"
 
+	"altalune.id/template/internal/apikey"
+	"altalune.id/template/internal/apperror"
 	mcpinternal "altalune.id/template/internal/mcp"
 	"altalune.id/template/internal/platform/authn"
 	"altalune.id/template/internal/platform/session"
 	"altalune.id/template/internal/platform/tokens"
+	"altalune.id/template/internal/testutil/fakes"
 )
 
 type rejectingAuthenticator struct{ err error }
@@ -30,7 +33,7 @@ func TestAuthenticate_LogsEachChainAuthenticatorsCause(t *testing.T) {
 		rejectingAuthenticator{err: errors.New("api key: no such key")},
 		rejectingAuthenticator{err: errors.New("jwt: token audience is not this resource")},
 	}
-	guard := mcpinternal.Authenticate(chain, authn.Scheme{Prefix: "key_"}, tokens.Resource{MetadataURL: "https://x/meta"}, log)
+	guard := mcpinternal.Authenticate(chain, tokens.Resource{MetadataURL: "https://x/meta"}, log)
 	h := guard(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 		t.Fatal("the guard admitted a request it must have rejected")
 	}))
@@ -60,7 +63,6 @@ func TestAuthenticate_LogsADistinctReasonPerFailure(t *testing.T) {
 	}{
 		{"no authenticator", nil, "Bearer a.b.c", "no authenticator configured"},
 		{"absent credential", rejectingAuthenticator{err: &authn.UnauthorizedError{}}, "", "no bearer credential"},
-		{"unrecognized shape", rejectingAuthenticator{err: &authn.UnauthorizedError{}}, "Bearer opaque-token", "neither the api key prefix, the JWT shape nor the personal token prefix"},
 		{"chain rejected", rejectingAuthenticator{err: &authn.UnauthorizedError{}}, "Bearer a.b.c", "every authenticator rejected"},
 	}
 
@@ -69,7 +71,7 @@ func TestAuthenticate_LogsADistinctReasonPerFailure(t *testing.T) {
 			var buf bytes.Buffer
 			log := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn}))
 
-			guard := mcpinternal.Authenticate(tc.auth, authn.Scheme{Prefix: "key_"}, tokens.Resource{MetadataURL: "https://x/meta"}, log)
+			guard := mcpinternal.Authenticate(tc.auth, tokens.Resource{MetadataURL: "https://x/meta"}, log)
 			h := guard(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				t.Fatal("the guard admitted a request it must have rejected")
 			}))
@@ -91,5 +93,60 @@ func TestAuthenticate_LogsADistinctReasonPerFailure(t *testing.T) {
 				t.Fatalf("SECURITY: the reason leaked into the response body:\n%s", body)
 			}
 		})
+	}
+}
+
+func TestAuthenticate_AnOutageAnswers503WithoutAChallenge(t *testing.T) {
+	var buf bytes.Buffer
+	log := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	chain := authn.Chain{
+		rejectingAuthenticator{err: &authn.UnauthorizedError{}},
+		rejectingAuthenticator{err: &authn.UnavailableError{Cause: errors.New("issuer metadata: connection refused")}},
+	}
+	guard := mcpinternal.Authenticate(chain, tokens.Resource{MetadataURL: "https://x/meta"}, log)
+	h := guard(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Fatal("the guard admitted a credential it could not check")
+	}))
+
+	req := httptest.NewRequest(http.MethodPost, "/mcp", nil)
+	req.Header.Set("Authorization", "Bearer a.b.c")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", rec.Code)
+	}
+	if got := rec.Header().Get("WWW-Authenticate"); got != "" {
+		t.Fatalf("WWW-Authenticate = %q; an outage must not tell the client to drop its token", got)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, apperror.CodeTokenUnavailable) {
+		t.Fatalf("body = %s, want code %s", body, apperror.CodeTokenUnavailable)
+	}
+	if strings.Contains(body, "connection refused") {
+		t.Fatalf("SECURITY: the cause leaked into the response body:\n%s", body)
+	}
+	logged := buf.String()
+	if !strings.Contains(logged, "connection refused") || !strings.Contains(logged, "level=ERROR") || !strings.Contains(logged, "credential check unavailable") {
+		t.Fatalf("an outage must be logged at error with its cause:\n%s", logged)
+	}
+}
+
+func TestAuthenticate_AnAPIKeyDuringAStoreOutageAnswers503(t *testing.T) {
+	store := fakes.NewAPIKey()
+	store.BySecretHashErr = errors.New("connection refused")
+	chain := authn.Chain{apikey.NewAuthenticator(store, nil, apikey.Scheme{}, fakes.NewMembers())}
+	guard := mcpinternal.Authenticate(chain, tokens.Resource{MetadataURL: "https://x/meta"}, nil)
+	h := guard(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Fatal("the guard admitted a key it could not check")
+	}))
+
+	req := httptest.NewRequest(http.MethodPost, "/mcp", nil)
+	req.Header.Set("Authorization", "Bearer "+apikey.DefaultPrefix+"whatever")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable || rec.Header().Get("WWW-Authenticate") != "" {
+		t.Fatalf("status = %d, WWW-Authenticate = %q; want 503 with no challenge", rec.Code, rec.Header().Get("WWW-Authenticate"))
 	}
 }

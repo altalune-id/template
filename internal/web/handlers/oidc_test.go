@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -14,7 +15,10 @@ import (
 	"github.com/altalune-id/oidcrp/oidcrptest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
 
+	apperrorv1 "altalune.id/template/gen/go/apperror/v1"
+	"altalune.id/template/internal/apperror"
 	"altalune.id/template/internal/auth"
 	"altalune.id/template/internal/user"
 	"altalune.id/template/internal/web"
@@ -338,6 +342,15 @@ func TestOIDC_CallbackFailuresNeverShowUpstreamText(t *testing.T) {
 			status: http.StatusForbidden,
 		},
 		{
+			name: "the user store is failing",
+			run: func(t *testing.T, o *oidcHarness) *httptest.ResponseRecorder {
+				authURL, state := o.start(t, "")
+				o.f.UserStore.ByIDPErr = errors.New("database unreachable")
+				return o.callback(o.idp.Authorize(authURL), state)
+			},
+			status: http.StatusInternalServerError,
+		},
+		{
 			name: "the person cancelled",
 			run: func(t *testing.T, o *oidcHarness) *httptest.ResponseRecorder {
 				authURL, state := o.start(t, "")
@@ -372,4 +385,23 @@ func mustQuery(t *testing.T, raw string) url.Values {
 	u, err := url.Parse(raw)
 	require.NoError(t, err)
 	return u.Query()
+}
+
+func TestSignInRefusalIsAnExplicitList(t *testing.T) {
+	for _, tc := range []struct {
+		code codes.Code
+		want bool
+	}{
+		{codes.PermissionDenied, true},
+		{codes.FailedPrecondition, true},
+		{codes.InvalidArgument, true},
+		{codes.Unauthenticated, true},
+		{codes.Unavailable, false},
+		{codes.Internal, false},
+		{codes.NotFound, false},
+	} {
+		err := apperror.New("TST001", "x", tc.code, &apperrorv1.ErrorDetail{Code: "TST001"})
+		assert.Equal(t, tc.want, handlers.IsSignInRefusal(err), "%v", tc.code)
+	}
+	assert.False(t, handlers.IsSignInRefusal(errors.New("connection refused")), "an untyped error is an outage")
 }
