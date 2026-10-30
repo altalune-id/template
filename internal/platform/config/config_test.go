@@ -116,6 +116,11 @@ func TestValidate_ModeInvariants(t *testing.T) {
 			wantSub: "oneof",
 		},
 		{
+			name:    "negative introspection budget fails",
+			mutate:  func(c *Config) { c.Tokens.Introspection.MaxPerMinute = -1 },
+			wantSub: "MaxPerMinute",
+		},
+		{
 			name: "selfhosted without genesis or oidc is allowed (onboarding-first)",
 			mutate: func(c *Config) {
 				c.Genesis = GenesisConfig{}

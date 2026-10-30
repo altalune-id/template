@@ -1202,3 +1202,45 @@ func setTenant(ctx context.Context, orgID, userID uuid.UUID) context.Context {
 func setTenantProject(ctx context.Context, orgID, projectID, userID uuid.UUID) context.Context {
 	return tenant.Into(ctx, tenant.Context{OrgID: orgID, ProjectID: projectID, UserID: userID})
 }
+
+// SECURITY: a cookie set over TLS is Secure even when http.cookieSecure is off.
+func TestDeps_SecureCookieFollowsTheConfigOrTLS(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name   string
+		secure bool
+		target string
+		want   bool
+	}{
+		{"plain http, config off", false, "http://app.example.com/", false},
+		{"TLS, config off", false, "https://app.example.com/", true},
+		{"plain http, config on", true, "http://app.example.com/", true},
+	} {
+		f := newFixture(t)
+		f.Cfg.HTTP.CookieSecure = tc.secure
+		r := httptest.NewRequest(http.MethodGet, tc.target, nil)
+		assert.Equal(t, tc.want, f.Deps.SecureCookie(r), tc.name)
+	}
+}
+
+// SECURITY: the locale cookie set over TLS is Secure even when http.cookieSecure is off.
+func TestLocale_CookieIsSecureOverTLS(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	f.Cfg.HTTP.CookieSecure = false
+	f.Deps.I18n = i18n.NewEmbeddedBundle(i18n.EnUS)
+	mux := http.NewServeMux()
+	handlers.NewLocaleHandler(f.Deps, f.Users).Register(mux)
+	req := httptest.NewRequest(http.MethodPost, "https://app.example.com/locale", strings.NewReader("locale=en-US&redirect=/"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	var locale *http.Cookie
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == i18n.CookieName {
+			locale = c
+		}
+	}
+	require.NotNil(t, locale, "status=%d", rec.Code)
+	assert.True(t, locale.Secure)
+}

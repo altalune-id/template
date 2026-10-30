@@ -3,8 +3,11 @@ package cli
 import (
 	"bytes"
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 
 	"altalune.id/template/internal/boot"
@@ -181,5 +184,70 @@ func TestLogin_LocalSavesALocalProfileTheInProcessCommandsUse(t *testing.T) {
 	root.SetArgs([]string{"--profile", "ops", "--output", "json", "org", "list"})
 	if err := root.ExecuteContext(context.Background()); err != nil {
 		t.Fatalf("org list as the local profile: %v (%s)", err, buf.String())
+	}
+}
+
+// SECURITY: RFC 7009: `auth login` that turns a remote profile into a local one revokes the refresh token it replaces.
+func TestLogin_LocalOverARemoteProfileRevokesItsRefreshToken(t *testing.T) {
+	sessPath := setSelfhostedEnv(t)
+	clearCLIEnv(t)
+	var (
+		mu      sync.Mutex
+		revoked []string
+	)
+	mux := http.NewServeMux()
+	issuer := httptest.NewServer(mux)
+	t.Cleanup(issuer.Close)
+	mux.HandleFunc("GET /.well-known/openid-configuration", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"issuer":"` + issuer.URL + `","authorization_endpoint":"` + issuer.URL + `/authorize",` +
+			`"token_endpoint":"` + issuer.URL + `/token","jwks_uri":"` + issuer.URL + `/jwks",` +
+			`"revocation_endpoint":"` + issuer.URL + `/revoke","response_types_supported":["code"],` +
+			`"subject_types_supported":["public"],"id_token_signing_alg_values_supported":["RS256"],` +
+			`"code_challenge_methods_supported":["S256"]}`))
+	})
+	mux.HandleFunc("POST /revoke", func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		mu.Lock()
+		revoked = append(revoked, r.PostForm.Get("token"))
+		mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+	})
+	writeRemoteProfile(t, sessPath, "ops", profile{
+		URL:   "https://app.example",
+		Token: &profileToken{Issuer: issuer.URL, ClientID: "cli-client", Access: "at", Refresh: "rt-old"},
+	})
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.WriteString("hunter2\n"); err != nil {
+		t.Fatal(err)
+	}
+	_ = w.Close()
+	stdin := os.Stdin
+	os.Stdin = r
+	t.Cleanup(func() { os.Stdin = stdin })
+
+	bootFn := func(ctx context.Context, cfg *config.Config, _ ...boot.Option) (*boot.Server, error) {
+		return boot.BootServer(ctx, cfg)
+	}
+	root := NewRootCmd(bootFn, stubClientBoot)
+	buf := &bytes.Buffer{}
+	root.SetOut(buf)
+	root.SetErr(buf)
+	root.SetArgs([]string{"--profile", "ops", "auth", "login", "--email", "root@example.com", "--password-stdin"})
+	if err := root.ExecuteContext(context.Background()); err != nil {
+		t.Fatalf("login: %v (%s)", err, buf.String())
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(revoked) != 1 || revoked[0] != "rt-old" {
+		t.Fatalf("revoked = %v, want the replaced refresh token (%s)", revoked, buf.String())
+	}
+	p, err := (profileStore{path: sessPath}).load("ops")
+	if err != nil || p == nil || p.URL != "" || p.Token != nil {
+		t.Fatalf("profile = %+v, %v; want the local profile", p, err)
 	}
 }
