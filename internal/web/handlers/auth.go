@@ -33,19 +33,11 @@ type AuthHandler struct {
 	Projects *project.Service
 	AltAuth  *oidcrp.Client
 	Required *atomic.Bool
-
-	stateSecret []byte
 }
 
 // NewAuthHandler wires the handler.
 func NewAuthHandler(d Deps, authSvc *auth.Service, users *user.Service, orgs *org.Service, projects *project.Service, ac *oidcrp.Client, required *atomic.Bool) *AuthHandler {
 	return &AuthHandler{Deps: d, Auth: authSvc, Users: users, Orgs: orgs, Projects: projects, AltAuth: ac, Required: required}
-}
-
-// WithStateSecret sets the key that signs the sign-in state and last-user cookies.
-func (h *AuthHandler) WithStateSecret(secret []byte) *AuthHandler {
-	h.stateSecret = secret
-	return h
 }
 
 func (h *AuthHandler) resolveActiveTenant(ctx context.Context, p session.Principal) session.Principal {
@@ -190,7 +182,7 @@ func (h *AuthHandler) pendingInviteDest(r *http.Request) string {
 	if err != nil || c.Value == "" {
 		return ""
 	}
-	token, err := web.VerifyCookie(h.SecretBytes(), c.Value)
+	token, err := web.VerifyCookie(h.Key(web.PurposeInvite), c.Value)
 	if err != nil || token == "" {
 		return ""
 	}

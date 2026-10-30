@@ -105,11 +105,12 @@ func buildWebHandler(
 	defaultLoc i18npkg.Locale,
 ) (handler http.Handler, routes []string) { //nolint:nonamedreturns // two return values differ in role
 	deps := newWebDeps(cfg, caps, kernel.Sessions, slogger)
+	deps.Secret = kernel.StateSecret
 	deps.Orgs = orgs
 	deps.Projects = projects
 	deps.I18n = bundle
 
-	authHandler := webhandlers.NewAuthHandler(deps, auths, users, orgs, projects, kernel.AltAuth, required).WithStateSecret(kernel.OIDCStateSecret)
+	authHandler := webhandlers.NewAuthHandler(deps, auths, users, orgs, projects, kernel.AltAuth, required)
 	onboardingHandler := webhandlers.NewOnboardingHandler(deps, users)
 	onboardHandler := webhandlers.NewOnboardHandler(deps, users, orgs, projects, onboards, required, onComplete, setupToken)
 	homeHandler := webhandlers.NewHomeHandler(deps, orgs, projects)
@@ -204,7 +205,7 @@ func surfaceChains(
 			webmw.Recover(reporter.Unexpected, errTmpl),
 			webmw.Session(webmw.SessionConfig{
 				Store:  kernel.Sessions,
-				Secret: []byte(cfg.HTTP.StateSecret),
+				Secret: web.DeriveKey(kernel.StateSecret, web.PurposeSession),
 			}),
 			webmw.Tenant,
 			i18npkg.Middleware(i18npkg.MiddlewareOpts{
