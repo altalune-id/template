@@ -295,6 +295,6 @@ tokens:
     # [secret] env: ALT_TOKENS_INTROSPECTION_CLIENT_SECRET
     clientSecret: ""
     # env: ALT_TOKENS_INTROSPECTION_MAX_PER_MINUTE
-    maxPerMinute: 300
+    maxPerMinute: 0
   # [required, mode:cloud] env: ALT_TOKENS_ISSUER
   issuer: ""

@@ -149,7 +149,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("i18n.defaultLocale", "en-US")
 
 	v.SetDefault("tokens.clockSkew", "60s")
-	v.SetDefault("tokens.introspection.maxPerMinute", 300)
+	v.SetDefault("tokens.introspection.maxPerMinute", 0)
 }
 
 // Defaults returns a Config with the seeded defaults materialised as a typed value.
