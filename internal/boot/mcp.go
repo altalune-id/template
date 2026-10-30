@@ -124,7 +124,7 @@ func registeredScopes(reg *rootmcp.Registry) []string {
 	scopes := map[string]struct{}{}
 	for _, name := range reg.Names() {
 		spec, ok := reg.Spec(name)
-		if !ok || spec.Scope == "" {
+		if !ok || !authn.Mintable(spec.Scope) {
 			continue
 		}
 		scopes[spec.Scope] = struct{}{}

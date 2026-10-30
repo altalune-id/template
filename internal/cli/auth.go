@@ -108,7 +108,7 @@ func localLogin(cmd *cobra.Command, bootServer ServerBootFn, cfg *config.Config,
 	if err != nil {
 		return err
 	}
-	if err := store.put(cmd.Context(), name, profile{Principal: viewOfSession(p)}); err != nil {
+	if err := replaceProfile(cmd.Context(), store, operatorHTTPClient(), cmd.ErrOrStderr(), name, profile{Principal: viewOfSession(p)}); err != nil {
 		return fmt.Errorf("login: persist session: %w", err)
 	}
 	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Signed in as %s (%s, profile %s)\n", p.Email, p.Source, name)
@@ -118,7 +118,7 @@ func localLogin(cmd *cobra.Command, bootServer ServerBootFn, cfg *config.Config,
 func runLogin(cmd *cobra.Command, s *boot.Server, o loginOpts) (session.Principal, error) {
 	if o.admin || !s.Caps.ExternalIdentity {
 		if !s.Auth.LocalConfigured() {
-			return session.Principal{}, errors.New("login: local admin login not configured; set ALT_GENESIS_EMAIL / ALT_GENESIS_PASSWORD")
+			return session.Principal{}, fmt.Errorf("login: local admin login not configured; set %s / %s", config.EnvVar("genesis.email"), config.EnvVar("genesis.password"))
 		}
 		if o.admin && s.Caps.ExternalIdentity {
 			_, _ = fmt.Fprintln(cmd.ErrOrStderr(), "warn: --admin break-glass login (OIDC bypassed for this session)")
@@ -158,7 +158,7 @@ func runLoopback(ctx context.Context, cmd *cobra.Command, s *boot.Server) (sessi
 		return session.Principal{}, errors.New("login: OIDC not configured (oidc.issuer / oidc.clientID)")
 	}
 	if s.Cfg.OIDC.CLIClientID == "" {
-		return session.Principal{}, errors.New("login: oidc.cliClientID not set; register a native client for the CLI (set ALT_OIDC_CLI_CLIENT_ID)")
+		return session.Principal{}, fmt.Errorf("login: oidc.cliClientID not set; register a native client for the CLI (set %s)", config.EnvVar("oidc.cliClientID"))
 	}
 	rp := cliRelyingParty(s.Cfg.OIDC, s.Platform.AltAuth.Keys().HTTPClient())
 	set, err := loopbackSignIn(ctx, rp, s.Cfg.OIDC.RedirectPort, cmd.ErrOrStderr(), oidcrp.OpenBrowser)

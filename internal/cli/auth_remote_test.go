@@ -24,6 +24,7 @@ import (
 	authv1 "altalune.id/template/gen/go/auth/v1"
 	"altalune.id/template/gen/go/auth/v1/authv1connect"
 	"altalune.id/template/internal/boot"
+	"altalune.id/template/internal/controlplane"
 	"altalune.id/template/internal/platform/config"
 	"altalune.id/template/internal/platform/session"
 	"altalune.id/template/internal/platform/tokens"
@@ -630,7 +631,7 @@ func TestResolveRemote_ExplicitTokenIgnoresABrokenSessionFile(t *testing.T) {
 	if err := os.WriteFile(path, []byte("not json"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	in := invocation{cfg: config.Defaults(), store: profileStore{path: path}, profile: defaultProfile, token: "tok"}
+	in := invocation{cfg: config.Defaults(), explicitConfig: true, store: profileStore{path: path}, profile: defaultProfile, token: "tok"}
 	in.cfg.HTTP.BaseURL = "https://cfg.example"
 	for _, explicit := range []string{"", "https://flag.example"} {
 		in.url = explicit
@@ -659,5 +660,52 @@ func TestResolveRemote_RefusesABearerOverPlainHTTP(t *testing.T) {
 	in.url, in.token = "http://127.0.0.1:5180", "tok"
 	if _, err := resolveRemote(t.Context(), in, http.DefaultClient); err != nil {
 		t.Fatalf("loopback stays allowed for local development: %v", err)
+	}
+}
+
+// SECURITY: RFC 7009: a local sign-in that overwrites a remote profile revokes the refresh token it replaces.
+func TestReplaceProfile_LocalOverRemoteRevokesTheRefreshToken(t *testing.T) {
+	f := newRemoteFixture(t, testCLIClient)
+	f.signedIn(t, "ops")
+
+	local := profile{Principal: principalView{Email: testEmail, UserID: "usr_local"}}
+	if err := replaceProfile(t.Context(), f.store, f.client, &f.errOut, "ops", local); err != nil {
+		t.Fatalf("replace: %v", err)
+	}
+	if f.idp.Revocations() != 1 {
+		t.Fatalf("revocations = %d, want the replaced refresh token revoked", f.idp.Revocations())
+	}
+	got, err := f.store.load("ops")
+	if err != nil || got == nil || got.URL != "" || got.Token != nil {
+		t.Fatalf("profile = %+v, %v; want the local profile", got, err)
+	}
+}
+
+// SECURITY: an http.baseURL from a config file found in the working directory never decides where a token goes.
+func TestRemoteCommands_IgnoreADiscoveredConfigBaseURL(t *testing.T) {
+	setSelfhostedEnv(t)
+	t.Setenv("ALT_HTTP_BASEURL", "")
+	t.Setenv("ALT_URL", "")
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "altempl.yaml"), []byte("http:\n  baseURL: \"https://attacker.example\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(dir)
+	var dialed string
+	bootClient := func(_ context.Context, cfg *config.Config, baseURL, token string) (*boot.Client, error) {
+		dialed = baseURL
+		return &boot.Client{Cfg: cfg, Conn: controlplane.NewClient(baseURL, token)}, nil
+	}
+
+	root := NewRootCmd(stubServerBoot, bootClient)
+	root.SetOut(&bytes.Buffer{})
+	root.SetErr(&bytes.Buffer{})
+	root.SetArgs([]string{"--token", "tok", "todo", "list"})
+	err := root.ExecuteContext(context.Background())
+	if !IsMissingURLError(err) {
+		t.Fatalf("err = %v, want MissingURLError: a discovered config file must not pick the server", err)
+	}
+	if dialed != "" {
+		t.Fatalf("the token was sent to %q", dialed)
 	}
 }

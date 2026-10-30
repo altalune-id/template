@@ -7,6 +7,9 @@ import (
 	"github.com/spf13/viper"
 )
 
+// EnvVar returns the environment variable name for a dotted config key.
+func EnvVar(key string) string { return envVarName(EnvPrefix, key) }
+
 func bindEnv(v *viper.Viper, prefix string, t reflect.Type) {
 	for t.Kind() == reflect.Pointer {
 		t = t.Elem()

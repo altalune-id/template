@@ -7,20 +7,20 @@ Commands: [`commands`](commands.md).
 
 Persistent on root, so every command accepts them. Only some read them.
 
-| Flag               | Env              | Default                                     | Read by                                                                       |
-| ------------------ | ---------------- | ------------------------------------------- | ----------------------------------------------------------------------------- |
-| `-c, --config`     | —                | discover `altempl.yaml` in `.` then `$HOME` | every command, via `config.Load`                                              |
-| `--url`            | `ALT_URL`        | the profile's URL, then `http.baseURL`      | `auth login` (picks remote sign-in), `auth whoami`, `todo`, `blog`, `healthz` |
-| `--token`          | `ALT_TOKEN`      | —                                           | `auth whoami`, `todo`, `blog`                                                 |
-| `--token-file`     | —                | —                                           | same as `--token`; the file holds the token alone                             |
-| `--profile`        | `ALT_PROFILE`    | `default`                                   | `auth`, `todo`, and the in-process commands, which act as its local sign-in   |
-| `--output`         | `ALT_OUTPUT`     | text on a TTY, json off-TTY                 | every command that prints a payload                                           |
-| `--org`            | `ALT_ORG`        | —                                           | **`blog` only**                                                               |
-| `--project`        | `ALT_PROJECT`    | —                                           | **`blog` only**                                                               |
-| `--no-interactive` | —                | `false`                                     | nothing — declared, not wired                                                 |
-| `--log-level`      | `ALT_LOG_LEVEL`  | `info`                                      | nothing; the **env var** works, via `log.level` in config                     |
-| `--log-format`     | `ALT_LOG_FORMAT` | `json`                                      | nothing; the **env var** works, via `log.format` in config                    |
-| `-v, --version`    | —                | —                                           | root, prints the version string and exits                                     |
+| Flag               | Env              | Default                                          | Read by                                                                       |
+| ------------------ | ---------------- | ------------------------------------------------ | ----------------------------------------------------------------------------- |
+| `-c, --config`     | —                | discover `altempl.yaml` in `.` then `$HOME`      | every command, via `config.Load`                                              |
+| `--url`            | `ALT_URL`        | the profile's URL, then `http.baseURL` from `-c` | `auth login` (picks remote sign-in), `auth whoami`, `todo`, `blog`, `healthz` |
+| `--token`          | `ALT_TOKEN`      | —                                                | `auth whoami`, `todo`, `blog`                                                 |
+| `--token-file`     | —                | —                                                | same as `--token`; the file holds the token alone                             |
+| `--profile`        | `ALT_PROFILE`    | `default`                                        | `auth`, `todo`, and the in-process commands, which act as its local sign-in   |
+| `--output`         | `ALT_OUTPUT`     | text on a TTY, json off-TTY                      | every command that prints a payload                                           |
+| `--org`            | `ALT_ORG`        | —                                                | **`blog` only**                                                               |
+| `--project`        | `ALT_PROJECT`    | —                                                | **`blog` only**                                                               |
+| `--no-interactive` | —                | `false`                                          | nothing — declared, not wired                                                 |
+| `--log-level`      | `ALT_LOG_LEVEL`  | `info`                                           | nothing; the **env var** works, via `log.level` in config                     |
+| `--log-format`     | `ALT_LOG_FORMAT` | `json`                                           | nothing; the **env var** works, via `log.format` in config                    |
+| `-v, --version`    | —                | —                                                | root, prints the version string and exits                                     |
 
 `--org` / `--project` are **not** global tenant overrides. Every other tenant-scoped command takes
 its org and project from the principal and ignores both flags. Treat them as `blog`'s path
@@ -83,10 +83,13 @@ Token, first hit wins (`internal/cli/token.go`, `internal/cli/profile.go`):
 URL, first hit wins (`internal/cli/url.go`):
 
 ```
---url > ALT_URL > the profile's URL > http.baseURL from config
+--url > ALT_URL > the profile's URL > http.baseURL from a config named with -c
 ```
 
-No URL at all exits `4` (`MissingURLError`).
+SECURITY: an `altempl.yaml` found in the working directory or `$HOME` never picks the server a
+token goes to; only a config file named with `-c` does. No URL at all exits `4`
+(`MissingURLError`). A non-loopback `http://` URL is refused before any credential is sent, the
+API key of `blog` included.
 
 ## In-process commands
 
