@@ -25,6 +25,7 @@ import (
 	"altalune.id/template/gen/go/auth/v1/authv1connect"
 	"altalune.id/template/internal/boot"
 	"altalune.id/template/internal/platform/config"
+	"altalune.id/template/internal/platform/session"
 	"altalune.id/template/internal/platform/tokens"
 )
 
@@ -52,7 +53,7 @@ func (a *fakeApp) Whoami(ctx context.Context, req *connect.Request[authv1.Whoami
 	}
 	return connect.NewResponse(&authv1.WhoamiResponse{
 		UserId: uuid.NewSHA1(uuid.NameSpaceURL, []byte(tok.Subject)).String(), Email: testEmail,
-		ActiveProjectId: a.projectID, Scopes: tok.Scopes,
+		ActiveProjectId: a.projectID, Scopes: tok.Scopes, Source: string(session.SourceToken),
 	}), nil
 }
 
