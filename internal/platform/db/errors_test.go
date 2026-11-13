@@ -16,8 +16,9 @@ func TestIsRowSecurityViolation(t *testing.T) {
 		want bool
 	}{
 		"the conflict refusal, as Postgres 17.12 reports it": {&pgconn.PgError{Code: "42501", Routine: "ExecWithCheckOptions", Message: using}, true},
-		"wrapped": {fmt.Errorf("save: %w", &pgconn.PgError{Code: "42501", Routine: "ExecWithCheckOptions", Message: using}), true},
-		"a translated message, matched by its routine":         {&pgconn.PgError{Code: "42501", Routine: "ExecWithCheckOptions", Message: "la nueva fila viola la política de seguridad de registros"}, true},
+		"wrapped":                                              {fmt.Errorf("save: %w", &pgconn.PgError{Code: "42501", Routine: "ExecWithCheckOptions", Message: using}), true},
+		"a translated message fails closed":                    {&pgconn.PgError{Code: "42501", Routine: "ExecWithCheckOptions", Message: "la nueva fila viola la política de seguridad de registros"}, false},
+		"a WITH CHECK refusal from the same routine":           {&pgconn.PgError{Code: "42501", Routine: "ExecWithCheckOptions", Message: `new row violates row-level security policy for table "webhook_endpoints"`}, false},
 		"no routine: the English conflict text":                {&pgconn.PgError{Code: "42501", Message: using}, true},
 		"no routine: a WITH CHECK refusal is not the conflict": {&pgconn.PgError{Code: "42501", Message: `new row violates row-level security policy for table "webhook_endpoints"`}, false},
 		"another insufficient-privilege error":                 {&pgconn.PgError{Code: "42501", Routine: "aclcheck_error", Message: "permission denied for table webhook_endpoints"}, false},

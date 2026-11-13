@@ -24,15 +24,13 @@ func IsInvalidRoleError(err error) bool {
 	return ok
 }
 
-// IsRowSecurityViolation reports an upsert refused on another org's row; trust it only after the store's same-org check.
+// IsRowSecurityViolation reports an upsert's conflict update refused on another org's row; a WITH CHECK refusal on the insert is not one.
 func IsRowSecurityViolation(err error) bool {
 	pgErr, ok := errors.AsType[*pgconn.PgError](err)
 	if !ok || pgErr.Code != "42501" {
 		return false
 	}
-	// NOTE: the routine name is never translated; the English text is the fallback when a server sends no routine.
-	if pgErr.Routine != "" {
-		return pgErr.Routine == "ExecWithCheckOptions"
-	}
-	return strings.Contains(pgErr.Message, "row-level security policy (USING expression)")
+	// NOTE: the WITH CHECK refusal shares the code and routine, so only the English "(USING expression)" text tells them apart; a translated server fails closed with the raw error.
+	return (pgErr.Routine == "" || pgErr.Routine == "ExecWithCheckOptions") &&
+		strings.Contains(pgErr.Message, "row-level security policy (USING expression)")
 }
