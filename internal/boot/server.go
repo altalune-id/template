@@ -330,6 +330,12 @@ func BootServer(ctx context.Context, cfg *config.Config, opts ...Option) (*Serve
 		return nil, err
 	}
 
+	crossOrigin, err := buildCrossOrigin(cfg.HTTP.BaseURL)
+	if err != nil {
+		abort()
+		return nil, err
+	}
+
 	healthOK := health.Ready
 
 	required.Store(!onboarded)
@@ -347,7 +353,7 @@ func BootServer(ctx context.Context, cfg *config.Config, opts ...Option) (*Serve
 
 	webHandler, webRoutes := buildWebHandler(cfg, kernel, caps, log, reporter, healthOK,
 		svcs.Auth, svcs.Users, svcs.Orgs, svcs.Projects, svcs.Todos, svcs.Invites, svcs.Onboards,
-		svcs.Posts, svcs.Categories, svcs.Tags, svcs.APIKeys, svcs.Webhooks, required, gate.Complete, setup, apiHandler, dataHandler, mcpSurf, apiRes, bundle, defaultLoc)
+		svcs.Posts, svcs.Categories, svcs.Tags, svcs.APIKeys, svcs.Webhooks, required, gate.Complete, setup, apiHandler, dataHandler, mcpSurf, apiRes, bundle, defaultLoc, crossOrigin)
 
 	httpHandler := webHandler
 	if o.schedulerOnly || o.consumerOnly {
