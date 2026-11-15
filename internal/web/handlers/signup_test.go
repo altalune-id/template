@@ -88,6 +88,41 @@ func TestSignupHandler_GetSignup_Renders(t *testing.T) {
 	assert.Contains(t, rec.Body.String(), `name="org_slug"`)
 }
 
+// TestSignupHandler_GetSignup_LogoutFormIsNotNested guards "Wrong account": a nested form is dropped by the parser, so its button would submit the signup form.
+func TestSignupHandler_GetSignup_LogoutFormIsNotNested(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	f.Cfg.Mode = config.ModeCloud
+	u, err := f.Users.Create(context.Background(), user.CreateRequest{Email: "alice@example.com", Name: "Alice", Source: user.SourceOIDC})
+	require.NoError(t, err)
+
+	h := handlers.NewSignupHandler(f.Deps, f.Users, f.Orgs, f.Projects)
+	mux := http.NewServeMux()
+	h.Register(mux)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, f.authedRequest(t, http.MethodGet, "/signup/complete", "", session.Principal{UserID: u.ID, Email: u.Email, Name: u.Name}))
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	body := rec.Body.String()
+	require.Contains(t, body, `action="/logout"`)
+	depth := 0
+	for rest := body; ; {
+		open, closing := strings.Index(rest, "<form"), strings.Index(rest, "</form>")
+		if open < 0 && closing < 0 {
+			break
+		}
+		if open >= 0 && (closing < 0 || open < closing) {
+			depth++
+			require.Equal(t, 1, depth, "a <form> is nested inside another <form>")
+			rest = rest[open+len("<form"):]
+			continue
+		}
+		depth--
+		rest = rest[closing+len("</form>"):]
+	}
+	require.Zero(t, depth, "unbalanced <form> tags")
+}
+
 func TestSignupHandler_PostSignup_MissingOrgFieldsRerenders(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
